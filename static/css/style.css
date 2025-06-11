@@ -41,3 +41,11 @@
   font-weight: bold;
   margin: 10px 0;
 }
+
+#modules {
+  margin-top: 20px;
+}
+
+.module {
+  margin-top: 10px;
+}
