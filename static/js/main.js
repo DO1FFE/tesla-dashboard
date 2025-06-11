@@ -20,6 +20,18 @@ var marker = L.marker([0, 0], {
     rotationOrigin: 'center center'
 }).addTo(map);
 
+function updateHeader(data) {
+    var info = '';
+    if (data && data.display_name) {
+        info = 'für ' + data.display_name;
+        var version = data.vehicle_state && data.vehicle_state.car_version;
+        if (version) {
+            info += ' (' + version + ')';
+        }
+    }
+    $('#vehicle-info').text(info);
+}
+
 function fetchVehicles() {
     $.getJSON('/api/vehicles', function(vehicles) {
         var $select = $('#vehicle-select');
@@ -46,6 +58,7 @@ function fetchVehicles() {
 function fetchData() {
     if (!currentVehicle) return;
     $.getJSON('/api/data/' + currentVehicle, function(data) {
+        updateHeader(data);
         updateUI(data);
         var drive = data.drive_state || {};
         var lat = drive.latitude;
