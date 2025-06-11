@@ -1,5 +1,4 @@
 import os
-import time
 from flask import Flask, render_template, jsonify
 from dotenv import load_dotenv
 
@@ -25,7 +24,7 @@ def track_park_time(vehicle_data):
         ts = int(ts * 1000)
     if shift in (None, 'P'):
         if park_start_ms is None or last_shift_state not in (None, 'P'):
-            park_start_ms = ts if ts else int(time.time() * 1000)
+            park_start_ms = int(ts) if ts is not None else None
     else:
         park_start_ms = None
     last_shift_state = shift

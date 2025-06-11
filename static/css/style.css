@@ -35,3 +35,9 @@
   height: 100%;
   background-color: #4caf50;
 }
+
+#park-since {
+  font-size: 1.2em;
+  font-weight: bold;
+  margin: 10px 0;
+}
