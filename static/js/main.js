@@ -5,7 +5,18 @@ var map = L.map('map').setView([0, 0], 13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
 }).addTo(map);
-var marker = L.marker([0, 0]).addTo(map);
+
+var carIcon = L.icon({
+    iconUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAAAUCAYAAAD/Rn+7AAAAnklEQVR4nO2VsRGAIAxFk5x7OIQUTMQS1i7BRBY4hJNooydEQZEiFLyKy4fwjjsAoNFoJMFbxbhNwOPCqsCJglBa7sGBYoEongvyAgDAPA6fe+lpSeZFvaxCqurkOMZt9D5LliZYSvWC3ZdJur/eznktv1M5/TB5i62KrzQuW+xPP+JfS1VYhXQOHsK3xbmb5eWHE/FCFXguFAvEYA47Io8vJd9/NZQAAAAASUVORK5CYII=',
+    iconSize: [40, 20],
+    iconAnchor: [20, 10]
+});
+
+var marker = L.marker([0, 0], {
+    icon: carIcon,
+    rotationAngle: 0,
+    rotationOrigin: 'center center'
+}).addTo(map);
 
 function fetchVehicles() {
     $.getJSON('/api/vehicles', function(vehicles) {
@@ -34,12 +45,16 @@ function fetchData() {
     if (!currentVehicle) return;
     $.getJSON('/api/data/' + currentVehicle, function(data) {
         updateUI(data);
-        var lat = data.drive_state && data.drive_state.latitude;
-        var lng = data.drive_state && data.drive_state.longitude;
+        var drive = data.drive_state || {};
+        var lat = drive.latitude;
+        var lng = drive.longitude;
         if (lat && lng) {
             marker.setLatLng([lat, lng]);
             // Preserve the current zoom level when updating the map position
             map.setView([lat, lng], map.getZoom());
+            if (typeof drive.heading === 'number') {
+                marker.setRotationAngle(drive.heading);
+            }
         }
     });
 }
