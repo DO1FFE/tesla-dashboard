@@ -12,7 +12,7 @@ This is a simple Flask application that displays real-time data from a Tesla veh
 
 2. Copy `.env.example` to `.env` and fill in your Tesla credentials:
     - `TESLA_EMAIL` and `TESLA_PASSWORD` **or**
-    - `TESLA_ACCESS_TOKEN`
+    - `TESLA_ACCESS_TOKEN` and `TESLA_REFRESH_TOKEN`
 
 3. Run the server:
     ```bash
