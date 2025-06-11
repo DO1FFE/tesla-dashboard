@@ -10,10 +10,18 @@ var marker = L.marker([0, 0]).addTo(map);
 function fetchVehicles() {
     $.getJSON('/api/vehicles', function(vehicles) {
         var $select = $('#vehicle-select');
+        var $label = $('label[for="vehicle-select"]');
         $select.empty();
         vehicles.forEach(function(v) {
             $select.append($('<option>').val(v.id).text(v.display_name));
         });
+        if (vehicles.length <= 1) {
+            $label.hide();
+            $select.hide();
+        } else {
+            $label.show();
+            $select.show();
+        }
         if (!currentVehicle && vehicles.length > 0) {
             currentVehicle = vehicles[0].id;
             $select.val(currentVehicle);
@@ -201,9 +209,18 @@ function categorizedData(data) {
     return categories;
 }
 
-function generateCategoryTables(cats) {
+function generateCategoryTables(cats, status) {
     var html = '';
+    var allowed = [];
+    if (status === 'Ladevorgang') {
+        allowed = ['Batterie und Laden', 'Klimaanlage', 'Fahrzeugstatus', 'Medieninfos'];
+    } else if (status === 'Fahrt') {
+        allowed = ['Batterie und Laden', 'Fahrstatus', 'Fahrzeugstatus', 'Medieninfos'];
+    } else {
+        allowed = ['Batterie und Laden', 'Fahrzeugstatus', 'Klimaanlage', 'Medieninfos'];
+    }
     Object.keys(cats).forEach(function(name) {
+        if (allowed.indexOf(name) === -1) return;
         var obj = cats[name];
         if (Object.keys(obj).length === 0) return;
         html += '<h3>' + name + '</h3>' + generateTable(obj);
@@ -257,12 +274,24 @@ function updateUI(data) {
     if (charge.charging_state === 'Charging') {
         status = 'Ladevorgang';
         parkStart = null;
+        localStorage.removeItem('parkStart');
     } else if (drive.shift_state === 'P' || !drive.shift_state) {
         status = 'Geparkt';
-        if (!parkStart) parkStart = Date.now();
+        if (!parkStart) {
+            var stored = localStorage.getItem('parkStart');
+            if (stored) {
+                parkStart = parseInt(stored, 10);
+            } else if (drive.gps_as_of) {
+                parkStart = drive.gps_as_of * 1000;
+            } else {
+                parkStart = Date.now();
+            }
+            localStorage.setItem('parkStart', parkStart);
+        }
     } else {
         status = 'Fahrt';
         parkStart = null;
+        localStorage.removeItem('parkStart');
     }
     html += '<h2>' + status + '</h2>';
     if (status === 'Geparkt' && parkStart) {
@@ -272,7 +301,7 @@ function updateUI(data) {
         html += '<p>Geparkt seit ' + hours + ' h ' + minutes + ' min</p>';
     }
     html += generateTable(simpleData(data));
-    html += generateCategoryTables(categorizedData(data));
+    html += generateCategoryTables(categorizedData(data), status);
     $('#info').html(html);
 }
 
