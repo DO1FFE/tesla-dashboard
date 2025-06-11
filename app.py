@@ -12,6 +12,7 @@ app = Flask(__name__)
 
 park_start_ms = None
 last_shift_state = None
+trip_path = []
 
 
 def track_park_time(vehicle_data):
@@ -28,6 +29,37 @@ def track_park_time(vehicle_data):
     else:
         park_start_ms = None
     last_shift_state = shift
+
+
+def _log_trip_point(ts, lat, lon):
+    """Append a GPS point to the trip history CSV."""
+    try:
+        os.makedirs('data', exist_ok=True)
+        with open(os.path.join('data', 'trip_history.csv'), 'a', encoding='utf-8') as f:
+            f.write(f"{ts},{lat},{lon}\n")
+    except Exception:
+        pass
+
+
+def track_drive_path(vehicle_data):
+    """Maintain the current trip path and log points when driving."""
+    global trip_path
+    drive = vehicle_data.get('drive_state', {}) if isinstance(vehicle_data, dict) else {}
+    shift = drive.get('shift_state')
+    lat = drive.get('latitude')
+    lon = drive.get('longitude')
+    ts = drive.get('timestamp') or drive.get('gps_as_of')
+    if ts and ts < 1e12:
+        ts = int(ts * 1000)
+    if shift in (None, 'P'):
+        trip_path = []
+        return
+    if lat is not None and lon is not None:
+        point = [lat, lon]
+        if not trip_path or trip_path[-1] != point:
+            trip_path.append(point)
+            if ts is not None:
+                _log_trip_point(ts, lat, lon)
 
 
 def get_tesla():
@@ -84,10 +116,25 @@ def get_vehicle_data(vehicle_id=None):
     if vehicle is None:
         vehicle = vehicles[0]
 
-    vehicle_data = vehicle.get_vehicle_data()
+    try:
+        vehicle_data = vehicle.get_vehicle_data()
+    except Exception as exc:  # vehicle may be asleep/offline
+        status_code = getattr(getattr(exc, 'response', None), 'status_code', None)
+        if status_code == 408:
+            try:
+                # wake the vehicle and retry once
+                if hasattr(vehicle, 'sync_wake_up'):
+                    vehicle.sync_wake_up()
+                vehicle_data = vehicle.get_vehicle_data()
+            except Exception:
+                return {"error": "Vehicle is offline or asleep"}
+        else:
+            raise
     track_park_time(vehicle_data)
+    track_drive_path(vehicle_data)
     sanitized = sanitize(vehicle_data)
     sanitized['park_start'] = park_start_ms
+    sanitized['path'] = trip_path
     return sanitized
 
 

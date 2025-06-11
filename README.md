@@ -25,6 +25,8 @@ This is a simple Flask application that displays real-time data from a Tesla veh
 
 The dashboard shows a short overview depending on whether the vehicle is parked, driving or charging. Below this, additional tables are grouped by category (battery/charging, climate, drive state, vehicle status and media information) to make the raw API data easier to read. While parked the dashboard also displays tire pressures, power usage of the drive unit and the 12V battery as well as how long the vehicle has been parked.
 
+While driving, a blue path is drawn on the map using the reported GPS positions. These points are also logged to `data/trip_history.csv` for later analysis.
+
 ## Reference
 
 For a sample API response from Tesla, see [docs/sample_api_response.json](docs/sample_api_response.json).

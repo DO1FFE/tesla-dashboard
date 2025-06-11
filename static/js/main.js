@@ -6,6 +6,7 @@ var map = L.map('map').setView([0, 0], 13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
 }).addTo(map);
+var polyline = null;
 
 var carIcon = L.icon({
     iconUrl: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0iYmkgYmktY2FyLWZyb250LWZpbGwiIHZpZXdCb3g9IjAgMCAxNiAxNiI+CiAgPHBhdGggZD0iTTIuNTIgMy41MTVBMi41IDIuNSAwIDAgMSA0LjgyIDJoNi4zNjJjMSAwIDEuOTA0LjU5NiAyLjI5OCAxLjUxNWwuNzkyIDEuODQ4Yy4wNzUuMTc1LjIxLjMxOS4zOC40MDQuNS4yNS44NTUuNzE1Ljk2NSAxLjI2MmwuMzM1IDEuNjc5Yy4wMzMuMTYxLjA0OS4zMjUuMDQ5LjQ5di40MTNjMCAuODE0LS4zOSAxLjU0My0xIDEuOTk3VjEzLjVhLjUuNSAwIDAgMS0uNS41aC0yYS41LjUgMCAwIDEtLjUtLjV2LTEuMzM4Yy0xLjI5Mi4wNDgtMi43NDUuMDg4LTQgLjA4OHMtMi43MDgtLjA0LTQtLjA4OFYxMy41YS41LjUgMCAwIDEtLjUuNWgtMmEuNS41IDAgMCAxLS41LS41di0xLjg5MmMtLjYxLS40NTQtMS0xLjE4My0xLTEuOTk3di0uNDEzYTIuNSAyLjUgMCAwIDEgLjA0OS0uNDlsLjMzNS0xLjY4Yy4xMS0uNTQ2LjQ2NS0xLjAxMi45NjQtMS4yNjFhLjgwNy44MDcgMCAwIDAgLjM4MS0uNDA0bC43OTItMS44NDhaTTMgMTBhMSAxIDAgMSAwIDAtMiAxIDEgMCAwIDAgMCAyWm0xMCAwYTEgMSAwIDEgMCAwLTIgMSAxIDAgMCAwIDAgMlpNNiA4YTEgMSAwIDAgMCAwIDJoNGExIDEgMCAxIDAgMC0ySDZaTTIuOTA2IDUuMTg5YS41MS41MSAwIDAgMCAuNDk3LjczMWMuOTEtLjA3MyAzLjM1LS4xNyA0LjU5Ny0uMTcgMS4yNDcgMCAzLjY4OC4wOTcgNC41OTcuMTdhLjUxLjUxIDAgMCAwIC40OTctLjczMWwtLjk1Ni0xLjkxM0EuNS41IDAgMCAwIDExLjY5MSAzSDQuMzA5YS41LjUgMCAwIDAtLjQ0Ny4yNzZMMi45MDYgNS4xOVoiLz4KPC9zdmc+',
@@ -56,6 +57,16 @@ function fetchData() {
             if (typeof drive.heading === 'number') {
                 marker.setRotationAngle(drive.heading);
             }
+        }
+        if (data.path && data.path.length > 1) {
+            if (polyline) {
+                polyline.setLatLngs(data.path);
+            } else {
+                polyline = L.polyline(data.path, { color: 'blue' }).addTo(map);
+            }
+        } else if (polyline) {
+            map.removeLayer(polyline);
+            polyline = null;
         }
     });
 }
