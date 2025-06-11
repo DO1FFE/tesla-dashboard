@@ -19,4 +19,4 @@ This is a simple Flask application that displays real-time data from a Tesla veh
     python app.py
     ```
 
-4. Open `http://localhost:5000` in your browser.
+4. Open `http://localhost:8013` in your browser (the server listens on `0.0.0.0:8013`).
