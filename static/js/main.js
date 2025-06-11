@@ -33,40 +33,122 @@ function fetchData() {
     });
 }
 
+function batteryBar(level) {
+    var pct = level != null ? level : 0;
+    var color = '#4caf50';
+    if (pct < 20) {
+        color = '#f44336';
+    } else if (pct < 50) {
+        color = '#ffc107';
+    }
+    return '<div class="battery"><div class="level" style="width:' + pct + '%; background:' + color + '"></div></div> ' + pct + '%';
+}
+
+var DESCRIPTIONS = {
+    // Wichtige Felder mit fest hinterlegter Übersetzung
+    'battery_level': 'Akkustand (%)',
+    'battery_range': 'Reichweite (km)',
+    'odometer': 'Kilometerstand (km)',
+    'outside_temp': 'Außen­temperatur (°C)',
+    'inside_temp': 'Innenraum­temperatur (°C)',
+    'speed': 'Geschwindigkeit (km/h)',
+    'heading': 'Richtung (°)',
+    'charge_rate': 'Laderate (km/h)',
+    'charger_power': 'Ladeleistung (kW)',
+    'time_to_full_charge': 'Zeit bis voll (h)',
+    'tpms_pressure_fl': 'Reifen vorne links (bar)',
+    'tpms_pressure_fr': 'Reifen vorne rechts (bar)',
+    'tpms_pressure_rl': 'Reifen hinten links (bar)',
+    'tpms_pressure_rr': 'Reifen hinten rechts (bar)',
+    'charge_state': 'Ladezustand',
+    'climate_state': 'Klimazustand',
+    'drive_state': 'Fahrstatus',
+    'gui_settings': 'GUI‑Einstellungen',
+    'vehicle_config': 'Fahrzeugkonfiguration',
+    'vehicle_state': 'Fahrzeugstatus',
+    'media_info': 'Medieninfos',
+    'media_state': 'Medienstatus'
+};
+
+var WORD_MAP = {
+    'battery': 'Batterie',
+    'heater': 'Heizung',
+    'on': 'an',
+    'off': 'aus',
+    'range': 'Reichweite',
+    'level': 'Stand',
+    'charge': 'Laden',
+    'power': 'Leistung',
+    'voltage': 'Spannung',
+    'current': 'Strom',
+    'temperature': 'Temperatur',
+    'speed': 'Geschwindigkeit',
+    'odometer': 'Kilometerzähler',
+    'pressure': 'Druck',
+    'front': 'vorn',
+    'rear': 'hinten',
+    'left': 'links',
+    'right': 'rechts',
+    'fl': 'vorne links',
+    'fr': 'vorne rechts',
+    'rl': 'hinten links',
+    'rr': 'hinten rechts',
+    'vehicle': 'Fahrzeug',
+    'state': 'Status',
+    'mode': 'Modus',
+    'sun': 'Sonnen',
+    'roof': 'Dach',
+    'update': 'Update',
+    'webcam': 'Webcam'
+};
+
+function describe(key) {
+    if (DESCRIPTIONS[key]) {
+        return DESCRIPTIONS[key];
+    }
+    var words = key.split('_');
+    var result = words.map(function(w) {
+        return WORD_MAP[w] || w;
+    }).join(' ');
+    return result.charAt(0).toUpperCase() + result.slice(1);
+}
+
+
+function generateTable(obj) {
+    var html = '<table class="info-table">';
+    Object.keys(obj).forEach(function(key) {
+        var value = obj[key];
+        if (value === null || value === undefined) {
+            return;
+        }
+        if (typeof value === 'object') {
+            html += '<tr><th colspan="2">' + describe(key) + '</th></tr>';
+            html += '<tr><td colspan="2">' + generateTable(value) + '</td></tr>';
+        } else {
+            if (key === 'battery_level') {
+                value = batteryBar(value);
+            }
+            html += '<tr><th>' + describe(key) + '</th><td>' + value + '</td></tr>';
+        }
+    });
+    html += '</table>';
+    return html;
+}
+
 function updateUI(data) {
     var drive = data.drive_state || {};
     var charge = data.charge_state || {};
     var html = '';
+    var status = '';
     if (charge.charging_state === 'Charging') {
-        html += '<h2>Ladevorgang</h2>';
-        html += '<p>Akkustand: ' + (charge.battery_level || '?') + '%</p>';
-        if (charge.charger_power != null) {
-            html += '<p>Ladeleistung: ' + charge.charger_power + ' kW</p>';
-        }
-        if (charge.charge_rate != null) {
-            html += '<p>Laderate: ' + charge.charge_rate + ' km/h</p>';
-        }
-        if (charge.time_to_full_charge != null) {
-            html += '<p>Zeit bis voll: ' + charge.time_to_full_charge + ' h</p>';
-        }
-        html += '<p>Status: ' + (charge.charging_state || '') + '</p>';
+        status = 'Ladevorgang';
     } else if (drive.shift_state === 'P' || !drive.shift_state) {
-        html += '<h2>Geparkt</h2>';
-        html += '<p>Akkustand: ' + (charge.battery_level || '?') + '%</p>';
+        status = 'Geparkt';
     } else {
-        html += '<h2>Fahrt</h2>';
-        html += '<p>Akkustand: ' + (charge.battery_level || '?') + '%</p>';
-        if (drive.speed != null) {
-            html += '<p>Geschwindigkeit: ' + drive.speed + ' km/h</p>';
-        }
-        if (drive.power != null) {
-            html += '<p>Leistung: ' + drive.power + ' kW</p>';
-        }
-        if (drive.active_route_miles_to_arrival != null) {
-            var km = drive.active_route_miles_to_arrival * 1.60934;
-            html += '<p>km bis Ziel: ' + km.toFixed(1) + ' km</p>';
-        }
+        status = 'Fahrt';
     }
+    html += '<h2>' + status + '</h2>';
+    html += generateTable(data);
     $('#info').html(html);
     $('#data').text(JSON.stringify(data, null, 2));
 }
