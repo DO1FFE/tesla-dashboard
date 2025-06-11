@@ -28,7 +28,8 @@ function fetchData() {
         var lng = data.drive_state && data.drive_state.longitude;
         if (lat && lng) {
             marker.setLatLng([lat, lng]);
-            map.setView([lat, lng], 13);
+            // Preserve the current zoom level when updating the map position
+            map.setView([lat, lng], map.getZoom());
         }
     });
 }
