@@ -1,15 +1,16 @@
 var currentVehicle = null;
 var MILES_TO_KM = 1.60934;
 var parkStart = null;
+var parkTimer = null;
 var map = L.map('map').setView([0, 0], 13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
 }).addTo(map);
 
 var carIcon = L.icon({
-    iconUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAAAUCAYAAAD/Rn+7AAAAnklEQVR4nO2VsRGAIAxFk5x7OIQUTMQS1i7BRBY4hJNooydEQZEiFLyKy4fwjjsAoNFoJMFbxbhNwOPCqsCJglBa7sGBYoEongvyAgDAPA6fe+lpSeZFvaxCqurkOMZt9D5LliZYSvWC3ZdJur/eznktv1M5/TB5i62KrzQuW+xPP+JfS1VYhXQOHsK3xbmb5eWHE/FCFXguFAvEYA47Io8vJd9/NZQAAAAASUVORK5CYII=',
-    iconSize: [40, 20],
-    iconAnchor: [20, 10]
+    iconUrl: 'data:image/png;base64,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',
+    iconSize: [50, 50],
+    iconAnchor: [25, 25]
 });
 
 var marker = L.marker([0, 0], {
@@ -57,6 +58,14 @@ function fetchData() {
             }
         }
     });
+}
+
+function updateParkTime() {
+    if (!parkStart) return;
+    var diff = Date.now() - parkStart;
+    var hours = Math.floor(diff / 3600000);
+    var minutes = Math.floor((diff % 3600000) / 60000);
+    $('#park-time').text(hours + ' h ' + minutes + ' min');
 }
 
 function batteryBar(level) {
@@ -286,36 +295,26 @@ function updateUI(data) {
     var charge = data.charge_state || {};
     var html = '';
     var status = '';
+    parkStart = data.park_start || null;
     if (charge.charging_state === 'Charging') {
         status = 'Ladevorgang';
-        parkStart = null;
-        localStorage.removeItem('parkStart');
     } else if (drive.shift_state === 'P' || !drive.shift_state) {
         status = 'Geparkt';
-        if (!parkStart) {
-            var stored = localStorage.getItem('parkStart');
-            if (stored) {
-                parkStart = parseInt(stored, 10);
-            } else if (drive.timestamp) {
-                parkStart = drive.timestamp;
-            } else if (drive.gps_as_of) {
-                parkStart = drive.gps_as_of * 1000;
-            } else {
-                parkStart = Date.now();
-            }
-            localStorage.setItem('parkStart', parkStart);
-        }
     } else {
         status = 'Fahrt';
-        parkStart = null;
-        localStorage.removeItem('parkStart');
     }
     html += '<h2>' + status + '</h2>';
     if (status === 'Geparkt' && parkStart) {
-        var diff = Date.now() - parkStart;
-        var hours = Math.floor(diff / 3600000);
-        var minutes = Math.floor((diff % 3600000) / 60000);
-        html += '<p>Geparkt seit ' + hours + ' h ' + minutes + ' min</p>';
+        html += '<p>Geparkt seit <span id="park-time"></span></p>';
+        updateParkTime();
+        if (!parkTimer) {
+            parkTimer = setInterval(updateParkTime, 60000);
+        }
+    } else {
+        if (parkTimer) {
+            clearInterval(parkTimer);
+            parkTimer = null;
+        }
     }
     html += generateTable(simpleData(data));
     html += generateCategoryTables(categorizedData(data), status);
