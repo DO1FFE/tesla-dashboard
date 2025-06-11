@@ -1,0 +1,23 @@
+{
+  "response": {
+    "id": 123456789012345,
+    "vin": "5YJSA1E26HF000001",
+    "display_name": "Model S",
+    "charge_state": {
+      "battery_level": 90,
+      "charging_state": "Disconnected",
+      "charge_rate": 0.0,
+      "est_battery_range": 205.2
+    },
+    "drive_state": {
+      "shift_state": null,
+      "speed": null,
+      "latitude": 37.400,
+      "longitude": -122.05
+    },
+    "vehicle_state": {
+      "locked": true,
+      "odometer": 12345.6
+    }
+  }
+}
