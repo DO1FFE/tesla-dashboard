@@ -372,8 +372,7 @@ function updateUI(data) {
     if (status === 'Geparkt') {
         html += '<p id="park-since">Geparkt seit <span id="park-time"></span></p>';
     }
-    html += generateTable(simpleData(data, status));
-    html += generateCategoryTables(categorizedData(data, status), status);
+    // Only show status and parking duration, omit detailed tables
     $('#info').html(html);
     if (status === 'Geparkt' && parkStart) {
         updateParkTime();
