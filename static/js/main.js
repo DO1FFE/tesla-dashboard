@@ -59,6 +59,7 @@ function fetchVehicles() {
 function handleData(data) {
     updateHeader(data);
     updateUI(data);
+    updateModules(data);
     var drive = data.drive_state || {};
     var lat = drive.latitude;
     var lng = drive.longitude;
@@ -390,10 +391,34 @@ function updateUI(data) {
     }
 }
 
+function updateModules(data) {
+    var drive = data.drive_state || {};
+    $('#module-drive').html('<h3>Fahrstatus</h3>' + generateTable(drive));
+
+    var climate = data.climate_state || {};
+    $('#module-climate').html('<h3>Klima</h3>' + generateTable(climate));
+
+    var vehicle = data.vehicle_state || {};
+    var tires = {
+        tpms_pressure_fl: vehicle.tpms_pressure_fl,
+        tpms_pressure_fr: vehicle.tpms_pressure_fr,
+        tpms_pressure_rl: vehicle.tpms_pressure_rl,
+        tpms_pressure_rr: vehicle.tpms_pressure_rr
+    };
+    $('#module-tires').html('<h3>Reifen</h3>' + generateTable(tires));
+
+    if (vehicle.media_info) {
+        $('#module-media').html('<h3>Media</h3>' + generateTable(vehicle.media_info));
+    } else {
+        $('#module-media').html('<h3>Media</h3><p>Keine Daten</p>');
+    }
+}
+
 $('#vehicle-select').on('change', function() {
     currentVehicle = $(this).val();
     startStream();
 });
+
 
 function startStream() {
     if (!currentVehicle) return;
