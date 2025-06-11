@@ -1,5 +1,6 @@
 var currentVehicle = null;
 var MILES_TO_KM = 1.60934;
+var parkStart = null;
 var map = L.map('map').setView([0, 0], 13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
@@ -62,6 +63,8 @@ var DESCRIPTIONS = {
     'tpms_pressure_fr': 'Reifen vorne rechts (bar)',
     'tpms_pressure_rl': 'Reifen hinten links (bar)',
     'tpms_pressure_rr': 'Reifen hinten rechts (bar)',
+    'power': 'Verbrauch (kW)',
+    'aux_battery_power': '12V-Verbrauch (W)',
     'charge_state': 'Ladezustand',
     'climate_state': 'Klimazustand',
     'drive_state': 'Fahrstatus',
@@ -119,7 +122,7 @@ function describe(key) {
 
 function generateTable(obj) {
     var html = '<table class="info-table">';
-    Object.keys(obj).forEach(function(key) {
+    Object.keys(obj).sort().forEach(function(key) {
         var value = obj[key];
         if (value === null || value === undefined) {
             return;
@@ -157,6 +160,20 @@ function simpleData(data) {
         if (charge.battery_level != null) result.battery_level = charge.battery_level;
         if (charge.battery_range != null) result.battery_range = (charge.battery_range * MILES_TO_KM).toFixed(1);
         if (data.vehicle_state && data.vehicle_state.odometer != null) result.odometer = Math.round(data.vehicle_state.odometer * MILES_TO_KM);
+        if (data.vehicle_state && data.vehicle_state.tpms_pressure_fl != null) result.tpms_pressure_fl = data.vehicle_state.tpms_pressure_fl;
+        if (data.vehicle_state && data.vehicle_state.tpms_pressure_fr != null) result.tpms_pressure_fr = data.vehicle_state.tpms_pressure_fr;
+        if (data.vehicle_state && data.vehicle_state.tpms_pressure_rl != null) result.tpms_pressure_rl = data.vehicle_state.tpms_pressure_rl;
+        if (data.vehicle_state && data.vehicle_state.tpms_pressure_rr != null) result.tpms_pressure_rr = data.vehicle_state.tpms_pressure_rr;
+        if (drive.power != null) result.power = drive.power;
+        if (data.vehicle_state) {
+            var auxPower = null;
+            if (data.vehicle_state.aux_battery_power != null) {
+                auxPower = data.vehicle_state.aux_battery_power;
+            } else if (data.vehicle_state.aux_battery_voltage != null && data.vehicle_state.aux_battery_current != null) {
+                auxPower = Math.round(data.vehicle_state.aux_battery_voltage * data.vehicle_state.aux_battery_current);
+            }
+            if (auxPower != null) result.aux_battery_power = auxPower;
+        }
     }
 
     return result;
@@ -169,12 +186,21 @@ function updateUI(data) {
     var status = '';
     if (charge.charging_state === 'Charging') {
         status = 'Ladevorgang';
+        parkStart = null;
     } else if (drive.shift_state === 'P' || !drive.shift_state) {
         status = 'Geparkt';
+        if (!parkStart) parkStart = Date.now();
     } else {
         status = 'Fahrt';
+        parkStart = null;
     }
     html += '<h2>' + status + '</h2>';
+    if (status === 'Geparkt' && parkStart) {
+        var diff = Date.now() - parkStart;
+        var hours = Math.floor(diff / 3600000);
+        var minutes = Math.floor((diff % 3600000) / 60000);
+        html += '<p>Geparkt seit ' + hours + ' h ' + minutes + ' min</p>';
+    }
     html += generateTable(simpleData(data));
     $('#info').html(html);
 }

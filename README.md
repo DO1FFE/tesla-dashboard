@@ -20,3 +20,7 @@ This is a simple Flask application that displays real-time data from a Tesla veh
     ```
 
 4. Open `http://localhost:8013` in your browser (the server listens on `0.0.0.0:8013`).
+
+## Features
+
+While parked, the dashboard now displays tire pressure readings, instantaneous power usage, the 12V consumption and how long the vehicle has been parked. The information table is sorted for easier comparison.
