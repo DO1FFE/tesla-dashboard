@@ -1,4 +1,5 @@
 var currentVehicle = null;
+var MILES_TO_KM = 1.60934;
 var map = L.map('map').setView([0, 0], 13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
@@ -144,18 +145,18 @@ function simpleData(data) {
 
     if (charge.charging_state === 'Charging') {
         if (charge.battery_level != null) result.battery_level = charge.battery_level;
-        if (charge.charge_rate != null) result.charge_rate = charge.charge_rate;
+        if (charge.charge_rate != null) result.charge_rate = (charge.charge_rate * MILES_TO_KM).toFixed(1);
         if (charge.charger_power != null) result.charger_power = charge.charger_power;
         if (charge.time_to_full_charge != null) result.time_to_full_charge = charge.time_to_full_charge;
     } else if (drive.shift_state && drive.shift_state !== 'P') {
-        if (drive.speed != null) result.speed = drive.speed;
-        if (drive.active_route_miles_to_arrival != null) result.distance_to_arrival = (drive.active_route_miles_to_arrival * 1.60934).toFixed(1);
+        if (drive.speed != null) result.speed = Math.round(drive.speed * MILES_TO_KM);
+        if (drive.active_route_miles_to_arrival != null) result.distance_to_arrival = (drive.active_route_miles_to_arrival * MILES_TO_KM).toFixed(1);
         if (charge.battery_level != null) result.battery_level = charge.battery_level;
-        if (charge.battery_range != null) result.battery_range = charge.battery_range;
+        if (charge.battery_range != null) result.battery_range = (charge.battery_range * MILES_TO_KM).toFixed(1);
     } else {
         if (charge.battery_level != null) result.battery_level = charge.battery_level;
-        if (charge.battery_range != null) result.battery_range = charge.battery_range;
-        if (data.vehicle_state && data.vehicle_state.odometer != null) result.odometer = data.vehicle_state.odometer;
+        if (charge.battery_range != null) result.battery_range = (charge.battery_range * MILES_TO_KM).toFixed(1);
+        if (data.vehicle_state && data.vehicle_state.odometer != null) result.odometer = Math.round(data.vehicle_state.odometer * MILES_TO_KM);
     }
 
     return result;
