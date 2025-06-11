@@ -435,8 +435,30 @@ function startStream() {
     eventSource = new EventSource('/stream/' + currentVehicle);
     eventSource.onmessage = function(e) {
         var data = JSON.parse(e.data);
-        handleData(data);
+        if (data.error) {
+            $('#errors').text(data.error);
+        } else {
+            handleData(data);
+        }
     };
 }
 
+function fetchErrors() {
+    $.getJSON('/error', function(errs) {
+        if (!errs.length) {
+            $('#errors').text('');
+            return;
+        }
+        var html = '<h3>Fehler</h3><ul>';
+        errs.forEach(function(e) {
+            var d = new Date(e.timestamp * 1000);
+            html += '<li>' + d.toLocaleString() + ': ' + e.message + '</li>';
+        });
+        html += '</ul>';
+        $('#errors').html(html);
+    });
+}
+
 fetchVehicles();
+fetchErrors();
+setInterval(fetchErrors, 10000);
