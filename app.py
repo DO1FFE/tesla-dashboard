@@ -20,6 +20,11 @@ trip_path = []
 latest_data = {}
 subscribers = {}
 threads = {}
+_vehicle_list_cache = []
+_vehicle_list_cache_ts = 0.0
+_vehicle_list_lock = threading.Lock()
+api_errors = []
+api_errors_lock = threading.Lock()
 
 
 def track_park_time(vehicle_data):
@@ -69,6 +74,16 @@ def track_drive_path(vehicle_data):
                 _log_trip_point(ts, lat, lon)
 
 
+def _log_api_error(exc):
+    """Store API error messages with timestamp for later retrieval."""
+    ts = time.time()
+    msg = str(exc)
+    with api_errors_lock:
+        api_errors.append({'timestamp': ts, 'message': msg})
+        if len(api_errors) > 50:
+            api_errors.pop(0)
+
+
 def get_tesla():
     """Authenticate and return a Tesla object or None."""
     if teslapy is None:
@@ -84,13 +99,17 @@ def get_tesla():
         return None
 
     tesla = teslapy.Tesla(email)
-    if tokens_provided:
-        tesla.sso_token = {"access_token": access_token, "refresh_token": refresh_token}
-        tesla.refresh_token()
-    elif access_token:
-        tesla.refresh_token({'access_token': access_token})
-    else:
-        tesla.fetch_token(password=password)
+    try:
+        if tokens_provided:
+            tesla.sso_token = {"access_token": access_token, "refresh_token": refresh_token}
+            tesla.refresh_token()
+        elif access_token:
+            tesla.refresh_token({'access_token': access_token})
+        else:
+            tesla.fetch_token(password=password)
+    except Exception as exc:
+        _log_api_error(exc)
+        return None
     return tesla
 
 
@@ -107,13 +126,28 @@ def sanitize(data):
     return data
 
 
+def _cached_vehicle_list(tesla, ttl=300):
+    """Return vehicle list with basic time-based caching."""
+    global _vehicle_list_cache, _vehicle_list_cache_ts
+    now = time.time()
+    with _vehicle_list_lock:
+        if not _vehicle_list_cache or now - _vehicle_list_cache_ts > ttl:
+            try:
+                _vehicle_list_cache = tesla.vehicle_list()
+                _vehicle_list_cache_ts = now
+            except Exception as exc:
+                _log_api_error(exc)
+                return []
+        return _vehicle_list_cache
+
+
 def get_vehicle_data(vehicle_id=None):
     """Fetch vehicle data for a given vehicle id."""
     tesla = get_tesla()
     if tesla is None:
         return {"error": "Missing Tesla credentials or teslapy not installed"}
 
-    vehicles = tesla.vehicle_list()
+    vehicles = _cached_vehicle_list(tesla)
     if not vehicles:
         return {"error": "No vehicles found"}
 
@@ -133,10 +167,12 @@ def get_vehicle_data(vehicle_id=None):
                 if hasattr(vehicle, 'sync_wake_up'):
                     vehicle.sync_wake_up()
                 vehicle_data = vehicle.get_vehicle_data()
-            except Exception:
+            except Exception as exc2:
+                _log_api_error(exc2)
                 return {"error": "Vehicle is offline or asleep"}
         else:
-            raise
+            _log_api_error(exc)
+            return {"error": str(exc)}
     track_park_time(vehicle_data)
     track_drive_path(vehicle_data)
     sanitized = sanitize(vehicle_data)
@@ -150,7 +186,7 @@ def get_vehicle_list():
     tesla = get_tesla()
     if tesla is None:
         return []
-    vehicles = tesla.vehicle_list()
+    vehicles = _cached_vehicle_list(tesla)
     sanitized = []
     for idx, v in enumerate(vehicles, start=1):
         name = v.get('display_name')
@@ -231,6 +267,13 @@ def stream_vehicle(vehicle_id='default'):
 def api_vehicles():
     vehicles = get_vehicle_list()
     return jsonify(vehicles)
+
+
+@app.route('/error')
+def get_errors():
+    """Return collected API errors."""
+    with api_errors_lock:
+        return jsonify(list(api_errors))
 
 
 if __name__ == '__main__':
