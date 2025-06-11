@@ -21,11 +21,15 @@ This is a simple Flask application that displays real-time data from a Tesla veh
 
 4. Open `http://localhost:8013` in your browser (the server listens on `0.0.0.0:8013`).
 
+The backend continuously polls the Tesla API and pushes new data to clients using Server-Sent Events (SSE).
+
 ## Features
 
 The dashboard shows a short overview depending on whether the vehicle is parked, driving or charging. Below this, additional tables are grouped by category (battery/charging, climate, drive state, vehicle status and media information) to make the raw API data easier to read. While parked the dashboard also displays tire pressures, power usage of the drive unit and the 12V battery as well as how long the vehicle has been parked.
 
 While driving, a blue path is drawn on the map using the reported GPS positions. These points are also logged to `data/trip_history.csv` for later analysis.
+
+Data is streamed to the frontend via `/stream/<vehicle_id>` using Server-Sent Events so the dashboard updates instantly when new information arrives.
 
 ## Reference
 
