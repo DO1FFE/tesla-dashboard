@@ -68,7 +68,8 @@ var DESCRIPTIONS = {
     'vehicle_config': 'Fahrzeugkonfiguration',
     'vehicle_state': 'Fahrzeugstatus',
     'media_info': 'Medieninfos',
-    'media_state': 'Medienstatus'
+    'media_state': 'Medienstatus',
+    'distance_to_arrival': 'Entfernung zum Ziel (km)'
 };
 
 var WORD_MAP = {
@@ -136,6 +137,30 @@ function generateTable(obj) {
     return html;
 }
 
+function simpleData(data) {
+    var drive = data.drive_state || {};
+    var charge = data.charge_state || {};
+    var result = {};
+
+    if (charge.charging_state === 'Charging') {
+        if (charge.battery_level != null) result.battery_level = charge.battery_level;
+        if (charge.charge_rate != null) result.charge_rate = charge.charge_rate;
+        if (charge.charger_power != null) result.charger_power = charge.charger_power;
+        if (charge.time_to_full_charge != null) result.time_to_full_charge = charge.time_to_full_charge;
+    } else if (drive.shift_state && drive.shift_state !== 'P') {
+        if (drive.speed != null) result.speed = drive.speed;
+        if (drive.active_route_miles_to_arrival != null) result.distance_to_arrival = (drive.active_route_miles_to_arrival * 1.60934).toFixed(1);
+        if (charge.battery_level != null) result.battery_level = charge.battery_level;
+        if (charge.battery_range != null) result.battery_range = charge.battery_range;
+    } else {
+        if (charge.battery_level != null) result.battery_level = charge.battery_level;
+        if (charge.battery_range != null) result.battery_range = charge.battery_range;
+        if (data.vehicle_state && data.vehicle_state.odometer != null) result.odometer = data.vehicle_state.odometer;
+    }
+
+    return result;
+}
+
 function updateUI(data) {
     var drive = data.drive_state || {};
     var charge = data.charge_state || {};
@@ -149,9 +174,8 @@ function updateUI(data) {
         status = 'Fahrt';
     }
     html += '<h2>' + status + '</h2>';
-    html += generateTable(data);
+    html += generateTable(simpleData(data));
     $('#info').html(html);
-    $('#data').text(JSON.stringify(data, null, 2));
 }
 
 $('#vehicle-select').on('change', function() {

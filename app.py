@@ -36,6 +36,19 @@ def get_tesla():
     return tesla
 
 
+def sanitize(data):
+    """Remove personally identifiable fields from the vehicle data."""
+    if isinstance(data, dict):
+        if "vin" in data:
+            data.pop("vin", None)
+        for value in data.values():
+            sanitize(value)
+    elif isinstance(data, list):
+        for item in data:
+            sanitize(item)
+    return data
+
+
 def get_vehicle_data(vehicle_id=None):
     """Fetch vehicle data for a given vehicle id."""
     tesla = get_tesla()
@@ -53,16 +66,22 @@ def get_vehicle_data(vehicle_id=None):
         vehicle = vehicles[0]
 
     vehicle_data = vehicle.get_vehicle_data()
-    return vehicle_data
+    return sanitize(vehicle_data)
 
 
 def get_vehicle_list():
-    """Return a list of available vehicles."""
+    """Return a list of available vehicles without exposing VIN."""
     tesla = get_tesla()
     if tesla is None:
         return []
     vehicles = tesla.vehicle_list()
-    return [{"id": v['id_s'], "display_name": v.get('display_name') or v['vin']} for v in vehicles]
+    sanitized = []
+    for idx, v in enumerate(vehicles, start=1):
+        name = v.get('display_name')
+        if not name:
+            name = f"Fahrzeug {idx}"
+        sanitized.append({"id": v['id_s'], "display_name": name})
+    return sanitized
 
 
 @app.route('/')
