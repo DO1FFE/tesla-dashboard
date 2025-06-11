@@ -1,5 +1,9 @@
 import os
-from flask import Flask, render_template, jsonify
+import json
+import queue
+import threading
+import time
+from flask import Flask, render_template, jsonify, Response
 from dotenv import load_dotenv
 
 try:
@@ -13,6 +17,9 @@ app = Flask(__name__)
 park_start_ms = None
 last_shift_state = None
 trip_path = []
+latest_data = {}
+subscribers = {}
+threads = {}
 
 
 def track_park_time(vehicle_data):
@@ -153,6 +160,26 @@ def get_vehicle_list():
     return sanitized
 
 
+def _fetch_loop(vehicle_id, interval=5):
+    """Continuously fetch data for a vehicle and notify subscribers."""
+    while True:
+        vid = None if vehicle_id == 'default' else vehicle_id
+        data = get_vehicle_data(vid)
+        latest_data[vehicle_id] = data
+        for q in subscribers.get(vehicle_id, []):
+            q.put(data)
+        time.sleep(interval)
+
+
+def _start_thread(vehicle_id):
+    """Start background fetching thread for the given vehicle."""
+    if vehicle_id in threads:
+        return
+    t = threading.Thread(target=_fetch_loop, args=(vehicle_id,), daemon=True)
+    threads[vehicle_id] = t
+    t.start()
+
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -160,14 +187,44 @@ def index():
 
 @app.route('/api/data')
 def api_data():
-    data = get_vehicle_data()
+    _start_thread('default')
+    data = latest_data.get('default')
+    if data is None:
+        data = get_vehicle_data()
+        latest_data['default'] = data
     return jsonify(data)
 
 
 @app.route('/api/data/<vehicle_id>')
 def api_data_vehicle(vehicle_id):
-    data = get_vehicle_data(vehicle_id)
+    _start_thread(vehicle_id)
+    data = latest_data.get(vehicle_id)
+    if data is None:
+        data = get_vehicle_data(vehicle_id)
+        latest_data[vehicle_id] = data
     return jsonify(data)
+
+
+@app.route('/stream')
+@app.route('/stream/<vehicle_id>')
+def stream_vehicle(vehicle_id='default'):
+    """Stream vehicle data to the client using Server-Sent Events."""
+    _start_thread(vehicle_id)
+
+    def gen():
+        q = queue.Queue()
+        subscribers.setdefault(vehicle_id, []).append(q)
+        try:
+            # Send the latest data immediately if available
+            if vehicle_id in latest_data:
+                yield f"data: {json.dumps(latest_data[vehicle_id])}\n\n"
+            while True:
+                data = q.get()
+                yield f"data: {json.dumps(data)}\n\n"
+        finally:
+            subscribers.get(vehicle_id, []).remove(q)
+
+    return Response(gen(), mimetype='text/event-stream')
 
 
 @app.route('/api/vehicles')

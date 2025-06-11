@@ -19,6 +19,7 @@ var marker = L.marker([0, 0], {
     rotationAngle: 0,
     rotationOrigin: 'center center'
 }).addTo(map);
+var eventSource = null;
 
 function updateHeader(data) {
     var info = '';
@@ -50,38 +51,34 @@ function fetchVehicles() {
         if (!currentVehicle && vehicles.length > 0) {
             currentVehicle = vehicles[0].id;
             $select.val(currentVehicle);
-            fetchData();
+            startStream();
         }
     });
 }
 
-function fetchData() {
-    if (!currentVehicle) return;
-    $.getJSON('/api/data/' + currentVehicle, function(data) {
-        updateHeader(data);
-        updateUI(data);
-        var drive = data.drive_state || {};
-        var lat = drive.latitude;
-        var lng = drive.longitude;
-        if (lat && lng) {
-            marker.setLatLng([lat, lng]);
-            // Preserve the current zoom level when updating the map position
-            map.setView([lat, lng], map.getZoom());
-            if (typeof drive.heading === 'number') {
-                marker.setRotationAngle(drive.heading);
-            }
+function handleData(data) {
+    updateHeader(data);
+    updateUI(data);
+    var drive = data.drive_state || {};
+    var lat = drive.latitude;
+    var lng = drive.longitude;
+    if (lat && lng) {
+        marker.setLatLng([lat, lng]);
+        map.setView([lat, lng], map.getZoom());
+        if (typeof drive.heading === 'number') {
+            marker.setRotationAngle(drive.heading);
         }
-        if (data.path && data.path.length > 1) {
-            if (polyline) {
-                polyline.setLatLngs(data.path);
-            } else {
-                polyline = L.polyline(data.path, { color: 'blue' }).addTo(map);
-            }
-        } else if (polyline) {
-            map.removeLayer(polyline);
-            polyline = null;
+    }
+    if (data.path && data.path.length > 1) {
+        if (polyline) {
+            polyline.setLatLngs(data.path);
+        } else {
+            polyline = L.polyline(data.path, { color: 'blue' }).addTo(map);
         }
-    });
+    } else if (polyline) {
+        map.removeLayer(polyline);
+        polyline = null;
+    }
 }
 
 function updateParkTime() {
@@ -395,8 +392,19 @@ function updateUI(data) {
 
 $('#vehicle-select').on('change', function() {
     currentVehicle = $(this).val();
-    fetchData();
+    startStream();
 });
 
+function startStream() {
+    if (!currentVehicle) return;
+    if (eventSource) {
+        eventSource.close();
+    }
+    eventSource = new EventSource('/stream/' + currentVehicle);
+    eventSource.onmessage = function(e) {
+        var data = JSON.parse(e.data);
+        handleData(data);
+    };
+}
+
 fetchVehicles();
-setInterval(fetchData, 5000);
