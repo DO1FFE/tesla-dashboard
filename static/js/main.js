@@ -125,6 +125,7 @@ var DESCRIPTIONS = {
     // Wichtige Felder mit fest hinterlegter Übersetzung
     'battery_level': 'Akkustand (%)',
     'battery_range': 'Reichweite (km)',
+    'est_battery_range': 'Restreichweite (km)',
     'odometer': 'Kilometerstand (km)',
     'outside_temp': 'Außen­temperatur (°C)',
     'inside_temp': 'Innenraum­temperatur (°C)',
@@ -396,6 +397,13 @@ function updateModules(data) {
 
     var climate = data.climate_state || {};
     $('#module-climate').html('<h3>Klima</h3>' + generateTable(climate));
+
+    var charge = data.charge_state || {};
+    var battery = {
+        battery_level: charge.battery_level,
+        est_battery_range: charge.est_battery_range != null ? (charge.est_battery_range * MILES_TO_KM).toFixed(1) : null
+    };
+    $('#module-battery').html('<h3>Batterie</h3>' + generateTable(battery));
 
     var vehicle = data.vehicle_state || {};
     var tires = {
