@@ -87,6 +87,18 @@ function batteryBar(level) {
     return '<div class="battery"><div class="level" style="width:' + pct + '%; background:' + color + '"></div></div> ' + pct + '%';
 }
 
+function getStatus(data) {
+    var drive = data.drive_state || {};
+    var charge = data.charge_state || {};
+    if (charge.charging_state === 'Charging') {
+        return 'Ladevorgang';
+    }
+    if (drive.shift_state && drive.shift_state !== 'P') {
+        return 'Fahrt';
+    }
+    return 'Geparkt';
+}
+
 var DESCRIPTIONS = {
     // Wichtige Felder mit fest hinterlegter Übersetzung
     'battery_level': 'Akkustand (%)',
@@ -181,7 +193,7 @@ function generateTable(obj) {
     return html;
 }
 
-function categorizedData(data) {
+function categorizedData(data, status) {
     var charge = data.charge_state || {};
     var climate = data.climate_state || {};
     var drive = data.drive_state || {};
@@ -194,48 +206,77 @@ function categorizedData(data) {
         'Medieninfos': {}
     };
 
-    // Batterie und Laden
-    if (charge.battery_level != null) categories['Batterie und Laden'].battery_level = charge.battery_level;
-    if (charge.battery_range != null) categories['Batterie und Laden'].battery_range = (charge.battery_range * MILES_TO_KM).toFixed(1);
-    if (charge.charge_rate != null) categories['Batterie und Laden'].charge_rate = (charge.charge_rate * MILES_TO_KM).toFixed(1);
-    if (charge.charger_power != null) categories['Batterie und Laden'].charger_power = charge.charger_power;
-    if (charge.time_to_full_charge != null) categories['Batterie und Laden'].time_to_full_charge = charge.time_to_full_charge;
+    function add(cat, key, val) {
+        if (val !== null && val !== undefined) {
+            categories[cat][key] = val;
+        }
+    }
 
-    // Klimaanlage
-    if (climate.inside_temp != null) categories['Klimaanlage'].inside_temp = climate.inside_temp;
-    if (climate.outside_temp != null) categories['Klimaanlage'].outside_temp = climate.outside_temp;
-    if (climate.hvac_auto_request != null) categories['Klimaanlage'].hvac_auto_request = climate.hvac_auto_request;
-    if (climate.is_climate_on != null) categories['Klimaanlage'].is_climate_on = climate.is_climate_on;
-    if (climate.seat_heater_left != null) categories['Klimaanlage'].seat_heater_left = climate.seat_heater_left;
-    if (climate.seat_heater_right != null) categories['Klimaanlage'].seat_heater_right = climate.seat_heater_right;
+    if (status === 'Ladevorgang') {
+        add('Batterie und Laden', 'battery_level', charge.battery_level);
+        add('Batterie und Laden', 'battery_range', charge.battery_range != null ? (charge.battery_range * MILES_TO_KM).toFixed(1) : null);
+        add('Batterie und Laden', 'charge_rate', charge.charge_rate != null ? (charge.charge_rate * MILES_TO_KM).toFixed(1) : null);
+        add('Batterie und Laden', 'charger_power', charge.charger_power);
+        add('Batterie und Laden', 'time_to_full_charge', charge.time_to_full_charge);
 
-    // Fahrstatus
-    if (drive.shift_state != null) categories['Fahrstatus'].shift_state = drive.shift_state;
-    if (drive.speed != null) categories['Fahrstatus'].speed = Math.round(drive.speed * MILES_TO_KM);
-    if (drive.heading != null) categories['Fahrstatus'].heading = drive.heading;
-    if (drive.latitude != null) categories['Fahrstatus'].latitude = drive.latitude;
-    if (drive.longitude != null) categories['Fahrstatus'].longitude = drive.longitude;
-    if (drive.power != null) categories['Fahrstatus'].power = drive.power;
+        add('Klimaanlage', 'inside_temp', climate.inside_temp);
+        add('Klimaanlage', 'outside_temp', climate.outside_temp);
+        add('Klimaanlage', 'is_climate_on', climate.is_climate_on);
 
-    // Fahrzeugstatus
-    if (vehicle.locked != null) categories['Fahrzeugstatus'].locked = vehicle.locked;
-    if (vehicle.odometer != null) categories['Fahrzeugstatus'].odometer = Math.round(vehicle.odometer * MILES_TO_KM);
-    if (vehicle.autopark_state_v2 != null) categories['Fahrzeugstatus'].autopark_state_v2 = vehicle.autopark_state_v2;
-    if (vehicle.autopark_style != null) categories['Fahrzeugstatus'].autopark_style = vehicle.autopark_style;
-    if (vehicle.last_autopark_error != null) categories['Fahrzeugstatus'].last_autopark_error = vehicle.last_autopark_error;
-    if (vehicle.software_update && vehicle.software_update.version) categories['Fahrzeugstatus'].software_update = { version: vehicle.software_update.version };
-    if (vehicle.speed_limit_mode && vehicle.speed_limit_mode.active != null) categories['Fahrzeugstatus'].speed_limit_mode = { active: vehicle.speed_limit_mode.active };
-    if (vehicle.remote_start_enabled != null) categories['Fahrzeugstatus'].remote_start_enabled = vehicle.remote_start_enabled;
-    if (vehicle.tpms_pressure_fl != null) categories['Fahrzeugstatus'].tpms_pressure_fl = vehicle.tpms_pressure_fl;
-    if (vehicle.tpms_pressure_fr != null) categories['Fahrzeugstatus'].tpms_pressure_fr = vehicle.tpms_pressure_fr;
-    if (vehicle.tpms_pressure_rl != null) categories['Fahrzeugstatus'].tpms_pressure_rl = vehicle.tpms_pressure_rl;
-    if (vehicle.tpms_pressure_rr != null) categories['Fahrzeugstatus'].tpms_pressure_rr = vehicle.tpms_pressure_rr;
+        add('Fahrzeugstatus', 'locked', vehicle.locked);
+        add('Fahrzeugstatus', 'odometer', vehicle.odometer != null ? Math.round(vehicle.odometer * MILES_TO_KM) : null);
+        add('Fahrzeugstatus', 'remote_start_enabled', vehicle.remote_start_enabled);
+        add('Fahrzeugstatus', 'tpms_pressure_fl', vehicle.tpms_pressure_fl);
+        add('Fahrzeugstatus', 'tpms_pressure_fr', vehicle.tpms_pressure_fr);
+        add('Fahrzeugstatus', 'tpms_pressure_rl', vehicle.tpms_pressure_rl);
+        add('Fahrzeugstatus', 'tpms_pressure_rr', vehicle.tpms_pressure_rr);
+        if (vehicle.software_update && vehicle.software_update.version) add('Fahrzeugstatus', 'software_update', { version: vehicle.software_update.version });
+        if (vehicle.speed_limit_mode && vehicle.speed_limit_mode.active != null) add('Fahrzeugstatus', 'speed_limit_mode', { active: vehicle.speed_limit_mode.active });
+    } else if (status === 'Fahrt') {
+        add('Batterie und Laden', 'battery_level', charge.battery_level);
+        add('Batterie und Laden', 'battery_range', charge.battery_range != null ? (charge.battery_range * MILES_TO_KM).toFixed(1) : null);
 
-    // Medieninfos
+        add('Fahrstatus', 'shift_state', drive.shift_state);
+        add('Fahrstatus', 'speed', drive.speed != null ? Math.round(drive.speed * MILES_TO_KM) : null);
+        add('Fahrstatus', 'heading', drive.heading);
+        add('Fahrstatus', 'latitude', drive.latitude);
+        add('Fahrstatus', 'longitude', drive.longitude);
+        add('Fahrstatus', 'power', drive.power);
+        if (drive.active_route_miles_to_arrival != null) add('Fahrstatus', 'distance_to_arrival', (drive.active_route_miles_to_arrival * MILES_TO_KM).toFixed(1));
+
+        add('Fahrzeugstatus', 'locked', vehicle.locked);
+        add('Fahrzeugstatus', 'odometer', vehicle.odometer != null ? Math.round(vehicle.odometer * MILES_TO_KM) : null);
+        add('Fahrzeugstatus', 'remote_start_enabled', vehicle.remote_start_enabled);
+    } else { // Geparkt
+        add('Batterie und Laden', 'battery_level', charge.battery_level);
+        add('Batterie und Laden', 'battery_range', charge.battery_range != null ? (charge.battery_range * MILES_TO_KM).toFixed(1) : null);
+
+        add('Klimaanlage', 'inside_temp', climate.inside_temp);
+        add('Klimaanlage', 'outside_temp', climate.outside_temp);
+        add('Klimaanlage', 'is_climate_on', climate.is_climate_on);
+        add('Klimaanlage', 'seat_heater_left', climate.seat_heater_left);
+        add('Klimaanlage', 'seat_heater_right', climate.seat_heater_right);
+
+        add('Fahrzeugstatus', 'locked', vehicle.locked);
+        add('Fahrzeugstatus', 'odometer', vehicle.odometer != null ? Math.round(vehicle.odometer * MILES_TO_KM) : null);
+        add('Fahrzeugstatus', 'tpms_pressure_fl', vehicle.tpms_pressure_fl);
+        add('Fahrzeugstatus', 'tpms_pressure_fr', vehicle.tpms_pressure_fr);
+        add('Fahrzeugstatus', 'tpms_pressure_rl', vehicle.tpms_pressure_rl);
+        add('Fahrzeugstatus', 'tpms_pressure_rr', vehicle.tpms_pressure_rr);
+        add('Fahrzeugstatus', 'power', drive.power);
+        var auxPower = null;
+        if (vehicle.aux_battery_power != null) {
+            auxPower = vehicle.aux_battery_power;
+        } else if (vehicle.aux_battery_voltage != null && vehicle.aux_battery_current != null) {
+            auxPower = Math.round(vehicle.aux_battery_voltage * vehicle.aux_battery_current);
+        }
+        add('Fahrzeugstatus', 'aux_battery_power', auxPower);
+    }
+
     if (vehicle.media_info) {
-        if (vehicle.media_info.media_playback_status != null) categories['Medieninfos'].media_playback_status = vehicle.media_info.media_playback_status;
-        if (vehicle.media_info.now_playing_source != null) categories['Medieninfos'].now_playing_source = vehicle.media_info.now_playing_source;
-        if (vehicle.media_info.audio_volume != null) categories['Medieninfos'].audio_volume = vehicle.media_info.audio_volume;
+        add('Medieninfos', 'media_playback_status', vehicle.media_info.media_playback_status);
+        add('Medieninfos', 'now_playing_source', vehicle.media_info.now_playing_source);
+        add('Medieninfos', 'audio_volume', vehicle.media_info.audio_volume);
     }
 
     return categories;
@@ -260,20 +301,20 @@ function generateCategoryTables(cats, status) {
     return html;
 }
 
-function simpleData(data) {
+function simpleData(data, status) {
     var drive = data.drive_state || {};
     var charge = data.charge_state || {};
     var climate = data.climate_state || {};
     var vehicle = data.vehicle_state || {};
     var result = {};
 
-    if (charge.charging_state === 'Charging') {
+    if (status === 'Ladevorgang') {
         if (charge.battery_level != null) result.battery_level = charge.battery_level;
         if (charge.battery_range != null) result.battery_range = (charge.battery_range * MILES_TO_KM).toFixed(1);
         if (charge.charge_rate != null) result.charge_rate = (charge.charge_rate * MILES_TO_KM).toFixed(1);
         if (charge.charger_power != null) result.charger_power = charge.charger_power;
         if (charge.time_to_full_charge != null) result.time_to_full_charge = charge.time_to_full_charge;
-    } else if (drive.shift_state && drive.shift_state !== 'P') {
+    } else if (status === 'Fahrt') {
         if (drive.speed != null) result.speed = Math.round(drive.speed * MILES_TO_KM);
         if (drive.heading != null) result.heading = drive.heading;
         if (drive.active_route_miles_to_arrival != null) result.distance_to_arrival = (drive.active_route_miles_to_arrival * MILES_TO_KM).toFixed(1);
@@ -302,24 +343,15 @@ function simpleData(data) {
 }
 
 function updateUI(data) {
-    var drive = data.drive_state || {};
-    var charge = data.charge_state || {};
     var html = '';
-    var status = '';
+    var status = getStatus(data);
     parkStart = data.park_start || null;
-    if (charge.charging_state === 'Charging') {
-        status = 'Ladevorgang';
-    } else if (drive.shift_state === 'P' || !drive.shift_state) {
-        status = 'Geparkt';
-    } else {
-        status = 'Fahrt';
-    }
     html += '<h2>' + status + '</h2>';
     if (status === 'Geparkt') {
         html += '<p id="park-since">Geparkt seit <span id="park-time"></span></p>';
     }
-    html += generateTable(simpleData(data));
-    html += generateCategoryTables(categorizedData(data), status);
+    html += generateTable(simpleData(data, status));
+    html += generateCategoryTables(categorizedData(data, status), status);
     $('#info').html(html);
     if (status === 'Geparkt' && parkStart) {
         updateParkTime();
