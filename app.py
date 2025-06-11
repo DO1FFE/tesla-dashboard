@@ -18,13 +18,19 @@ def get_vehicle_data():
 
     email = os.getenv("TESLA_EMAIL")
     password = os.getenv("TESLA_PASSWORD")
-    token = os.getenv("TESLA_ACCESS_TOKEN")
-    if not token and not (email and password):
+    access_token = os.getenv("TESLA_ACCESS_TOKEN")
+    refresh_token = os.getenv("TESLA_REFRESH_TOKEN")
+
+    tokens_provided = access_token and refresh_token
+    if not tokens_provided and not (email and password):
         return {"error": "Missing Tesla credentials"}
 
     with teslapy.Tesla(email) as tesla:
-        if token:
-            tesla.refresh_token({'access_token': token})
+        if tokens_provided:
+            tesla.sso_token = {"access_token": access_token, "refresh_token": refresh_token}
+            tesla.refresh_token()
+        elif access_token:
+            tesla.refresh_token({'access_token': access_token})
         else:
             tesla.fetch_token(password=password)
 
