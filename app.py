@@ -1,4 +1,5 @@
 import os
+import time
 from flask import Flask, render_template, jsonify
 from dotenv import load_dotenv
 
@@ -9,6 +10,25 @@ except ImportError:
 
 load_dotenv()
 app = Flask(__name__)
+
+park_start_ms = None
+last_shift_state = None
+
+
+def track_park_time(vehicle_data):
+    """Track when the vehicle was first seen parked."""
+    global park_start_ms, last_shift_state
+    drive = vehicle_data.get('drive_state', {}) if isinstance(vehicle_data, dict) else {}
+    shift = drive.get('shift_state')
+    ts = drive.get('timestamp') or drive.get('gps_as_of')
+    if ts and ts < 1e12:
+        ts = int(ts * 1000)
+    if shift in (None, 'P'):
+        if park_start_ms is None or last_shift_state not in (None, 'P'):
+            park_start_ms = ts if ts else int(time.time() * 1000)
+    else:
+        park_start_ms = None
+    last_shift_state = shift
 
 
 def get_tesla():
@@ -66,7 +86,10 @@ def get_vehicle_data(vehicle_id=None):
         vehicle = vehicles[0]
 
     vehicle_data = vehicle.get_vehicle_data()
-    return sanitize(vehicle_data)
+    track_park_time(vehicle_data)
+    sanitized = sanitize(vehicle_data)
+    sanitized['park_start'] = park_start_ms
+    return sanitized
 
 
 def get_vehicle_list():
