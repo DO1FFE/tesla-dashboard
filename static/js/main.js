@@ -141,6 +141,76 @@ function generateTable(obj) {
     return html;
 }
 
+function categorizedData(data) {
+    var charge = data.charge_state || {};
+    var climate = data.climate_state || {};
+    var drive = data.drive_state || {};
+    var vehicle = data.vehicle_state || {};
+    var categories = {
+        'Batterie und Laden': {},
+        'Klimaanlage': {},
+        'Fahrstatus': {},
+        'Fahrzeugstatus': {},
+        'Medieninfos': {}
+    };
+
+    // Batterie und Laden
+    if (charge.battery_level != null) categories['Batterie und Laden'].battery_level = charge.battery_level;
+    if (charge.battery_range != null) categories['Batterie und Laden'].battery_range = (charge.battery_range * MILES_TO_KM).toFixed(1);
+    if (charge.charge_rate != null) categories['Batterie und Laden'].charge_rate = (charge.charge_rate * MILES_TO_KM).toFixed(1);
+    if (charge.charger_power != null) categories['Batterie und Laden'].charger_power = charge.charger_power;
+    if (charge.time_to_full_charge != null) categories['Batterie und Laden'].time_to_full_charge = charge.time_to_full_charge;
+
+    // Klimaanlage
+    if (climate.inside_temp != null) categories['Klimaanlage'].inside_temp = climate.inside_temp;
+    if (climate.outside_temp != null) categories['Klimaanlage'].outside_temp = climate.outside_temp;
+    if (climate.hvac_auto_request != null) categories['Klimaanlage'].hvac_auto_request = climate.hvac_auto_request;
+    if (climate.is_climate_on != null) categories['Klimaanlage'].is_climate_on = climate.is_climate_on;
+    if (climate.seat_heater_left != null) categories['Klimaanlage'].seat_heater_left = climate.seat_heater_left;
+    if (climate.seat_heater_right != null) categories['Klimaanlage'].seat_heater_right = climate.seat_heater_right;
+
+    // Fahrstatus
+    if (drive.shift_state != null) categories['Fahrstatus'].shift_state = drive.shift_state;
+    if (drive.speed != null) categories['Fahrstatus'].speed = Math.round(drive.speed * MILES_TO_KM);
+    if (drive.heading != null) categories['Fahrstatus'].heading = drive.heading;
+    if (drive.latitude != null) categories['Fahrstatus'].latitude = drive.latitude;
+    if (drive.longitude != null) categories['Fahrstatus'].longitude = drive.longitude;
+    if (drive.power != null) categories['Fahrstatus'].power = drive.power;
+
+    // Fahrzeugstatus
+    if (vehicle.locked != null) categories['Fahrzeugstatus'].locked = vehicle.locked;
+    if (vehicle.odometer != null) categories['Fahrzeugstatus'].odometer = Math.round(vehicle.odometer * MILES_TO_KM);
+    if (vehicle.autopark_state_v2 != null) categories['Fahrzeugstatus'].autopark_state_v2 = vehicle.autopark_state_v2;
+    if (vehicle.autopark_style != null) categories['Fahrzeugstatus'].autopark_style = vehicle.autopark_style;
+    if (vehicle.last_autopark_error != null) categories['Fahrzeugstatus'].last_autopark_error = vehicle.last_autopark_error;
+    if (vehicle.software_update && vehicle.software_update.version) categories['Fahrzeugstatus'].software_update = { version: vehicle.software_update.version };
+    if (vehicle.speed_limit_mode && vehicle.speed_limit_mode.active != null) categories['Fahrzeugstatus'].speed_limit_mode = { active: vehicle.speed_limit_mode.active };
+    if (vehicle.remote_start_enabled != null) categories['Fahrzeugstatus'].remote_start_enabled = vehicle.remote_start_enabled;
+    if (vehicle.tpms_pressure_fl != null) categories['Fahrzeugstatus'].tpms_pressure_fl = vehicle.tpms_pressure_fl;
+    if (vehicle.tpms_pressure_fr != null) categories['Fahrzeugstatus'].tpms_pressure_fr = vehicle.tpms_pressure_fr;
+    if (vehicle.tpms_pressure_rl != null) categories['Fahrzeugstatus'].tpms_pressure_rl = vehicle.tpms_pressure_rl;
+    if (vehicle.tpms_pressure_rr != null) categories['Fahrzeugstatus'].tpms_pressure_rr = vehicle.tpms_pressure_rr;
+
+    // Medieninfos
+    if (vehicle.media_info) {
+        if (vehicle.media_info.media_playback_status != null) categories['Medieninfos'].media_playback_status = vehicle.media_info.media_playback_status;
+        if (vehicle.media_info.now_playing_source != null) categories['Medieninfos'].now_playing_source = vehicle.media_info.now_playing_source;
+        if (vehicle.media_info.audio_volume != null) categories['Medieninfos'].audio_volume = vehicle.media_info.audio_volume;
+    }
+
+    return categories;
+}
+
+function generateCategoryTables(cats) {
+    var html = '';
+    Object.keys(cats).forEach(function(name) {
+        var obj = cats[name];
+        if (Object.keys(obj).length === 0) return;
+        html += '<h3>' + name + '</h3>' + generateTable(obj);
+    });
+    return html;
+}
+
 function simpleData(data) {
     var drive = data.drive_state || {};
     var charge = data.charge_state || {};
@@ -202,6 +272,7 @@ function updateUI(data) {
         html += '<p>Geparkt seit ' + hours + ' h ' + minutes + ' min</p>';
     }
     html += generateTable(simpleData(data));
+    html += generateCategoryTables(categorizedData(data));
     $('#info').html(html);
 }
 
