@@ -98,7 +98,7 @@ def get_tesla():
     if not tokens_provided and not (email and password):
         return None
 
-    tesla = teslapy.Tesla(email)
+    tesla = teslapy.Tesla(email, app_user_agent="Tesla-Dashboard")
     try:
         if tokens_provided:
             tesla.sso_token = {"access_token": access_token, "refresh_token": refresh_token}
