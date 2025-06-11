@@ -281,6 +281,8 @@ function updateUI(data) {
             var stored = localStorage.getItem('parkStart');
             if (stored) {
                 parkStart = parseInt(stored, 10);
+            } else if (drive.timestamp) {
+                parkStart = drive.timestamp;
             } else if (drive.gps_as_of) {
                 parkStart = drive.gps_as_of * 1000;
             } else {
