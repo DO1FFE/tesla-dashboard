@@ -77,32 +77,44 @@ def update_api_list(data, filename=os.path.join('data', 'api-liste.txt')):
         os.makedirs(os.path.dirname(filename), exist_ok=True)
 
         existing_lines = []
-        existing_map = {}
         if os.path.exists(filename):
             with open(filename, 'r', encoding='utf-8') as f:
-                for idx, line in enumerate(f):
+                for line in f:
                     line = line.rstrip('\n')
                     if ': ' in line:
                         k, v = line.split(': ', 1)
                     else:
                         k, v = line, ''
                     existing_lines.append((k, v))
-                    if k not in existing_map:
-                        existing_map[k] = idx
 
+        existing_map = {k: i for i, (k, _v) in enumerate(existing_lines)}
         kv = _collect_key_values(data)
-        new_lines = []
-        seen = set()
-        for k, v in kv:
-            seen.add(k)
+
+        lines = existing_lines[:]
+        for idx, (k, v) in enumerate(kv):
             value = json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v
-            new_lines.append((k, value))
+            if k in existing_map:
+                pos = existing_map[k]
+                lines[pos] = (k, value)
+            else:
+                # try to place the key after the nearest previous known key
+                insert_pos = None
+                for prev_idx in range(idx - 1, -1, -1):
+                    prev_k = kv[prev_idx][0]
+                    if prev_k in existing_map:
+                        insert_pos = existing_map[prev_k] + 1
+                        break
+                if insert_pos is None:
+                    # fallback: before the next known key
+                    insert_pos = len(lines)
+                    for next_k, _ in kv[idx + 1:]:
+                        if next_k in existing_map:
+                            insert_pos = existing_map[next_k]
+                            break
+                lines.insert(insert_pos, (k, value))
+                existing_map = {key: i for i, (key, _v) in enumerate(lines)}
 
-        for k, v in existing_lines:
-            if k not in seen:
-                new_lines.append((k, v))
-
-        content = '\n'.join(f"{k}: {v}" for k, v in new_lines) + '\n'
+        content = '\n'.join(f"{k}: {v}" for k, v in lines) + '\n'
 
         current = ''
         if os.path.exists(filename):
