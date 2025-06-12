@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
     <meta charset="utf-8">
-    <title>Letzte Fahrt</title>
+    <title>Fahrtverlauf</title>
     <script src="/static/js/jquery.min.js"></script>
     <link rel="stylesheet" href="/static/css/leaflet.css" />
     <link rel="stylesheet" href="/static/css/style.css" />
@@ -16,6 +16,14 @@
     </style>
 </head>
 <body>
+    <form id="trip-form" method="get" style="position:absolute;top:10px;left:10px;z-index:1000;background:#fff;padding:5px;">
+        <label for="file">Fahrt auswählen:</label>
+        <select id="file" name="file" onchange="document.getElementById('trip-form').submit();">
+            {% for f in files %}
+            <option value="{{ f }}" {% if f == selected %}selected{% endif %}>{{ f }}</option>
+            {% endfor %}
+        </select>
+    </form>
     <div id="map"></div>
     <script>
         var tripPath = {{ path|tojson }};
