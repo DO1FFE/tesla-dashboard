@@ -67,6 +67,13 @@
   font-weight: bold;
 }
 
+#lock-status {
+  display: inline-block;
+  font-size: 24px;
+  margin: 10px 10px 10px 0;
+  vertical-align: top;
+}
+
 #gear-shift div {
   text-align: center;
   padding: 2px 0;
