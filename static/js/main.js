@@ -1,18 +1,21 @@
 var currentVehicle = null;
 var MILES_TO_KM = 1.60934;
+// Default view if no coordinates are available
+var DEFAULT_POS = [51.4556, 7.0116];
+var DEFAULT_ZOOM = 19;
 var parkStart = null;
 var parkTimer = null;
 // Initialize the map roughly centered on Essen with a high zoom until
 // coordinates from the API are received.
-var map = L.map('map').setView([51.4556, 7.0116], 19);
+var map = L.map('map').setView(DEFAULT_POS, DEFAULT_ZOOM);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
 }).addTo(map);
 var polyline = null;
 
 var arrowIcon = L.divIcon({
-    html: "<svg width="30" height="30" viewBox="0 0 30 30"><polygon points="15,0 30,30 15,22 0,30" /></svg>",
-    className: "arrow-icon",
+    html: '<svg width="30" height="30" viewBox="0 0 30 30"><polygon points="15,0 30,30 15,22 0,30" /></svg>',
+    className: 'arrow-icon',
     iconSize: [30, 30],
     iconAnchor: [15, 15]
 });
@@ -77,6 +80,9 @@ function handleData(data) {
         if (typeof drive.heading === 'number') {
             marker.setRotationAngle(drive.heading);
         }
+    } else {
+        // Fall back to Essen if no coordinates are available
+        map.setView(DEFAULT_POS, DEFAULT_ZOOM);
     }
     if (data.path && data.path.length > 1) {
         if (polyline) {
@@ -466,6 +472,8 @@ function startStream() {
                 handleData(data);
             }
         });
+        // Ensure the map shows Essen if no cached data was found
+        map.setView(DEFAULT_POS, DEFAULT_ZOOM);
     };
 }
 
