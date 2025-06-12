@@ -16,11 +16,16 @@ except ImportError:
 load_dotenv()
 app = Flask(__name__)
 
-os.makedirs('data', exist_ok=True)
+# Ensure data paths are relative to this file regardless of the
+# current working directory.  This allows running the application
+# from any location while still finding the trip files and caches.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, 'data')
+os.makedirs(DATA_DIR, exist_ok=True)
 api_logger = logging.getLogger('api_logger')
 if not api_logger.handlers:
-    handler = RotatingFileHandler(os.path.join('data', 'api.log'),
-                                  maxBytes=1_000_000, backupCount=1)
+    handler = RotatingFileHandler(
+        os.path.join(DATA_DIR, 'api.log'), maxBytes=1_000_000, backupCount=1)
     formatter = logging.Formatter('%(asctime)s %(message)s')
     handler.setFormatter(formatter)
     api_logger.addHandler(handler)
@@ -90,7 +95,7 @@ def _merge_data(existing, new):
     return new
 
 
-def _update_api_json(data, filename=os.path.join('data', 'api-liste.json')):
+def _update_api_json(data, filename=os.path.join(DATA_DIR, 'api-liste.json')):
     """Update ``api-liste.json`` while preserving existing keys."""
     try:
         os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -111,7 +116,7 @@ def _update_api_json(data, filename=os.path.join('data', 'api-liste.json')):
         pass
 
 
-def update_api_list(data, filename=os.path.join('data', 'api-liste.txt')):
+def update_api_list(data, filename=os.path.join(DATA_DIR, 'api-liste.txt')):
     """Update ``api-liste.txt`` with key/value pairs in API order."""
     try:
         os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -183,7 +188,7 @@ def log_api_data(endpoint, data):
         pass
 
 
-TRIP_DIR = os.path.join('data', 'trips')
+TRIP_DIR = os.path.join(DATA_DIR, 'trips')
 
 park_start_ms = None
 last_shift_state = None
@@ -232,7 +237,7 @@ def park_duration_string(start_ms):
 def _log_trip_point(ts, lat, lon, filename=None):
     """Append a GPS point to a trip history CSV."""
     if filename is None:
-        filename = os.path.join('data', 'trip_history.csv')
+        filename = os.path.join(DATA_DIR, 'trip_history.csv')
     try:
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, 'a', encoding='utf-8') as f:
@@ -281,7 +286,7 @@ def _log_api_error(exc):
 def _cache_file(vehicle_id):
     """Return filename for cached data of a vehicle."""
     name = vehicle_id if vehicle_id is not None else 'default'
-    return os.path.join('data', f'cache_{name}.json')
+    return os.path.join(DATA_DIR, f'cache_{name}.json')
 
 
 def _load_cached(vehicle_id):
@@ -590,7 +595,7 @@ def get_errors():
 def api_list_file():
     """Return the aggregated API key list as plain text."""
     try:
-        with open(os.path.join('data', 'api-liste.txt'), 'r', encoding='utf-8') as f:
+        with open(os.path.join(DATA_DIR, 'api-liste.txt'), 'r', encoding='utf-8') as f:
             content = f.read()
     except Exception:
         content = ''
@@ -610,7 +615,7 @@ def debug_info():
 
     log_lines = []
     try:
-        with open(os.path.join('data', 'api.log'), 'r', encoding='utf-8') as f:
+        with open(os.path.join(DATA_DIR, 'api.log'), 'r', encoding='utf-8') as f:
             log_lines = f.readlines()[-50:]
     except Exception:
         pass

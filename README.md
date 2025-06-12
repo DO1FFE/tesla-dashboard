@@ -26,6 +26,8 @@ grow to at most 1&nbsp;MB.
 The latest successful API response is also stored in `data/cache_<vehicle_id>.json`
 so the dashboard can display the most recently fetched data if the Tesla API is
 temporarily unavailable.
+All data paths are resolved relative to the application directory, so the server
+can be started from any location while still accessing existing trips and logs.
 
 All required JavaScript and CSS libraries are bundled under `static/` so the dashboard works even without Internet access.
 
