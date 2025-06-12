@@ -160,7 +160,8 @@ function updateUserPresence(present) {
     } else {
         isPresent = !!present;
     }
-    $('#user-presence').text('\uD83D\uDC64');
+    // use text variant of the bust in silhouette emoji so color can be applied
+    $('#user-presence').text('\uD83D\uDC64\uFE0E');
     if (isPresent) {
         $('#user-presence').css('color', '#4caf50').attr('title', 'Person im Fahrzeug');
     } else {
