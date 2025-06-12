@@ -24,11 +24,21 @@
 
 .battery {
   width: 20px;
-  height: 60px;
+  height: 72px;
   border: 1px solid #999;
   display: inline-block;
   margin-right: 5px;
   position: relative;
+}
+
+.battery-block {
+  display: inline-block;
+  text-align: center;
+}
+
+.battery-value {
+  font-size: 0.9em;
+  margin-top: 2px;
 }
 
 .battery .level {
@@ -103,6 +113,7 @@
   text-align: center;
   font-weight: bold;
 }
+
 
 #battery-indicator .range {
   font-size: 0.9em;
