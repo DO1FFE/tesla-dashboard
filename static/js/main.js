@@ -82,6 +82,7 @@ function handleData(data) {
     var climate = data.climate_state || {};
     updateThermometers(climate.inside_temp, climate.outside_temp);
     updateClimateStatus(climate.is_climate_on);
+    updateClimateMode(climate.climate_keeper_mode);
     updateFanStatus(climate.fan_status);
     updateDesiredTemp(climate.driver_temp_setting);
     var lat = drive.latitude;
@@ -199,6 +200,27 @@ function updateFanStatus(speed) {
     }
     var val = Math.max(0, Math.min(11, Number(speed)));
     $('#fan-status').text('\uD83C\uDF00 ' + val).attr('title', 'L\u00FCfterstufe ' + val);
+}
+
+function updateClimateMode(mode) {
+    var $el = $('#climate-mode');
+    if (!mode || mode === 'off') {
+        $el.text('').attr('title', '').hide();
+        return;
+    }
+    var icon = '';
+    var title = '';
+    if (mode === 'dog') {
+        icon = '\uD83D\uDC36';
+        title = 'Hundemodus';
+    } else if (mode === 'camp') {
+        icon = '\u26FA';
+        title = 'Camp-Modus';
+    } else {
+        $el.text('').attr('title', '').hide();
+        return;
+    }
+    $el.text(icon).attr('title', title).show();
 }
 
 function updateDesiredTemp(temp) {
