@@ -173,8 +173,8 @@ function updateThermometers(inside, outside) {
         } else if (temp < 30) {
             color = '#ff9800';
         }
-        $('#' + prefix + '-level').attr('y', y).attr('height', h).attr('fill', color);
-        $('#' + prefix + '-bulb').attr('fill', color);
+        $('#' + prefix + '-level').attr('y', y).attr('height', h).css('fill', color);
+        $('#' + prefix + '-bulb').css('fill', color);
         var label = isNaN(temp) ? '? °C' : temp.toFixed(1) + ' °C';
         $('#' + prefix + '-temp-value').text((prefix === 'inside' ? 'Innen: ' : 'Außen: ') + label);
     }
