@@ -54,20 +54,64 @@ def _collect_keys(data, prefix='', keys=None):
     return keys
 
 
+def _collect_key_values(data, prefix='', result=None):
+    """Recursively gather key/value pairs in the order provided by the API."""
+    if result is None:
+        result = []
+    if isinstance(data, dict):
+        for k, v in data.items():
+            key = f"{prefix}.{k}" if prefix else k
+            _collect_key_values(v, key, result)
+    elif isinstance(data, list):
+        for i, item in enumerate(data):
+            key = f"{prefix}[{i}]"
+            _collect_key_values(item, key, result)
+    else:
+        result.append((prefix, data))
+    return result
+
+
 def update_api_list(data, filename=os.path.join('data', 'api-liste.txt')):
-    """Update the list of known API variables with entries from *data*."""
+    """Update ``api-liste.txt`` with key/value pairs in API order."""
     try:
         os.makedirs(os.path.dirname(filename), exist_ok=True)
-        existing = set()
+
+        existing_lines = []
+        existing_map = {}
         if os.path.exists(filename):
             with open(filename, 'r', encoding='utf-8') as f:
-                existing = {line.strip() for line in f if line.strip()}
-        keys = _collect_keys(data)
-        merged = existing | keys
-        if merged != existing:
+                for idx, line in enumerate(f):
+                    line = line.rstrip('\n')
+                    if ': ' in line:
+                        k, v = line.split(': ', 1)
+                    else:
+                        k, v = line, ''
+                    existing_lines.append((k, v))
+                    if k not in existing_map:
+                        existing_map[k] = idx
+
+        kv = _collect_key_values(data)
+        new_lines = []
+        seen = set()
+        for k, v in kv:
+            seen.add(k)
+            value = json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v
+            new_lines.append((k, value))
+
+        for k, v in existing_lines:
+            if k not in seen:
+                new_lines.append((k, v))
+
+        content = '\n'.join(f"{k}: {v}" for k, v in new_lines) + '\n'
+
+        current = ''
+        if os.path.exists(filename):
+            with open(filename, 'r', encoding='utf-8') as f:
+                current = f.read()
+
+        if content != current:
             with open(filename, 'w', encoding='utf-8') as f:
-                for key in sorted(merged):
-                    f.write(f"{key}\n")
+                f.write(content)
     except Exception:
         pass
 
