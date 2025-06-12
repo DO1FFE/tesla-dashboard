@@ -123,8 +123,12 @@
   vertical-align: top;
 }
 
-#climate-indicator div {
+#climate-indicator > div {
   font-size: 34px;
+}
+
+#fan-status,
+#desired-temp {
   display: block;
 }
 
