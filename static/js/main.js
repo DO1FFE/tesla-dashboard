@@ -72,6 +72,8 @@ function handleData(data) {
     updateUI(data);
     updateModules(data);
     var drive = data.drive_state || {};
+    var vehicle = data.vehicle_state || {};
+    updateLockStatus(vehicle.locked);
     updateGearShift(drive.shift_state);
     updateSpeedometer(drive.speed, drive.power);
     var lat = drive.latitude;
@@ -121,6 +123,18 @@ function updateGearShift(state) {
     var gear = state || 'P';
     $('#gear-shift div').removeClass('active');
     $('#gear-shift div[data-gear="' + gear + '"]').addClass('active');
+}
+
+function updateLockStatus(locked) {
+    if (locked == null) {
+        $('#lock-status').text('');
+        return;
+    }
+    if (locked) {
+        $('#lock-status').text('\uD83D\uDD12').attr('title', 'Verriegelt');
+    } else {
+        $('#lock-status').text('\uD83D\uDD13').attr('title', 'Offen');
+    }
 }
 
 var MAX_SPEED = 240;
