@@ -165,7 +165,16 @@ function updateThermometers(inside, outside) {
         var clamped = Math.max(MIN_TEMP, Math.min(MAX_TEMP, temp));
         var h = (clamped - MIN_TEMP) / range * 40;
         var y = 5 + 40 - h;
-        $('#' + prefix + '-level').attr('y', y).attr('height', h);
+        var color = '#d00';
+        if (temp < 15) {
+            color = '#06c';
+        } else if (temp < 25) {
+            color = '#4caf50';
+        } else if (temp < 30) {
+            color = '#ff9800';
+        }
+        $('#' + prefix + '-level').attr('y', y).attr('height', h).attr('fill', color);
+        $('#' + prefix + '-bulb').attr('fill', color);
         var label = isNaN(temp) ? '? °C' : temp.toFixed(1) + ' °C';
         $('#' + prefix + '-temp-value').text((prefix === 'inside' ? 'Innen: ' : 'Außen: ') + label);
     }
