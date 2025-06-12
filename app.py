@@ -585,8 +585,21 @@ def api_vehicles():
 
 
 @app.route('/error')
-def get_errors():
-    """Return collected API errors."""
+def error_page():
+    """Display collected API errors."""
+    with api_errors_lock:
+        errors = list(api_errors)
+    for e in errors:
+        try:
+            e['time_str'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(e['timestamp']))
+        except Exception:
+            e['time_str'] = str(e['timestamp'])
+    return render_template('errors.html', errors=errors)
+
+
+@app.route('/api/errors')
+def api_errors_route():
+    """Return collected API errors as JSON."""
     with api_errors_lock:
         return jsonify(list(api_errors))
 
@@ -620,11 +633,8 @@ def debug_info():
     except Exception:
         pass
 
-    with api_errors_lock:
-        errors = list(api_errors)
-
     return render_template('debug.html', env_info=env_info, log_lines=log_lines,
-                          errors=errors, latest=latest_data)
+                          latest=latest_data)
 
 
 if __name__ == '__main__':

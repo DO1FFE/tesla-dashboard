@@ -20,8 +20,6 @@
     </ul>
     <h2>Latest fetched data</h2>
     <pre>{{ latest|tojson(indent=2) }}</pre>
-    <h2>API errors</h2>
-    <pre>{{ errors|tojson(indent=2) }}</pre>
     <h2>Last log entries (api.log)</h2>
     <pre>{{ log_lines|join('') }}</pre>
 </body>
