@@ -135,78 +135,14 @@ function getStatus(data) {
     return 'Geparkt';
 }
 
-var DESCRIPTIONS = {
-    // Wichtige Felder mit fest hinterlegter Übersetzung
-    'battery_level': 'Akkustand (%)',
-    'battery_range': 'Reichweite (km)',
-    'est_battery_range': 'Restreichweite (km)',
-    'odometer': 'Kilometerstand (km)',
-    'outside_temp': 'Außen­temperatur (°C)',
-    'inside_temp': 'Innenraum­temperatur (°C)',
-    'speed': 'Geschwindigkeit (km/h)',
-    'heading': 'Richtung (°)',
-    'charge_rate': 'Laderate (km/h)',
-    'charger_power': 'Ladeleistung (kW)',
-    'time_to_full_charge': 'Zeit bis voll (h)',
-    'tpms_pressure_fl': 'Reifen vorne links (bar)',
-    'tpms_pressure_fr': 'Reifen vorne rechts (bar)',
-    'tpms_pressure_rl': 'Reifen hinten links (bar)',
-    'tpms_pressure_rr': 'Reifen hinten rechts (bar)',
-    'power': 'Verbrauch (kW)',
-    'aux_battery_power': '12V-Verbrauch (W)',
-    'charge_state': 'Ladezustand',
-    'climate_state': 'Klimazustand',
-    'drive_state': 'Fahrstatus',
-    'gui_settings': 'GUI‑Einstellungen',
-    'vehicle_config': 'Fahrzeugkonfiguration',
-    'vehicle_state': 'Fahrzeugstatus',
-    'media_info': 'Medieninfos',
-    'media_state': 'Medienstatus',
-    'distance_to_arrival': 'Entfernung zum Ziel (km)'
-};
-
-var WORD_MAP = {
-    'battery': 'Batterie',
-    'heater': 'Heizung',
-    'on': 'an',
-    'off': 'aus',
-    'range': 'Reichweite',
-    'level': 'Stand',
-    'charge': 'Laden',
-    'power': 'Leistung',
-    'voltage': 'Spannung',
-    'current': 'Strom',
-    'temperature': 'Temperatur',
-    'speed': 'Geschwindigkeit',
-    'odometer': 'Kilometerzähler',
-    'pressure': 'Druck',
-    'front': 'vorn',
-    'rear': 'hinten',
-    'left': 'links',
-    'right': 'rechts',
-    'fl': 'vorne links',
-    'fr': 'vorne rechts',
-    'rl': 'hinten links',
-    'rr': 'hinten rechts',
-    'vehicle': 'Fahrzeug',
-    'state': 'Status',
-    'mode': 'Modus',
-    'sun': 'Sonnen',
-    'roof': 'Dach',
-    'update': 'Update',
-    'webcam': 'Webcam'
-};
-
 function describe(key) {
-    if (DESCRIPTIONS[key]) {
-        return DESCRIPTIONS[key];
-    }
-    var words = key.split('_');
+    var words = key.split("_");
     var result = words.map(function(w) {
-        return WORD_MAP[w] || w;
-    }).join(' ');
-    return result.charAt(0).toUpperCase() + result.slice(1);
+        return w.charAt(0).toUpperCase() + w.slice(1);
+    }).join(" ");
+    return result;
 }
+
 
 
 function generateTable(obj) {
