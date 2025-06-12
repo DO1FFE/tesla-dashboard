@@ -73,6 +73,7 @@ function handleData(data) {
     updateModules(data);
     var drive = data.drive_state || {};
     updateGearShift(drive.shift_state);
+    updateSpeedometer(drive.speed, drive.power);
     var lat = drive.latitude;
     var lng = drive.longitude;
     if (lat && lng) {
@@ -120,6 +121,22 @@ function updateGearShift(state) {
     var gear = state || 'P';
     $('#gear-shift div').removeClass('active');
     $('#gear-shift div[data-gear="' + gear + '"]').addClass('active');
+}
+
+var MAX_SPEED = 240;
+
+function updateSpeedometer(speed, power) {
+    if (speed == null) speed = 0;
+    if (power == null) power = 0;
+    var kmh = Math.round(speed * MILES_TO_KM);
+    var angle = (Math.min(Math.max(kmh, 0), MAX_SPEED) / MAX_SPEED) * 180 - 90;
+    $('#speedometer-needle').attr('transform', 'rotate(' + angle + ' 60 50)');
+    $('#speed-value').text(kmh + ' km/h');
+    var text = Math.round(power) + ' kW';
+    if (power < 0) {
+        text += ' (Rekuperation)';
+    }
+    $('#power-value').text(text);
 }
 
 function batteryBar(level) {

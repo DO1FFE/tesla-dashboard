@@ -76,3 +76,21 @@
   background: #4caf50;
   color: white;
 }
+
+/* Simple speedometer next to the gear shift */
+#speedometer {
+  display: inline-block;
+  margin-left: 20px;
+  vertical-align: top;
+  text-align: center;
+  font-weight: bold;
+}
+
+#speedometer svg {
+  display: block;
+}
+
+#speedometer .power {
+  font-size: 0.9em;
+  margin-top: 2px;
+}

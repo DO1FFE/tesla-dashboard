@@ -20,6 +20,14 @@
         <div data-gear="N">N</div>
         <div data-gear="D">D</div>
     </div>
+    <div id="speedometer">
+        <svg width="120" height="60" viewBox="0 0 120 60">
+            <path d="M10,50 A50,50 0 0,1 110,50" stroke="#ccc" stroke-width="8" fill="none"/>
+            <line id="speedometer-needle" x1="60" y1="50" x2="60" y2="15" stroke="#d00" stroke-width="3" transform="rotate(-90 60 50)" />
+        </svg>
+        <div id="speed-value">0 km/h</div>
+        <div id="power-value" class="power">0 kW</div>
+    </div>
     <div id="info"></div>
 
     <div id="modules">
