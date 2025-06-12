@@ -183,9 +183,12 @@ def log_api_data(endpoint, data):
         pass
 
 
+TRIP_DIR = os.path.join('data', 'trips')
+
 park_start_ms = None
 last_shift_state = None
 trip_path = []
+current_trip_file = None
 latest_data = {}
 subscribers = {}
 threads = {}
@@ -226,11 +229,13 @@ def park_duration_string(start_ms):
     return ' '.join(parts)
 
 
-def _log_trip_point(ts, lat, lon):
-    """Append a GPS point to the trip history CSV."""
+def _log_trip_point(ts, lat, lon, filename=None):
+    """Append a GPS point to a trip history CSV."""
+    if filename is None:
+        filename = os.path.join('data', 'trip_history.csv')
     try:
-        os.makedirs('data', exist_ok=True)
-        with open(os.path.join('data', 'trip_history.csv'), 'a', encoding='utf-8') as f:
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(filename, 'a', encoding='utf-8') as f:
             f.write(f"{ts},{lat},{lon}\n")
     except Exception:
         pass
@@ -238,7 +243,7 @@ def _log_trip_point(ts, lat, lon):
 
 def track_drive_path(vehicle_data):
     """Maintain the current trip path and log points when driving."""
-    global trip_path
+    global trip_path, current_trip_file
     drive = vehicle_data.get('drive_state', {}) if isinstance(vehicle_data, dict) else {}
     shift = drive.get('shift_state')
     lat = drive.get('latitude')
@@ -248,13 +253,19 @@ def track_drive_path(vehicle_data):
         ts = int(ts * 1000)
     if shift in (None, 'P'):
         trip_path = []
+        current_trip_file = None
         return
     if lat is not None and lon is not None:
+        if current_trip_file is None:
+            if ts is None:
+                ts = int(time.time() * 1000)
+            timestr = time.strftime('%Y%m%d_%H%M%S', time.localtime(ts / 1000))
+            current_trip_file = os.path.join(TRIP_DIR, f'trip_{timestr}.csv')
         point = [lat, lon]
         if not trip_path or trip_path[-1] != point:
             trip_path.append(point)
             if ts is not None:
-                _log_trip_point(ts, lat, lon)
+                _log_trip_point(ts, lat, lon, current_trip_file)
 
 
 def _log_api_error(exc):
@@ -291,25 +302,26 @@ def _save_cached(vehicle_id, data):
         pass
 
 
-def _load_last_trip(filename=os.path.join('data', 'trip_history.csv'), idle_ms=600000):
-    """Return coordinates of the most recent trip from the history CSV."""
+def _get_trip_files(directory=TRIP_DIR):
+    """Return a list of available trip CSV files sorted chronologically."""
+    try:
+        os.makedirs(directory, exist_ok=True)
+        files = [f for f in os.listdir(directory) if f.endswith('.csv')]
+        files.sort()
+        return files
+    except Exception:
+        return []
+
+
+def _load_trip(filename):
+    """Load all coordinates from a trip history CSV."""
     try:
         with open(filename, 'r', encoding='utf-8') as f:
             rows = [line.strip().split(',') for line in f if line.strip()]
-            rows = [(int(t), float(lat), float(lon)) for t, lat, lon in rows]
+            rows = [(float(lat), float(lon)) for _t, lat, lon in rows]
+        return [[lat, lon] for lat, lon in rows]
     except Exception:
         return []
-    if not rows:
-        return []
-
-    path = [[rows[-1][1], rows[-1][2]]]
-    prev = rows[-1][0]
-    for ts, lat, lon in reversed(rows[:-1]):
-        if prev - ts > idle_ms:
-            break
-        path.insert(0, [lat, lon])
-        prev = ts
-    return path
 
 
 def _bearing(p1, p2):
@@ -477,12 +489,17 @@ def map_only():
 
 @app.route('/history')
 def trip_history():
-    """Show the last recorded trip on a map."""
-    path = _load_last_trip()
+    """Show recorded trips and allow selecting a trip to display."""
+    files = _get_trip_files()
+    selected = request.args.get('file')
+    if selected not in files and files:
+        selected = files[-1]
+    path = _load_trip(os.path.join(TRIP_DIR, selected)) if selected else []
     heading = 0.0
     if len(path) >= 2:
         heading = _bearing(path[-2], path[-1])
-    return render_template('history.html', path=path, heading=heading)
+    return render_template('history.html', path=path, heading=heading,
+                           files=files, selected=selected)
 
 
 @app.route('/daten')
