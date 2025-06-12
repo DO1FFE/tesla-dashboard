@@ -187,14 +187,15 @@ function updateThermometers(inside, outside) {
 function updateBatteryIndicator(level, rangeMiles) {
     var pct = level != null ? level : 0;
     var range = rangeMiles != null ? Math.round(rangeMiles * MILES_TO_KM) : '?';
-    var html = '<div class="battery"><div class="level" style="height:' + pct + '%;"></div></div> ' + pct + '%';
+    var html = '<div class="battery"><div class="level" style="height:' + pct + '%;"></div></div>';
+    html += '<div class="battery-value">' + pct + '%</div>';
     html += '<div class="range">' + range + ' km</div>';
     $('#battery-indicator').html(html);
 }
 
 function batteryBar(level) {
     var pct = level != null ? level : 0;
-    return '<div class="battery"><div class="level" style="height:' + pct + '%;"></div></div> ' + pct + '%';
+    return '<div class="battery-block"><div class="battery"><div class="level" style="height:' + pct + '%;"></div></div><div class="battery-value">' + pct + '%</div></div>';
 }
 
 function getStatus(data) {
