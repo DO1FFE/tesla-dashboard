@@ -2,7 +2,9 @@ var currentVehicle = null;
 var MILES_TO_KM = 1.60934;
 var parkStart = null;
 var parkTimer = null;
-var map = L.map('map').setView([0, 0], 13);
+// Initialize the map roughly centered on Essen with a high zoom until
+// coordinates from the API are received.
+var map = L.map('map').setView([51.4556, 7.0116], 19);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
 }).addTo(map);
