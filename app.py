@@ -37,6 +37,41 @@ if not api_logger.handlers:
         pass
 
 
+# Tools to build an aggregated list of API keys ------------------------------
+
+def _collect_keys(data, prefix='', keys=None):
+    """Recursively gather dotted key names from the given data."""
+    if keys is None:
+        keys = set()
+    if isinstance(data, dict):
+        for k, v in data.items():
+            key = f"{prefix}.{k}" if prefix else k
+            keys.add(key)
+            _collect_keys(v, key, keys)
+    elif isinstance(data, list):
+        for item in data:
+            _collect_keys(item, prefix, keys)
+    return keys
+
+
+def update_api_list(data, filename=os.path.join('data', 'api-liste.txt')):
+    """Update the list of known API variables with entries from *data*."""
+    try:
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        existing = set()
+        if os.path.exists(filename):
+            with open(filename, 'r', encoding='utf-8') as f:
+                existing = {line.strip() for line in f if line.strip()}
+        keys = _collect_keys(data)
+        merged = existing | keys
+        if merged != existing:
+            with open(filename, 'w', encoding='utf-8') as f:
+                for key in sorted(merged):
+                    f.write(f"{key}\n")
+    except Exception:
+        pass
+
+
 # Communication with the Tesla API is logged via ``log_api_data`` and the
 # ``teslapy``/``urllib3`` loggers. Requests to this web application are no longer
 # recorded in ``api.log``.
@@ -46,6 +81,7 @@ def log_api_data(endpoint, data):
     """Write API communication to the rotating log file."""
     try:
         api_logger.info(json.dumps({'endpoint': endpoint, 'data': data}))
+        update_api_list(data)
     except Exception:
         pass
 
@@ -420,6 +456,17 @@ def get_errors():
     """Return collected API errors."""
     with api_errors_lock:
         return jsonify(list(api_errors))
+
+
+@app.route('/apiliste')
+def api_list_file():
+    """Return the aggregated API key list as plain text."""
+    try:
+        with open(os.path.join('data', 'api-liste.txt'), 'r', encoding='utf-8') as f:
+            content = f.read()
+    except Exception:
+        content = ''
+    return Response(content, mimetype='text/plain')
 
 
 @app.route('/debug')
