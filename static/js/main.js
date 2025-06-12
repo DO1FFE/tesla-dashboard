@@ -83,6 +83,7 @@ function handleData(data) {
     updateThermometers(climate.inside_temp, climate.outside_temp);
     updateClimateStatus(climate.is_climate_on);
     updateFanStatus(climate.fan_status);
+    updateDesiredTemp(climate.driver_temp_setting);
     var lat = drive.latitude;
     var lng = drive.longitude;
     if (lat && lng) {
@@ -198,6 +199,15 @@ function updateFanStatus(speed) {
     }
     var val = Math.max(0, Math.min(11, Number(speed)));
     $('#fan-status').text('\uD83C\uDF00 ' + val).attr('title', 'L\u00FCfterstufe ' + val);
+}
+
+function updateDesiredTemp(temp) {
+    if (temp == null || isNaN(temp)) {
+        $('#desired-temp').text('🌡️ -- °C').attr('title', 'Wunschtemperatur');
+        return;
+    }
+    $('#desired-temp').text('\uD83C\uDF21\uFE0F ' + temp.toFixed(1) + ' \u00B0C')
+        .attr('title', 'Wunschtemperatur');
 }
 
 var MAX_SPEED = 240;
