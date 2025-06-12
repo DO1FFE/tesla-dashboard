@@ -46,7 +46,6 @@ function fetchVehicles() {
         var $label = $('label[for="vehicle-select"]');
         $select.empty();
         if (!vehicles.length) {
-            $('#errors').text(resp.error || 'Keine Fahrzeuge gefunden. Bitte Tesla-Zugangsdaten pr\xC3\xBCfen.');
             return;
         }
         vehicles.forEach(function(v) {
@@ -464,7 +463,6 @@ $('#vehicle-select').on('change', function() {
 
 function startStream() {
     if (!currentVehicle) {
-        $('#errors').text('Kein Fahrzeug ausgew\xC3\xA4hlt.');
         return;
     }
     if (eventSource) {
@@ -473,14 +471,11 @@ function startStream() {
     eventSource = new EventSource('/stream/' + currentVehicle);
     eventSource.onmessage = function(e) {
         var data = JSON.parse(e.data);
-        if (data.error) {
-            $('#errors').text(data.error);
-        } else {
+        if (!data.error) {
             handleData(data);
         }
     };
     eventSource.onerror = function() {
-        $('#errors').text('Live-Daten konnten nicht geladen werden. Lade Cache.');
         if (eventSource) {
             eventSource.close();
         }
@@ -498,22 +493,4 @@ function startStream() {
     };
 }
 
-function fetchErrors() {
-    $.getJSON('/error', function(errs) {
-        if (!errs.length) {
-            $('#errors').text('');
-            return;
-        }
-        var html = '<h3>Fehler</h3><ul>';
-        errs.forEach(function(e) {
-            var d = new Date(e.timestamp * 1000);
-            html += '<li>' + d.toLocaleString() + ': ' + e.message + '</li>';
-        });
-        html += '</ul>';
-        $('#errors').html(html);
-    });
-}
-
 fetchVehicles();
-fetchErrors();
-setInterval(fetchErrors, 10000);

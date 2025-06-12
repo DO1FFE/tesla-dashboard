@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <title>API Fehler</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+    </style>
+</head>
+<body>
+    <h1>API Fehler</h1>
+    {% if errors %}
+    <ul>
+        {% for e in errors %}
+        <li>{{ e.time_str }}: {{ e.message }}</li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p>Keine Fehler gespeichert.</p>
+    {% endif %}
+</body>
+</html>
