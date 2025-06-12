@@ -14,41 +14,43 @@
     <label for="vehicle-select">Fahrzeug auswählen:</label>
     <select id="vehicle-select"></select>
     <div id="map" style="height: 400px; margin-top: 10px;"></div>
-    <div id="lock-container">
-        <div id="lock-status" title="Verriegelt">🔒</div>
-        <div id="user-presence" title="Niemand im Fahrzeug">👤&#xFE0E;</div>
-    </div>
-    <div id="gear-shift">
-        <div data-gear="P">P</div>
-        <div data-gear="R">R</div>
-        <div data-gear="N">N</div>
-        <div data-gear="D">D</div>
-    </div>
-    <div id="battery-indicator"></div>
-    <div id="speedometer">
-        <svg width="120" height="60" viewBox="0 0 120 60">
-            <path d="M10,50 A50,50 0 0,1 110,50" stroke="#ccc" stroke-width="8" fill="none"/>
-            <line id="speedometer-needle" x1="60" y1="50" x2="60" y2="15" stroke="#d00" stroke-width="3" transform="rotate(-90 60 50)" />
-        </svg>
-        <div id="speed-value">0 km/h</div>
-        <div id="power-value" class="power">0 kW</div>
-    </div>
-    <div id="thermometers">
-        <div class="thermometer">
-            <svg width="30" height="60" viewBox="0 0 30 60">
-                <rect x="13" y="5" width="4" height="40" class="tube" />
-                <rect id="inside-level" x="13" y="45" width="4" height="0" class="level" />
-                <circle id="inside-bulb" cx="15" cy="50" r="7" class="bulb" />
+    <div id="status-bar">
+        <div id="lock-container">
+            <div id="lock-status" title="Verriegelt">🔒</div>
+            <div id="user-presence" title="Niemand im Fahrzeug">👤&#xFE0E;</div>
+        </div>
+        <div id="gear-shift">
+            <div data-gear="P">P</div>
+            <div data-gear="R">R</div>
+            <div data-gear="N">N</div>
+            <div data-gear="D">D</div>
+        </div>
+        <div id="battery-indicator"></div>
+        <div id="speedometer">
+            <svg width="120" height="60" viewBox="0 0 120 60">
+                <path d="M10,50 A50,50 0 0,1 110,50" stroke="#ccc" stroke-width="8" fill="none"/>
+                <line id="speedometer-needle" x1="60" y1="50" x2="60" y2="15" stroke="#d00" stroke-width="3" transform="rotate(-90 60 50)" />
+            </svg>
+            <div id="speed-value">0 km/h</div>
+            <div id="power-value" class="power">0 kW</div>
+        </div>
+        <div id="thermometers">
+            <div class="thermometer">
+                <svg width="30" height="60" viewBox="0 0 30 60">
+                    <rect x="13" y="5" width="4" height="40" class="tube" />
+                    <rect id="inside-level" x="13" y="45" width="4" height="0" class="level" />
+                    <circle id="inside-bulb" cx="15" cy="50" r="7" class="bulb" />
             </svg>
             <div id="inside-temp-value" class="label">Innen: -- °C</div>
         </div>
         <div class="thermometer">
-            <svg width="30" height="60" viewBox="0 0 30 60">
-                <rect x="13" y="5" width="4" height="40" class="tube" />
-                <rect id="outside-level" x="13" y="45" width="4" height="0" class="level" />
-                <circle id="outside-bulb" cx="15" cy="50" r="7" class="bulb" />
-            </svg>
-            <div id="outside-temp-value" class="label">Außen: -- °C</div>
+                <svg width="30" height="60" viewBox="0 0 30 60">
+                    <rect x="13" y="5" width="4" height="40" class="tube" />
+                    <rect id="outside-level" x="13" y="45" width="4" height="0" class="level" />
+                    <circle id="outside-bulb" cx="15" cy="50" r="7" class="bulb" />
+                </svg>
+                <div id="outside-temp-value" class="label">Außen: -- °C</div>
+            </div>
         </div>
     </div>
     <div id="info"></div>
