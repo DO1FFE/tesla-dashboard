@@ -76,6 +76,8 @@ function handleData(data) {
     updateLockStatus(vehicle.locked);
     updateGearShift(drive.shift_state);
     updateSpeedometer(drive.speed, drive.power);
+    var charge = data.charge_state || {};
+    updateBatteryIndicator(charge.battery_level, charge.battery_range);
     var climate = data.climate_state || {};
     updateThermometers(climate.inside_temp, climate.outside_temp);
     var lat = drive.latitude;
@@ -180,6 +182,20 @@ function updateThermometers(inside, outside) {
     }
     set('inside', inside);
     set('outside', outside);
+}
+
+function updateBatteryIndicator(level, rangeMiles) {
+    var pct = level != null ? level : 0;
+    var color = '#4caf50';
+    if (pct < 20) {
+        color = '#f44336';
+    } else if (pct < 50) {
+        color = '#ffc107';
+    }
+    var range = rangeMiles != null ? Math.round(rangeMiles * MILES_TO_KM) : '?';
+    var html = '<div class="battery"><div class="level" style="width:' + pct + '%; background:' + color + '"></div></div> ' + pct + '%';
+    html += '<div class="range">' + range + ' km</div>';
+    $('#battery-indicator').html(html);
 }
 
 function batteryBar(level) {
