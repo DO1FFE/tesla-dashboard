@@ -77,7 +77,7 @@ function handleData(data) {
     updateGearShift(drive.shift_state);
     updateSpeedometer(drive.speed, drive.power);
     var charge = data.charge_state || {};
-    updateBatteryIndicator(charge.battery_level, charge.battery_range);
+    updateBatteryIndicator(charge.battery_level, charge.est_battery_range);
     var climate = data.climate_state || {};
     updateThermometers(climate.inside_temp, climate.outside_temp);
     var lat = drive.latitude;
@@ -290,7 +290,7 @@ function categorizedData(data, status) {
 
     if (status === 'Ladevorgang') {
         add('Batterie und Laden', 'battery_level', charge.battery_level);
-        add('Batterie und Laden', 'battery_range', charge.battery_range != null ? (charge.battery_range * MILES_TO_KM).toFixed(1) : null);
+        add('Batterie und Laden', 'battery_range', charge.est_battery_range != null ? (charge.est_battery_range * MILES_TO_KM).toFixed(1) : null);
         add('Batterie und Laden', 'charge_rate', charge.charge_rate != null ? (charge.charge_rate * MILES_TO_KM).toFixed(1) : null);
         add('Batterie und Laden', 'charger_power', charge.charger_power);
         add('Batterie und Laden', 'time_to_full_charge', charge.time_to_full_charge);
@@ -310,7 +310,7 @@ function categorizedData(data, status) {
         if (vehicle.speed_limit_mode && vehicle.speed_limit_mode.active != null) add('Fahrzeugstatus', 'speed_limit_mode', { active: vehicle.speed_limit_mode.active });
     } else if (status === 'Fahrt') {
         add('Batterie und Laden', 'battery_level', charge.battery_level);
-        add('Batterie und Laden', 'battery_range', charge.battery_range != null ? (charge.battery_range * MILES_TO_KM).toFixed(1) : null);
+        add('Batterie und Laden', 'battery_range', charge.est_battery_range != null ? (charge.est_battery_range * MILES_TO_KM).toFixed(1) : null);
 
         add('Fahrstatus', 'shift_state', drive.shift_state);
         add('Fahrstatus', 'speed', drive.speed != null ? Math.round(drive.speed * MILES_TO_KM) : null);
@@ -325,7 +325,7 @@ function categorizedData(data, status) {
         add('Fahrzeugstatus', 'remote_start_enabled', vehicle.remote_start_enabled);
     } else { // Geparkt
         add('Batterie und Laden', 'battery_level', charge.battery_level);
-        add('Batterie und Laden', 'battery_range', charge.battery_range != null ? (charge.battery_range * MILES_TO_KM).toFixed(1) : null);
+        add('Batterie und Laden', 'battery_range', charge.est_battery_range != null ? (charge.est_battery_range * MILES_TO_KM).toFixed(1) : null);
 
         add('Klimaanlage', 'inside_temp', climate.inside_temp);
         add('Klimaanlage', 'outside_temp', climate.outside_temp);
@@ -386,7 +386,7 @@ function simpleData(data, status) {
 
     if (status === 'Ladevorgang') {
         if (charge.battery_level != null) result.battery_level = charge.battery_level;
-        if (charge.battery_range != null) result.battery_range = (charge.battery_range * MILES_TO_KM).toFixed(1);
+        if (charge.est_battery_range != null) result.battery_range = (charge.est_battery_range * MILES_TO_KM).toFixed(1);
         if (charge.charge_rate != null) result.charge_rate = (charge.charge_rate * MILES_TO_KM).toFixed(1);
         if (charge.charger_power != null) result.charger_power = charge.charger_power;
         if (charge.time_to_full_charge != null) result.time_to_full_charge = charge.time_to_full_charge;
@@ -395,11 +395,11 @@ function simpleData(data, status) {
         if (drive.heading != null) result.heading = drive.heading;
         if (drive.active_route_miles_to_arrival != null) result.distance_to_arrival = (drive.active_route_miles_to_arrival * MILES_TO_KM).toFixed(1);
         if (charge.battery_level != null) result.battery_level = charge.battery_level;
-        if (charge.battery_range != null) result.battery_range = (charge.battery_range * MILES_TO_KM).toFixed(1);
+        if (charge.est_battery_range != null) result.battery_range = (charge.est_battery_range * MILES_TO_KM).toFixed(1);
         if (climate.outside_temp != null) result.outside_temp = climate.outside_temp;
     } else {
         if (charge.battery_level != null) result.battery_level = charge.battery_level;
-        if (charge.battery_range != null) result.battery_range = (charge.battery_range * MILES_TO_KM).toFixed(1);
+        if (charge.est_battery_range != null) result.battery_range = (charge.est_battery_range * MILES_TO_KM).toFixed(1);
         if (vehicle.odometer != null) result.odometer = Math.round(vehicle.odometer * MILES_TO_KM);
         if (vehicle.tpms_pressure_fl != null) result.tpms_pressure_fl = vehicle.tpms_pressure_fl;
         if (vehicle.tpms_pressure_fr != null) result.tpms_pressure_fr = vehicle.tpms_pressure_fr;
