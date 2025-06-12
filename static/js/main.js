@@ -73,6 +73,7 @@ function handleData(data) {
     var drive = data.drive_state || {};
     var vehicle = data.vehicle_state || {};
     updateLockStatus(vehicle.locked);
+    updateUserPresence(vehicle.is_user_present);
     updateGearShift(drive.shift_state);
     updateSpeedometer(drive.speed, drive.power);
     var charge = data.charge_state || {};
@@ -144,6 +145,26 @@ function updateLockStatus(locked) {
         $('#lock-status').text('\uD83D\uDD12').attr('title', 'Verriegelt');
     } else {
         $('#lock-status').text('\uD83D\uDD13').attr('title', 'Offen');
+    }
+}
+
+function updateUserPresence(present) {
+    if (present == null) {
+        $('#user-presence').text('');
+        return;
+    }
+    var isPresent = false;
+    if (typeof present === 'string') {
+        var norm = present.toLowerCase();
+        isPresent = norm === 'true' || norm === '1';
+    } else {
+        isPresent = !!present;
+    }
+    $('#user-presence').text('\uD83D\uDC64');
+    if (isPresent) {
+        $('#user-presence').css('color', '#4caf50').attr('title', 'Person im Fahrzeug');
+    } else {
+        $('#user-presence').css('color', '#d00').attr('title', 'Keine Person im Fahrzeug');
     }
 }
 
