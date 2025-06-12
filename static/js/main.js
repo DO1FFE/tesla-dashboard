@@ -426,6 +426,8 @@ function updateModules(data) {
     };
     $('#module-battery').html('<h3>Batterie</h3>' + generateTable(battery));
 
+    $('#module-charge').html('<h3>Laden</h3>' + generateTable(charge));
+
     var vehicle = data.vehicle_state || {};
     var tires = {
         tpms_pressure_fl: vehicle.tpms_pressure_fl,
