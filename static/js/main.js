@@ -194,7 +194,7 @@ function updateBatteryIndicator(level, rangeMiles) {
 
 function batteryBar(level) {
     var pct = level != null ? level : 0;
-    return '<div class="battery"><div class="level" style="height:' + pct + '%;'></div></div> ' + pct + '%';
+    return '<div class="battery"><div class="level" style="height:' + pct + '%;"></div></div> ' + pct + '%';
 }
 
 function getStatus(data) {
