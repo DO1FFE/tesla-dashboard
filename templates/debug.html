@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Debug Info</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        pre { background:#f0f0f0; padding:10px; overflow-x:auto; }
+    </style>
+</head>
+<body>
+    <h1>Debug Information</h1>
+    <h2>Environment</h2>
+    <ul>
+        <li>teslapy available: {{ env_info.teslapy_available }}</li>
+        <li>TESLA_EMAIL provided: {{ env_info.has_email }}</li>
+        <li>TESLA_PASSWORD provided: {{ env_info.has_password }}</li>
+        <li>TESLA_ACCESS_TOKEN provided: {{ env_info.has_access_token }}</li>
+        <li>TESLA_REFRESH_TOKEN provided: {{ env_info.has_refresh_token }}</li>
+    </ul>
+    <h2>Latest fetched data</h2>
+    <pre>{{ latest|tojson(indent=2) }}</pre>
+    <h2>API errors</h2>
+    <pre>{{ errors|tojson(indent=2) }}</pre>
+    <h2>Last log entries (api.log)</h2>
+    <pre>{{ log_lines|join('') }}</pre>
+</body>
+</html>

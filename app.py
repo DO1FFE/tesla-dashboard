@@ -356,5 +356,30 @@ def get_errors():
         return jsonify(list(api_errors))
 
 
+@app.route('/debug')
+def debug_info():
+    """Display diagnostic information about the server."""
+    env_info = {
+        'teslapy_available': teslapy is not None,
+        'has_email': bool(os.getenv('TESLA_EMAIL')),
+        'has_password': bool(os.getenv('TESLA_PASSWORD')),
+        'has_access_token': bool(os.getenv('TESLA_ACCESS_TOKEN')),
+        'has_refresh_token': bool(os.getenv('TESLA_REFRESH_TOKEN')),
+    }
+
+    log_lines = []
+    try:
+        with open(os.path.join('data', 'api.log'), 'r', encoding='utf-8') as f:
+            log_lines = f.readlines()[-50:]
+    except Exception:
+        pass
+
+    with api_errors_lock:
+        errors = list(api_errors)
+
+    return render_template('debug.html', env_info=env_info, log_lines=log_lines,
+                          errors=errors, latest=latest_data)
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8013, debug=True)
