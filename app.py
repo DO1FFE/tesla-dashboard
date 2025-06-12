@@ -5,7 +5,7 @@ import threading
 import time
 import logging
 from logging.handlers import RotatingFileHandler
-from flask import Flask, render_template, jsonify, Response
+from flask import Flask, render_template, jsonify, Response, request
 from dotenv import load_dotenv
 
 try:
@@ -25,6 +25,52 @@ if not api_logger.handlers:
     handler.setFormatter(formatter)
     api_logger.addHandler(handler)
     api_logger.setLevel(logging.INFO)
+    # Forward detailed library logs to the same file
+    for name in ('teslapy', 'urllib3'):
+        lib_logger = logging.getLogger(name)
+        lib_logger.addHandler(handler)
+        lib_logger.setLevel(logging.DEBUG)
+    try:
+        import http.client as http_client
+        http_client.HTTPConnection.debuglevel = 1
+    except Exception:
+        pass
+
+
+# Log incoming and outgoing HTTP requests
+@app.before_request
+def _log_request():
+    try:
+        log_api_data('request', {
+            'method': request.method,
+            'path': request.path,
+            'args': request.args.to_dict(),
+            'body': request.get_data(as_text=True)
+        })
+    except Exception:
+        pass
+
+
+@app.after_request
+def _log_response(response):
+    try:
+        body = None
+        if not response.direct_passthrough:
+            text = response.get_data(as_text=True)
+            try:
+                body = json.loads(text)
+                body = sanitize(body)
+            except Exception:
+                body = text
+        log_api_data('response', {
+            'method': request.method,
+            'path': request.path,
+            'status': response.status_code,
+            'body': body
+        })
+    except Exception:
+        pass
+    return response
 
 
 def log_api_data(endpoint, data):
@@ -33,6 +79,7 @@ def log_api_data(endpoint, data):
         api_logger.info(json.dumps({'endpoint': endpoint, 'data': data}))
     except Exception:
         pass
+
 
 park_start_ms = None
 last_shift_state = None
