@@ -83,6 +83,7 @@ function handleData(data) {
     updateThermometers(climate.inside_temp, climate.outside_temp);
     updateClimateStatus(climate.is_climate_on);
     updateClimateMode(climate.climate_keeper_mode);
+    updateCabinProtection(climate.cabin_overheat_protection);
     updateFanStatus(climate.fan_status);
     updateDesiredTemp(climate.driver_temp_setting);
     var lat = drive.latitude;
@@ -221,6 +222,15 @@ function updateClimateMode(mode) {
         return;
     }
     $el.text(icon).attr('title', title).show();
+}
+
+function updateCabinProtection(value) {
+    var $el = $('#cabin-protection');
+    if (value === 'On') {
+        $el.text('\u2600\uFE0F').attr('title', 'Kabinenschutz aktiv').show();
+    } else {
+        $el.text('').attr('title', '').hide();
+    }
 }
 
 function updateDesiredTemp(temp) {
