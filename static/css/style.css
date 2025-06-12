@@ -116,6 +116,18 @@
   color: red;
 }
 
+#climate-indicator {
+  display: inline-block;
+  margin: 0;
+  text-align: center;
+  vertical-align: top;
+}
+
+#climate-indicator div {
+  font-size: 34px;
+  display: block;
+}
+
 #gear-shift div {
   text-align: center;
   padding: 2px 0;

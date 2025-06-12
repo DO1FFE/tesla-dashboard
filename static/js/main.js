@@ -81,6 +81,8 @@ function handleData(data) {
     updateBatteryIndicator(charge.battery_level, charge.est_battery_range);
     var climate = data.climate_state || {};
     updateThermometers(climate.inside_temp, climate.outside_temp);
+    updateClimateStatus(climate.is_climate_on);
+    updateFanStatus(climate.fan_status);
     var lat = drive.latitude;
     var lng = drive.longitude;
     if (lat && lng) {
@@ -168,6 +170,34 @@ function updateUserPresence(present) {
     } else {
         $('#user-presence').css('color', '#d00').attr('title', 'Keine Person im Fahrzeug');
     }
+}
+
+function updateClimateStatus(on) {
+    if (on == null) {
+        $('#climate-status').text('').attr('title', '');
+        return;
+    }
+    var active = false;
+    if (typeof on === 'string') {
+        var norm = on.toLowerCase();
+        active = norm === 'true' || norm === '1';
+    } else {
+        active = !!on;
+    }
+    if (active) {
+        $('#climate-status').text('\u2744\uFE0F').attr('title', 'Klimaanlage an');
+    } else {
+        $('#climate-status').text('\uD83D\uDEAB').attr('title', 'Klimaanlage aus');
+    }
+}
+
+function updateFanStatus(speed) {
+    if (speed == null || isNaN(speed)) {
+        $('#fan-status').text('').attr('title', '');
+        return;
+    }
+    var val = Math.max(0, Math.min(11, Number(speed)));
+    $('#fan-status').text('\uD83C\uDF00 ' + val).attr('title', 'L\u00FCfterstufe ' + val);
 }
 
 var MAX_SPEED = 240;

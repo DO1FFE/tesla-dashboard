@@ -40,10 +40,10 @@
                     <rect x="13" y="5" width="4" height="40" class="tube" />
                     <rect id="inside-level" x="13" y="45" width="4" height="0" class="level" />
                     <circle id="inside-bulb" cx="15" cy="50" r="7" class="bulb" />
-            </svg>
-            <div id="inside-temp-value" class="label">Innen: -- °C</div>
-        </div>
-        <div class="thermometer">
+                </svg>
+                <div id="inside-temp-value" class="label">Innen: -- °C</div>
+            </div>
+            <div class="thermometer">
                 <svg width="30" height="60" viewBox="0 0 30 60">
                     <rect x="13" y="5" width="4" height="40" class="tube" />
                     <rect id="outside-level" x="13" y="45" width="4" height="0" class="level" />
@@ -51,6 +51,10 @@
                 </svg>
                 <div id="outside-temp-value" class="label">Außen: -- °C</div>
             </div>
+        </div>
+        <div id="climate-indicator">
+            <div id="climate-status" title="Klimaanlage aus">🚫</div>
+            <div id="fan-status" title="Lüfterstufe">🌀 0</div>
         </div>
     </div>
     <div id="info"></div>
