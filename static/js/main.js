@@ -76,6 +76,8 @@ function handleData(data) {
     updateLockStatus(vehicle.locked);
     updateGearShift(drive.shift_state);
     updateSpeedometer(drive.speed, drive.power);
+    var climate = data.climate_state || {};
+    updateThermometers(climate.inside_temp, climate.outside_temp);
     var lat = drive.latitude;
     var lng = drive.longitude;
     if (lat && lng) {
@@ -138,6 +140,8 @@ function updateLockStatus(locked) {
 }
 
 var MAX_SPEED = 240;
+var MIN_TEMP = -20;
+var MAX_TEMP = 50;
 
 function updateSpeedometer(speed, power) {
     if (speed == null) speed = 0;
@@ -151,6 +155,22 @@ function updateSpeedometer(speed, power) {
         text += ' (Rekuperation)';
     }
     $('#power-value').text(text);
+}
+
+function updateThermometers(inside, outside) {
+    if (inside == null) inside = 0;
+    if (outside == null) outside = 0;
+    var range = MAX_TEMP - MIN_TEMP;
+    function set(prefix, temp) {
+        var clamped = Math.max(MIN_TEMP, Math.min(MAX_TEMP, temp));
+        var h = (clamped - MIN_TEMP) / range * 40;
+        var y = 5 + 40 - h;
+        $('#' + prefix + '-level').attr('y', y).attr('height', h);
+        var label = isNaN(temp) ? '? °C' : temp.toFixed(1) + ' °C';
+        $('#' + prefix + '-temp-value').text((prefix === 'inside' ? 'Innen: ' : 'Außen: ') + label);
+    }
+    set('inside', inside);
+    set('outside', outside);
 }
 
 function batteryBar(level) {

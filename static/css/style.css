@@ -101,3 +101,42 @@
   font-size: 0.9em;
   margin-top: 2px;
 }
+
+/* Thermometers for inside/outside temperature */
+#thermometers {
+  display: inline-block;
+  margin-left: 20px;
+  vertical-align: top;
+  text-align: center;
+  font-weight: bold;
+}
+
+#thermometers .thermometer {
+  display: inline-block;
+  margin: 0 5px;
+}
+
+#thermometers svg {
+  display: block;
+}
+
+#thermometers .label {
+  font-size: 0.9em;
+  margin-top: 2px;
+}
+
+#thermometers .tube {
+  fill: #eee;
+  stroke: #555;
+  stroke-width: 2px;
+}
+
+#thermometers .level {
+  fill: #d00;
+}
+
+#thermometers .bulb {
+  fill: #d00;
+  stroke: #555;
+  stroke-width: 2px;
+}
