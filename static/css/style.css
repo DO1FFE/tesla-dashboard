@@ -133,11 +133,13 @@
 }
 
 #climate-status,
-#climate-mode {
+#climate-mode,
+#cabin-protection {
   display: inline-block;
 }
 
-#climate-mode {
+#climate-mode,
+#cabin-protection {
   margin-left: 4px;
 }
 
