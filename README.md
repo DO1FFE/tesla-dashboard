@@ -21,6 +21,8 @@ This is a simple Flask application that displays real-time data from a Tesla veh
 
 4. Open `http://localhost:8013` in your browser (the server listens on `0.0.0.0:8013`).
 
+All required JavaScript and CSS libraries are bundled under `static/` so the dashboard works even without Internet access.
+
 The backend continuously polls the Tesla API and pushes new data to clients using Server-Sent Events (SSE).
 
 ## Features
