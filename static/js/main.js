@@ -373,6 +373,13 @@ function updateModules(data) {
     } else {
         $('#module-media').html('<h3>Media</h3><p>Keine Daten</p>');
     }
+
+    var update = vehicle.software_update || {};
+    if (Object.keys(update).length > 0) {
+        $('#module-updates').html('<h3>Updates</h3>' + generateTable(update));
+    } else {
+        $('#module-updates').html('<h3>Updates</h3><p>Keine Daten</p>');
+    }
 }
 
 $('#vehicle-select').on('change', function() {
