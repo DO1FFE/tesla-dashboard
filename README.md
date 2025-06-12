@@ -40,6 +40,7 @@ The `/history` page displays this last recorded trip on an interactive map.
 
 Data is streamed to the frontend via `/stream/<vehicle_id>` using Server-Sent Events so the dashboard updates instantly when new information arrives.
 The endpoint `/apiliste` exposes a text file listing all seen API variables and their latest values.
+The same information is also stored as hierarchical JSON in `data/api-liste.json`.
 
 ## Reference
 

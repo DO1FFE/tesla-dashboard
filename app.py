@@ -71,6 +71,46 @@ def _collect_key_values(data, prefix='', result=None):
     return result
 
 
+def _merge_data(existing, new):
+    """Recursively merge ``new`` into ``existing`` without removing keys."""
+    if isinstance(existing, dict) and isinstance(new, dict):
+        for k, v in new.items():
+            if k in existing:
+                existing[k] = _merge_data(existing[k], v)
+            else:
+                existing[k] = v
+        return existing
+    if isinstance(existing, list) and isinstance(new, list):
+        for i, item in enumerate(new):
+            if i < len(existing):
+                existing[i] = _merge_data(existing[i], item)
+            else:
+                existing.append(item)
+        return existing
+    return new
+
+
+def _update_api_json(data, filename=os.path.join('data', 'api-liste.json')):
+    """Update ``api-liste.json`` while preserving existing keys."""
+    try:
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        if os.path.exists(filename):
+            with open(filename, 'r', encoding='utf-8') as f:
+                try:
+                    current = json.load(f)
+                except Exception:
+                    current = {}
+        else:
+            current = {}
+
+        merged = _merge_data(current, data)
+
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(merged, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
 def update_api_list(data, filename=os.path.join('data', 'api-liste.txt')):
     """Update ``api-liste.txt`` with key/value pairs in API order."""
     try:
@@ -124,6 +164,7 @@ def update_api_list(data, filename=os.path.join('data', 'api-liste.txt')):
         if content != current:
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write(content)
+        _update_api_json(data)
     except Exception:
         pass
 
