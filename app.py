@@ -3,6 +3,8 @@ import json
 import queue
 import threading
 import time
+import logging
+from logging.handlers import RotatingFileHandler
 from flask import Flask, render_template, jsonify, Response
 from dotenv import load_dotenv
 
@@ -13,6 +15,24 @@ except ImportError:
 
 load_dotenv()
 app = Flask(__name__)
+
+os.makedirs('data', exist_ok=True)
+api_logger = logging.getLogger('api_logger')
+if not api_logger.handlers:
+    handler = RotatingFileHandler(os.path.join('data', 'api.log'),
+                                  maxBytes=1_000_000, backupCount=1)
+    formatter = logging.Formatter('%(asctime)s %(message)s')
+    handler.setFormatter(formatter)
+    api_logger.addHandler(handler)
+    api_logger.setLevel(logging.INFO)
+
+
+def log_api_data(endpoint, data):
+    """Write API communication to the rotating log file."""
+    try:
+        api_logger.info(json.dumps({'endpoint': endpoint, 'data': data}))
+    except Exception:
+        pass
 
 park_start_ms = None
 last_shift_state = None
@@ -135,6 +155,7 @@ def _cached_vehicle_list(tesla, ttl=300):
             try:
                 _vehicle_list_cache = tesla.vehicle_list()
                 _vehicle_list_cache_ts = now
+                log_api_data('vehicle_list', sanitize([v.copy() for v in _vehicle_list_cache]))
             except Exception as exc:
                 _log_api_error(exc)
                 return []
@@ -176,6 +197,7 @@ def get_vehicle_data(vehicle_id=None):
     track_park_time(vehicle_data)
     track_drive_path(vehicle_data)
     sanitized = sanitize(vehicle_data)
+    log_api_data('get_vehicle_data', sanitized)
     sanitized['park_start'] = park_start_ms
     sanitized['path'] = trip_path
     return sanitized
