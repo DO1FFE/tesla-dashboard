@@ -289,6 +289,29 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/map')
+def map_only():
+    """Display only the map without additional modules."""
+    return render_template('map.html')
+
+
+@app.route('/daten')
+def data_only():
+    """Display live or cached vehicle data without extra UI."""
+    _start_thread('default')
+    data = latest_data.get('default')
+    if data is None:
+        data = get_vehicle_data()
+        if isinstance(data, dict) and not data.get('error'):
+            _save_cached('default', data)
+        else:
+            cached = _load_cached('default')
+            if cached is not None:
+                data = cached
+        latest_data['default'] = data
+    return render_template('data.html', data=data)
+
+
 @app.route('/api/data')
 def api_data():
     _start_thread('default')
