@@ -33,7 +33,8 @@ function updateHeader(data) {
         info = 'für ' + data.display_name;
         var version = data.vehicle_state && data.vehicle_state.car_version;
         if (version) {
-            info += ' (' + version + ')';
+            version = version.split(' ')[0];
+            info += ' (V ' + version + ')';
         }
     }
     $('#vehicle-info').text(info);
