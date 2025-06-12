@@ -37,40 +37,9 @@ if not api_logger.handlers:
         pass
 
 
-# Log incoming and outgoing HTTP requests
-@app.before_request
-def _log_request():
-    try:
-        log_api_data('request', {
-            'method': request.method,
-            'path': request.path,
-            'args': request.args.to_dict(),
-            'body': request.get_data(as_text=True)
-        })
-    except Exception:
-        pass
-
-
-@app.after_request
-def _log_response(response):
-    try:
-        body = None
-        if not response.direct_passthrough:
-            text = response.get_data(as_text=True)
-            try:
-                body = json.loads(text)
-                body = sanitize(body)
-            except Exception:
-                body = text
-        log_api_data('response', {
-            'method': request.method,
-            'path': request.path,
-            'status': response.status_code,
-            'body': body
-        })
-    except Exception:
-        pass
-    return response
+# Communication with the Tesla API is logged via ``log_api_data`` and the
+# ``teslapy``/``urllib3`` loggers. Requests to this web application are no longer
+# recorded in ``api.log``.
 
 
 def log_api_data(endpoint, data):
