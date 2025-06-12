@@ -84,6 +84,20 @@
   color: white;
 }
 
+/* Battery indicator between gear shift and speedometer */
+#battery-indicator {
+  display: inline-block;
+  margin-left: 20px;
+  vertical-align: top;
+  text-align: center;
+  font-weight: bold;
+}
+
+#battery-indicator .range {
+  font-size: 0.9em;
+  margin-top: 2px;
+}
+
 /* Simple speedometer next to the gear shift */
 #speedometer {
   display: inline-block;
