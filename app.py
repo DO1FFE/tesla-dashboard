@@ -151,6 +151,30 @@ def _log_api_error(exc):
             api_errors.pop(0)
 
 
+def _cache_file(vehicle_id):
+    """Return filename for cached data of a vehicle."""
+    name = vehicle_id if vehicle_id is not None else 'default'
+    return os.path.join('data', f'cache_{name}.json')
+
+
+def _load_cached(vehicle_id):
+    """Load cached vehicle data from disk."""
+    try:
+        with open(_cache_file(vehicle_id), 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _save_cached(vehicle_id, data):
+    """Write vehicle data cache to disk."""
+    try:
+        with open(_cache_file(vehicle_id), 'w', encoding='utf-8') as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
 def get_tesla():
     """Authenticate and return a Tesla object or None."""
     if teslapy is None:
@@ -270,6 +294,12 @@ def _fetch_loop(vehicle_id, interval=5):
     while True:
         vid = None if vehicle_id == 'default' else vehicle_id
         data = get_vehicle_data(vid)
+        if isinstance(data, dict) and not data.get('error'):
+            _save_cached(vehicle_id, data)
+        else:
+            cached = _load_cached(vehicle_id)
+            if cached is not None:
+                data = cached
         latest_data[vehicle_id] = data
         for q in subscribers.get(vehicle_id, []):
             q.put(data)
@@ -296,6 +326,12 @@ def api_data():
     data = latest_data.get('default')
     if data is None:
         data = get_vehicle_data()
+        if isinstance(data, dict) and not data.get('error'):
+            _save_cached('default', data)
+        else:
+            cached = _load_cached('default')
+            if cached is not None:
+                data = cached
         latest_data['default'] = data
     return jsonify(data)
 
@@ -306,6 +342,12 @@ def api_data_vehicle(vehicle_id):
     data = latest_data.get(vehicle_id)
     if data is None:
         data = get_vehicle_data(vehicle_id)
+        if isinstance(data, dict) and not data.get('error'):
+            _save_cached(vehicle_id, data)
+        else:
+            cached = _load_cached(vehicle_id)
+            if cached is not None:
+                data = cached
         latest_data[vehicle_id] = data
     return jsonify(data)
 
