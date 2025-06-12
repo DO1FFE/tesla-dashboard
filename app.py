@@ -378,7 +378,6 @@ def get_vehicle_data(vehicle_id=None):
     sanitized = sanitize(vehicle_data)
     log_api_data('get_vehicle_data', sanitized)
     sanitized['park_start'] = park_start_ms
-    sanitized['park_since'] = park_duration_string(park_start_ms)
     sanitized['path'] = trip_path
     return sanitized
 

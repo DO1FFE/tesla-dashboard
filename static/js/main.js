@@ -96,12 +96,11 @@ function handleData(data) {
     }
 }
 
-function updateParkTime() {
-    if (!parkStart) {
-        $('#park-time').text('?');
-        return;
+function formatParkDuration(start) {
+    if (!start) {
+        return '?';
     }
-    var diff = Date.now() - parkStart;
+    var diff = Date.now() - start;
     var hours = Math.floor(diff / 3600000);
     var minutes = Math.floor((diff % 3600000) / 60000);
     var parts = [];
@@ -109,7 +108,11 @@ function updateParkTime() {
         parts.push(hours + ' ' + (hours === 1 ? 'Stunde' : 'Stunden'));
     }
     parts.push(minutes + ' ' + (minutes === 1 ? 'Minute' : 'Minuten'));
-    $('#park-time').text(parts.join(' '));
+    return parts.join(' ');
+}
+
+function updateParkTime() {
+    $('#park-time').text(formatParkDuration(parkStart));
 }
 
 function batteryBar(level) {
@@ -319,7 +322,7 @@ function updateUI(data) {
     var html = '';
     var status = getStatus(data);
     parkStart = data.park_start || null;
-    var parkSinceText = data.park_since || '';
+    var parkSinceText = parkStart ? formatParkDuration(parkStart) : '';
     html += '<h2>' + status + '</h2>';
     if (status === 'Geparkt') {
         html += '<p id="park-since">Geparkt seit <span id="park-time">' + parkSinceText + '</span></p>';
