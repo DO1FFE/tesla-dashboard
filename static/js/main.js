@@ -133,7 +133,14 @@ function updateLockStatus(locked) {
         $('#lock-status').text('');
         return;
     }
-    if (locked) {
+    var isLocked = false;
+    if (typeof locked === 'string') {
+        var norm = locked.toLowerCase();
+        isLocked = norm === 'true' || norm === '1';
+    } else {
+        isLocked = !!locked;
+    }
+    if (isLocked) {
         $('#lock-status').text('\uD83D\uDD12').attr('title', 'Verriegelt');
     } else {
         $('#lock-status').text('\uD83D\uDD13').attr('title', 'Offen');
