@@ -319,9 +319,10 @@ function updateUI(data) {
     var html = '';
     var status = getStatus(data);
     parkStart = data.park_start || null;
+    var parkSinceText = data.park_since || '';
     html += '<h2>' + status + '</h2>';
     if (status === 'Geparkt') {
-        html += '<p id="park-since">Geparkt seit <span id="park-time"></span></p>';
+        html += '<p id="park-since">Geparkt seit <span id="park-time">' + parkSinceText + '</span></p>';
     }
     // Only show status and parking duration, omit detailed tables
     $('#info').html(html);

@@ -171,6 +171,20 @@ def track_park_time(vehicle_data):
     last_shift_state = shift
 
 
+def park_duration_string(start_ms):
+    """Return human readable parking duration for ``start_ms``."""
+    if start_ms is None:
+        return None
+    diff = int(time.time() * 1000) - start_ms
+    hours = diff // 3600000
+    minutes = (diff % 3600000) // 60000
+    parts = []
+    if hours > 0:
+        parts.append(f"{hours} {'Stunde' if hours == 1 else 'Stunden'}")
+    parts.append(f"{minutes} {'Minute' if minutes == 1 else 'Minuten'}")
+    return ' '.join(parts)
+
+
 def _log_trip_point(ts, lat, lon):
     """Append a GPS point to the trip history CSV."""
     try:
@@ -364,6 +378,7 @@ def get_vehicle_data(vehicle_id=None):
     sanitized = sanitize(vehicle_data)
     log_api_data('get_vehicle_data', sanitized)
     sanitized['park_start'] = park_start_ms
+    sanitized['park_since'] = park_duration_string(park_start_ms)
     sanitized['path'] = trip_path
     return sanitized
 
