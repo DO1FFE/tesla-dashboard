@@ -144,6 +144,39 @@ def _save_cached(vehicle_id, data):
         pass
 
 
+def _load_last_trip(filename=os.path.join('data', 'trip_history.csv'), idle_ms=600000):
+    """Return coordinates of the most recent trip from the history CSV."""
+    try:
+        with open(filename, 'r', encoding='utf-8') as f:
+            rows = [line.strip().split(',') for line in f if line.strip()]
+            rows = [(int(t), float(lat), float(lon)) for t, lat, lon in rows]
+    except Exception:
+        return []
+    if not rows:
+        return []
+
+    path = [[rows[-1][1], rows[-1][2]]]
+    prev = rows[-1][0]
+    for ts, lat, lon in reversed(rows[:-1]):
+        if prev - ts > idle_ms:
+            break
+        path.insert(0, [lat, lon])
+        prev = ts
+    return path
+
+
+def _bearing(p1, p2):
+    """Compute heading in degrees from p1 to p2."""
+    from math import atan2, cos, sin, radians, degrees
+    lat1, lon1 = radians(p1[0]), radians(p1[1])
+    lat2, lon2 = radians(p2[0]), radians(p2[1])
+    dlon = lon2 - lon1
+    y = sin(dlon) * cos(lat2)
+    x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dlon)
+    brng = degrees(atan2(y, x))
+    return (brng + 360) % 360
+
+
 def get_tesla():
     """Authenticate and return a Tesla object or None."""
     if teslapy is None:
@@ -293,6 +326,16 @@ def index():
 def map_only():
     """Display only the map without additional modules."""
     return render_template('map.html')
+
+
+@app.route('/history')
+def trip_history():
+    """Show the last recorded trip on a map."""
+    path = _load_last_trip()
+    heading = 0.0
+    if len(path) >= 2:
+        heading = _bearing(path[-2], path[-1])
+    return render_template('history.html', path=path, heading=heading)
 
 
 @app.route('/daten')

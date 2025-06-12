@@ -49,3 +49,10 @@
 .module {
   margin-top: 10px;
 }
+
+/* Arrow marker used on the map */
+.arrow-icon svg {
+  fill: #d00;
+  stroke: #000;
+  stroke-width: 1px;
+}
