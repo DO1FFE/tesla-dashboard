@@ -88,11 +88,20 @@
   font-weight: bold;
 }
 
-#lock-status {
+#lock-container {
   display: inline-block;
-  font-size: 34px;
   margin: 10px 10px 10px 0;
+  text-align: center;
   vertical-align: top;
+}
+
+#lock-container div {
+  font-size: 34px;
+  display: block;
+}
+
+#user-presence {
+  color: red;
 }
 
 #gear-shift div {
