@@ -186,27 +186,15 @@ function updateThermometers(inside, outside) {
 
 function updateBatteryIndicator(level, rangeMiles) {
     var pct = level != null ? level : 0;
-    var color = '#4caf50';
-    if (pct < 20) {
-        color = '#f44336';
-    } else if (pct < 50) {
-        color = '#ffc107';
-    }
     var range = rangeMiles != null ? Math.round(rangeMiles * MILES_TO_KM) : '?';
-    var html = '<div class="battery"><div class="level" style="width:' + pct + '%; background:' + color + '"></div></div> ' + pct + '%';
+    var html = '<div class="battery"><div class="level" style="height:' + pct + '%;"></div></div> ' + pct + '%';
     html += '<div class="range">' + range + ' km</div>';
     $('#battery-indicator').html(html);
 }
 
 function batteryBar(level) {
     var pct = level != null ? level : 0;
-    var color = '#4caf50';
-    if (pct < 20) {
-        color = '#f44336';
-    } else if (pct < 50) {
-        color = '#ffc107';
-    }
-    return '<div class="battery"><div class="level" style="width:' + pct + '%; background:' + color + '"></div></div> ' + pct + '%';
+    return '<div class="battery"><div class="level" style="height:' + pct + '%;'></div></div> ' + pct + '%';
 }
 
 function getStatus(data) {
