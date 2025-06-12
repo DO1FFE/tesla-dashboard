@@ -188,24 +188,24 @@ function updateSpeedometer(speed, power) {
 }
 
 function updateThermometers(inside, outside) {
-    if (inside == null) inside = 0;
-    if (outside == null) outside = 0;
     var range = MAX_TEMP - MIN_TEMP;
     function set(prefix, temp) {
-        var clamped = Math.max(MIN_TEMP, Math.min(MAX_TEMP, temp));
+        var missing = temp == null || isNaN(temp);
+        var value = missing ? 0 : temp;
+        var clamped = Math.max(MIN_TEMP, Math.min(MAX_TEMP, value));
         var h = (clamped - MIN_TEMP) / range * 40;
         var y = 5 + 40 - h;
         var color = '#d00';
-        if (temp < 15) {
+        if (value < 15) {
             color = '#06c';
-        } else if (temp < 25) {
+        } else if (value < 25) {
             color = '#4caf50';
-        } else if (temp < 30) {
+        } else if (value < 30) {
             color = '#ff9800';
         }
         $('#' + prefix + '-level').attr('y', y).attr('height', h).css('fill', color);
         $('#' + prefix + '-bulb').css('fill', color);
-        var label = isNaN(temp) ? '? °C' : temp.toFixed(1) + ' °C';
+        var label = missing ? '-.- °C' : temp.toFixed(1) + ' °C';
         $('#' + prefix + '-temp-value').text((prefix === 'inside' ? 'Innen: ' : 'Außen: ') + label);
     }
     set('inside', inside);
