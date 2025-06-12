@@ -451,6 +451,21 @@ function startStream() {
             handleData(data);
         }
     };
+    eventSource.onerror = function() {
+        $('#errors').text('Live-Daten konnten nicht geladen werden. Lade Cache.');
+        if (eventSource) {
+            eventSource.close();
+        }
+        var url = '/api/data';
+        if (currentVehicle) {
+            url += '/' + currentVehicle;
+        }
+        $.getJSON(url, function(data) {
+            if (data && !data.error) {
+                handleData(data);
+            }
+        });
+    };
 }
 
 function fetchErrors() {
