@@ -23,6 +23,9 @@ This is a simple Flask application that displays real-time data from a Tesla veh
 
 API responses are logged to `data/api.log`. The log file uses rotation and will
 grow to at most 1&nbsp;MB.
+The latest successful API response is also stored in `data/cache_<vehicle_id>.json`
+so the dashboard can display the most recently fetched data if the Tesla API is
+temporarily unavailable.
 
 All required JavaScript and CSS libraries are bundled under `static/` so the dashboard works even without Internet access.
 
