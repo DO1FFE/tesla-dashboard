@@ -56,3 +56,23 @@
   stroke: #000;
   stroke-width: 1px;
 }
+
+/* Simple automatic gear shift display */
+#gear-shift {
+  display: inline-block;
+  border: 2px solid #555;
+  padding: 4px;
+  margin: 10px 0;
+  width: 30px;
+  font-weight: bold;
+}
+
+#gear-shift div {
+  text-align: center;
+  padding: 2px 0;
+}
+
+#gear-shift div.active {
+  background: #4caf50;
+  color: white;
+}

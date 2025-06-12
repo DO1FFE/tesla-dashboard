@@ -72,6 +72,7 @@ function handleData(data) {
     updateUI(data);
     updateModules(data);
     var drive = data.drive_state || {};
+    updateGearShift(drive.shift_state);
     var lat = drive.latitude;
     var lng = drive.longitude;
     if (lat && lng) {
@@ -113,6 +114,12 @@ function formatParkDuration(start) {
 
 function updateParkTime() {
     $('#park-time').text(formatParkDuration(parkStart));
+}
+
+function updateGearShift(state) {
+    var gear = state || 'P';
+    $('#gear-shift div').removeClass('active');
+    $('#gear-shift div[data-gear="' + gear + '"]').addClass('active');
 }
 
 function batteryBar(level) {
