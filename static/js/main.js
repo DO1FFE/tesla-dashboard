@@ -16,7 +16,7 @@ var lastDataTimestamp = null;
 // Marker and polyline for active navigation destination
 var flagIcon = L.divIcon({
     html: [
-        '<svg width="25" height="30" viewBox="0 0 20 30">',
+        '<svg width="40" height="48" viewBox="0 0 20 30">',
         '<defs>',
         '<pattern id="checker" width="4" height="4" patternUnits="userSpaceOnUse">',
         '<rect width="2" height="2" fill="#000"/>',
@@ -28,8 +28,8 @@ var flagIcon = L.divIcon({
         '</svg>'
     ].join(''),
     className: 'flag-icon',
-    iconSize: [25, 30],
-    iconAnchor: [5, 28]
+    iconSize: [40, 48],
+    iconAnchor: [8, 45]
 });
 var destMarker = null;
 var destLine = null;
