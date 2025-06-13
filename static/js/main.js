@@ -335,7 +335,10 @@ function updateOdometer(value) {
         return;
     }
     var km = Number(value) * MILES_TO_KM;
-    $('#odometer-value').text(km.toFixed(1));
+    var formatted = km
+        .toFixed(0)
+        .replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    $('#odometer-value').text(formatted + ' km');
 }
 
 function updateThermometers(inside, outside) {
