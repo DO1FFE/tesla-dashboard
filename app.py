@@ -493,7 +493,7 @@ def index():
 @app.route('/map')
 def map_only():
     """Display only the map without additional modules."""
-    return render_template('map.html')
+    return render_template('map.html', version=__version__)
 
 
 @app.route('/history')
@@ -586,6 +586,12 @@ def stream_vehicle(vehicle_id='default'):
 def api_vehicles():
     vehicles = get_vehicle_list()
     return jsonify(vehicles)
+
+
+@app.route('/api/version')
+def api_version():
+    """Return the current application version."""
+    return jsonify({'version': __version__})
 
 
 @app.route('/error')
