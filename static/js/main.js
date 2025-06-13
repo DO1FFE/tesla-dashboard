@@ -76,6 +76,7 @@ function handleData(data) {
     updateLockStatus(vehicle.locked);
     updateUserPresence(vehicle.is_user_present);
     updateGearShift(drive.shift_state);
+    updateNavBar(drive);
     updateSpeedometer(drive.speed, drive.power);
     var charge = data.charge_state || {};
     updateBatteryIndicator(charge.battery_level, charge.est_battery_range);
@@ -297,6 +298,38 @@ function updateBatteryIndicator(level, rangeMiles) {
 function batteryBar(level) {
     var pct = level != null ? level : 0;
     return '<div class="battery-block"><div class="battery"><div class="level" style="height:' + pct + '%;"></div></div><div class="battery-value">' + pct + '%</div></div>';
+}
+
+function updateNavBar(drive) {
+    var $nav = $('#nav-bar');
+    if (!drive || !('active_route_destination' in drive) || !drive.active_route_destination) {
+        $nav.html('<table><tr><td colspan="2"><span class="icon">🧭</span>Keine Navigation aktiv</td></tr></table>');
+        return;
+    }
+
+    var rows = [];
+    rows.push('<tr><th><span class="icon">🧭</span>Ich düse gerade nach:</th><td>' + drive.active_route_destination + '</td></tr>');
+    if (drive.active_route_energy_at_arrival != null) {
+        rows.push('<tr><th><span class="icon">🔋</span>Batteriestand bei Ankunft:</th><td>' + Math.round(drive.active_route_energy_at_arrival) + ' %</td></tr>');
+    }
+    if (drive.active_route_miles_to_arrival != null) {
+        var km = drive.active_route_miles_to_arrival * MILES_TO_KM;
+        km = Math.floor(km * 100) / 100;
+        rows.push('<tr><th><span class="icon">📏</span>Entfernung bis zum Ziel:</th><td>' + km.toFixed(2) + ' km</td></tr>');
+    }
+    if (drive.active_route_minutes_to_arrival != null) {
+        var mins = Math.round(drive.active_route_minutes_to_arrival);
+        var h = Math.floor(mins / 60);
+        var m = mins % 60;
+        var timeStr = (h > 0 ? h + 'h ' : '') + m + 'min';
+        var arrival = new Date(Date.now() + mins * 60000);
+        var arrivalStr = arrival.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        rows.push('<tr><th><span class="icon">⏱️</span>Restzeit (Ankunftszeit):</th><td>' + timeStr + ' (' + arrivalStr + ')</td></tr>');
+    }
+    if (drive.active_route_traffic_minutes_delay != null) {
+        rows.push('<tr><th><span class="icon">🚦</span>Stau-Verzögerung:</th><td>+' + Math.round(drive.active_route_traffic_minutes_delay) + ' min</td></tr>');
+    }
+    $nav.html('<table>' + rows.join('') + '</table>');
 }
 
 function getStatus(data) {
