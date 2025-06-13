@@ -316,4 +316,11 @@
   font-size: 0.8em;
   margin-top: 10px;
   color: #666;
+  position: relative;
+}
+
+.app-version #data-age {
+  position: absolute;
+  right: 10px;
+  bottom: 0;
 }
