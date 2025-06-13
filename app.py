@@ -459,7 +459,7 @@ def get_vehicle_list():
     return sanitized
 
 
-def _fetch_loop(vehicle_id, interval=5):
+def _fetch_loop(vehicle_id, interval=3):
     """Continuously fetch data for a vehicle and notify subscribers."""
     while True:
         vid = None if vehicle_id == 'default' else vehicle_id
