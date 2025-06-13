@@ -99,6 +99,7 @@ function handleData(data) {
     updateGearShift(drive.shift_state);
     updateNavBar(drive);
     updateSpeedometer(drive.speed, drive.power);
+    updateOdometer(vehicle.odometer);
     var charge = data.charge_state || {};
     var rangeMiles = charge.ideal_battery_range;
     if (rangeMiles == null) {
@@ -326,6 +327,15 @@ function updateSpeedometer(speed, power) {
         text += ' (Rekuperation)';
     }
     $('#power-value').text(text);
+}
+
+function updateOdometer(value) {
+    if (value == null || isNaN(value)) {
+        $('#odometer-value').text('--');
+        return;
+    }
+    var km = Number(value) * MILES_TO_KM;
+    $('#odometer-value').text(km.toFixed(1));
 }
 
 function updateThermometers(inside, outside) {
