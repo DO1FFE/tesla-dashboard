@@ -64,7 +64,7 @@ The dashboard reports its own version in the footer. The version string is deriv
 from the number of Git commits so it increases automatically with every pull request.
 The footer also includes a copyright notice:
 ```
-Dashboard Version 1.0.X - © <current year> Erik Schauer, do1ffe@darc.de
+Tesla-Dashboard Version 1.0.X - © <current year> Erik Schauer, do1ffe@darc.de
 ```
 
 ## Reference
