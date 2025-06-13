@@ -1,4 +1,5 @@
 var currentVehicle = null;
+var APP_VERSION = window.APP_VERSION || null;
 var MILES_TO_KM = 1.60934;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
@@ -509,3 +510,13 @@ function startStream() {
 }
 
 fetchVehicles();
+
+function checkAppVersion() {
+    $.getJSON('/api/version', function(resp) {
+        if (resp.version && APP_VERSION && resp.version !== APP_VERSION) {
+            location.reload(true);
+        }
+    });
+}
+
+setInterval(checkAppVersion, 60000);

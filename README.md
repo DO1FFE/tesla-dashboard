@@ -56,12 +56,15 @@ The same information is also stored as hierarchical JSON in `data/api-liste.json
 * `/error` – show recent API errors (JSON via `/api/errors`)
 * `/debug` – display environment info and recent log lines
 * `/api/vehicles` – list available vehicles as JSON
+* `/api/version` – return the current dashboard version as JSON
 * `/stream/<vehicle_id>` – Server-Sent Events endpoint used by the frontend
 
 ## Version
 
 The dashboard reports its own version in the footer. The version string is derived
 from the number of Git commits so it increases automatically with every pull request.
+Clients periodically fetch `/api/version` and reload the page when the version changes
+so the browser always shows the latest release.
 The footer also includes a copyright notice:
 ```
 Tesla-Dashboard Version 1.0.X - © <current year> Erik Schauer, do1ffe@darc.de
