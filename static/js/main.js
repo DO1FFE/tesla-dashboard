@@ -11,6 +11,7 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
 }).addTo(map);
 var polyline = null;
+var lastDataTimestamp = null;
 
 // Marker and polyline for active navigation destination
 var flagIcon = L.divIcon({
@@ -92,6 +93,7 @@ function handleData(data) {
     updateUI(data);
     var drive = data.drive_state || {};
     var vehicle = data.vehicle_state || {};
+    updateDataAge(vehicle.timestamp);
     updateLockStatus(vehicle.locked);
     updateUserPresence(vehicle.is_user_present);
     updateGearShift(drive.shift_state);
@@ -462,6 +464,37 @@ function describe(key) {
     return result;
 }
 
+function updateDataAge(ts) {
+    if (typeof ts !== 'undefined') {
+        if (ts && ts < 1e12) {
+            ts *= 1000;
+        }
+        lastDataTimestamp = ts || null;
+    }
+    var $el = $('#data-age');
+    if (!lastDataTimestamp) {
+        $el.text('');
+        return;
+    }
+    var diff = Math.round((Date.now() - lastDataTimestamp) / 1000);
+    if (diff < 0) diff = 0;
+    var text;
+    if (diff < 60) {
+        text = diff + ' s';
+    } else if (diff < 3600) {
+        var m = Math.floor(diff / 60);
+        var s = diff % 60;
+        text = m + ' min ' + s + ' s';
+    } else {
+        var h = Math.floor(diff / 3600);
+        var m = Math.floor((diff % 3600) / 60);
+        var s = diff % 60;
+        text = h + ' h ' + m + ' min ' + s + ' s';
+    }
+    var timeStr = new Date(lastDataTimestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+    $el.text('Letztes Update vor ' + text + ' (' + timeStr + ')');
+}
+
 
 
 
@@ -520,3 +553,4 @@ function checkAppVersion() {
 }
 
 setInterval(checkAppVersion, 60000);
+setInterval(function() { updateDataAge(); }, 1000);
