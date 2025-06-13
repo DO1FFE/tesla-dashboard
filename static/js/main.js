@@ -3,8 +3,6 @@ var MILES_TO_KM = 1.60934;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 19;
-var parkStart = null;
-var parkTimer = null;
 // Initialize the map roughly centered on Essen with a high zoom until
 // coordinates from the API are received.
 var map = L.map('map').setView(DEFAULT_POS, DEFAULT_ZOOM);
@@ -162,24 +160,6 @@ function handleData(data) {
     }
 }
 
-function formatParkDuration(start) {
-    if (!start) {
-        return '?';
-    }
-    var diff = Date.now() - start;
-    var hours = Math.floor(diff / 3600000);
-    var minutes = Math.floor((diff % 3600000) / 60000);
-    var parts = [];
-    if (hours > 0) {
-        parts.push(hours + ' ' + (hours === 1 ? 'Stunde' : 'Stunden'));
-    }
-    parts.push(minutes + ' ' + (minutes === 1 ? 'Minute' : 'Minuten'));
-    return parts.join(' ');
-}
-
-function updateParkTime() {
-    $('#park-time').text(formatParkDuration(parkStart));
-}
 
 function updateGearShift(state) {
     var gear = state || 'P';
@@ -429,201 +409,10 @@ function describe(key) {
 
 
 
-function generateTable(obj) {
-    var html = '<table class="info-table">';
-    Object.keys(obj).sort().forEach(function(key) {
-        var value = obj[key];
-        if (value === null || value === undefined) {
-            return;
-        }
-        if (typeof value === 'object') {
-            html += '<tr><th colspan="2">' + describe(key) + '</th></tr>';
-            html += '<tr><td colspan="2">' + generateTable(value) + '</td></tr>';
-        } else {
-            if (key === 'battery_level') {
-                value = batteryBar(value);
-            }
-            html += '<tr><th>' + describe(key) + '</th><td>' + value + '</td></tr>';
-        }
-    });
-    html += '</table>';
-    return html;
-}
-
-function categorizedData(data, status) {
-    var charge = data.charge_state || {};
-    var climate = data.climate_state || {};
-    var drive = data.drive_state || {};
-    var vehicle = data.vehicle_state || {};
-    var categories = {
-        'Batterie und Laden': {},
-        'Klimaanlage': {},
-        'Fahrstatus': {},
-        'Fahrzeugstatus': {},
-        'Medieninfos': {}
-    };
-
-    function add(cat, key, val) {
-        if (val !== null && val !== undefined) {
-            categories[cat][key] = val;
-        }
-    }
-
-    if (status === 'Ladevorgang') {
-        add('Batterie und Laden', 'battery_level', charge.battery_level);
-        add('Batterie und Laden', 'battery_range', charge.est_battery_range != null ? (charge.est_battery_range * MILES_TO_KM).toFixed(1) : null);
-        add('Batterie und Laden', 'charge_rate', charge.charge_rate != null ? (charge.charge_rate * MILES_TO_KM).toFixed(1) : null);
-        add('Batterie und Laden', 'charger_power', charge.charger_power);
-        add('Batterie und Laden', 'time_to_full_charge', charge.time_to_full_charge);
-
-        add('Klimaanlage', 'inside_temp', climate.inside_temp);
-        add('Klimaanlage', 'outside_temp', climate.outside_temp);
-        add('Klimaanlage', 'is_climate_on', climate.is_climate_on);
-
-        add('Fahrzeugstatus', 'locked', vehicle.locked);
-        add('Fahrzeugstatus', 'odometer', vehicle.odometer != null ? Math.round(vehicle.odometer * MILES_TO_KM) : null);
-        add('Fahrzeugstatus', 'remote_start_enabled', vehicle.remote_start_enabled);
-        add('Fahrzeugstatus', 'tpms_pressure_fl', vehicle.tpms_pressure_fl);
-        add('Fahrzeugstatus', 'tpms_pressure_fr', vehicle.tpms_pressure_fr);
-        add('Fahrzeugstatus', 'tpms_pressure_rl', vehicle.tpms_pressure_rl);
-        add('Fahrzeugstatus', 'tpms_pressure_rr', vehicle.tpms_pressure_rr);
-        if (vehicle.software_update && vehicle.software_update.version) add('Fahrzeugstatus', 'software_update', { version: vehicle.software_update.version });
-        if (vehicle.speed_limit_mode && vehicle.speed_limit_mode.active != null) add('Fahrzeugstatus', 'speed_limit_mode', { active: vehicle.speed_limit_mode.active });
-    } else if (status === 'Fahrt') {
-        add('Batterie und Laden', 'battery_level', charge.battery_level);
-        add('Batterie und Laden', 'battery_range', charge.est_battery_range != null ? (charge.est_battery_range * MILES_TO_KM).toFixed(1) : null);
-
-        add('Fahrstatus', 'shift_state', drive.shift_state);
-        add('Fahrstatus', 'speed', drive.speed != null ? Math.round(drive.speed * MILES_TO_KM) : null);
-        add('Fahrstatus', 'heading', drive.heading);
-        add('Fahrstatus', 'latitude', drive.latitude);
-        add('Fahrstatus', 'longitude', drive.longitude);
-        add('Fahrstatus', 'power', drive.power);
-        if (drive.active_route_miles_to_arrival != null) add('Fahrstatus', 'distance_to_arrival', (drive.active_route_miles_to_arrival * MILES_TO_KM).toFixed(1));
-
-        add('Fahrzeugstatus', 'locked', vehicle.locked);
-        add('Fahrzeugstatus', 'odometer', vehicle.odometer != null ? Math.round(vehicle.odometer * MILES_TO_KM) : null);
-        add('Fahrzeugstatus', 'remote_start_enabled', vehicle.remote_start_enabled);
-    } else { // Geparkt
-        add('Batterie und Laden', 'battery_level', charge.battery_level);
-        add('Batterie und Laden', 'battery_range', charge.est_battery_range != null ? (charge.est_battery_range * MILES_TO_KM).toFixed(1) : null);
-
-        add('Klimaanlage', 'inside_temp', climate.inside_temp);
-        add('Klimaanlage', 'outside_temp', climate.outside_temp);
-        add('Klimaanlage', 'is_climate_on', climate.is_climate_on);
-        add('Klimaanlage', 'seat_heater_left', climate.seat_heater_left);
-        add('Klimaanlage', 'seat_heater_right', climate.seat_heater_right);
-
-        add('Fahrzeugstatus', 'locked', vehicle.locked);
-        add('Fahrzeugstatus', 'odometer', vehicle.odometer != null ? Math.round(vehicle.odometer * MILES_TO_KM) : null);
-        add('Fahrzeugstatus', 'tpms_pressure_fl', vehicle.tpms_pressure_fl);
-        add('Fahrzeugstatus', 'tpms_pressure_fr', vehicle.tpms_pressure_fr);
-        add('Fahrzeugstatus', 'tpms_pressure_rl', vehicle.tpms_pressure_rl);
-        add('Fahrzeugstatus', 'tpms_pressure_rr', vehicle.tpms_pressure_rr);
-        add('Fahrzeugstatus', 'power', drive.power);
-        var auxPower = null;
-        if (vehicle.aux_battery_power != null) {
-            auxPower = vehicle.aux_battery_power;
-        } else if (vehicle.aux_battery_voltage != null && vehicle.aux_battery_current != null) {
-            auxPower = Math.round(vehicle.aux_battery_voltage * vehicle.aux_battery_current);
-        }
-        add('Fahrzeugstatus', 'aux_battery_power', auxPower);
-    }
-
-    if (vehicle.media_info) {
-        add('Medieninfos', 'media_playback_status', vehicle.media_info.media_playback_status);
-        add('Medieninfos', 'now_playing_source', vehicle.media_info.now_playing_source);
-        add('Medieninfos', 'audio_volume', vehicle.media_info.audio_volume);
-    }
-
-    return categories;
-}
-
-function generateCategoryTables(cats, status) {
-    var html = '';
-    var allowed = [];
-    if (status === 'Ladevorgang') {
-        allowed = ['Batterie und Laden', 'Klimaanlage', 'Fahrzeugstatus', 'Medieninfos'];
-    } else if (status === 'Fahrt') {
-        allowed = ['Batterie und Laden', 'Fahrstatus', 'Fahrzeugstatus', 'Medieninfos'];
-    } else {
-        allowed = ['Batterie und Laden', 'Fahrzeugstatus', 'Klimaanlage', 'Medieninfos'];
-    }
-    Object.keys(cats).forEach(function(name) {
-        if (allowed.indexOf(name) === -1) return;
-        var obj = cats[name];
-        if (Object.keys(obj).length === 0) return;
-        html += '<h3>' + name + '</h3>' + generateTable(obj);
-    });
-    return html;
-}
-
-function simpleData(data, status) {
-    var drive = data.drive_state || {};
-    var charge = data.charge_state || {};
-    var climate = data.climate_state || {};
-    var vehicle = data.vehicle_state || {};
-    var result = {};
-
-    if (status === 'Ladevorgang') {
-        if (charge.battery_level != null) result.battery_level = charge.battery_level;
-        if (charge.est_battery_range != null) result.battery_range = (charge.est_battery_range * MILES_TO_KM).toFixed(1);
-        if (charge.charge_rate != null) result.charge_rate = (charge.charge_rate * MILES_TO_KM).toFixed(1);
-        if (charge.charger_power != null) result.charger_power = charge.charger_power;
-        if (charge.time_to_full_charge != null) result.time_to_full_charge = charge.time_to_full_charge;
-    } else if (status === 'Fahrt') {
-        if (drive.speed != null) result.speed = Math.round(drive.speed * MILES_TO_KM);
-        if (drive.heading != null) result.heading = drive.heading;
-        if (drive.active_route_miles_to_arrival != null) result.distance_to_arrival = (drive.active_route_miles_to_arrival * MILES_TO_KM).toFixed(1);
-        if (charge.battery_level != null) result.battery_level = charge.battery_level;
-        if (charge.est_battery_range != null) result.battery_range = (charge.est_battery_range * MILES_TO_KM).toFixed(1);
-        if (climate.outside_temp != null) result.outside_temp = climate.outside_temp;
-    } else {
-        if (charge.battery_level != null) result.battery_level = charge.battery_level;
-        if (charge.est_battery_range != null) result.battery_range = (charge.est_battery_range * MILES_TO_KM).toFixed(1);
-        if (vehicle.odometer != null) result.odometer = Math.round(vehicle.odometer * MILES_TO_KM);
-        if (vehicle.tpms_pressure_fl != null) result.tpms_pressure_fl = vehicle.tpms_pressure_fl;
-        if (vehicle.tpms_pressure_fr != null) result.tpms_pressure_fr = vehicle.tpms_pressure_fr;
-        if (vehicle.tpms_pressure_rl != null) result.tpms_pressure_rl = vehicle.tpms_pressure_rl;
-        if (vehicle.tpms_pressure_rr != null) result.tpms_pressure_rr = vehicle.tpms_pressure_rr;
-        if (drive.power != null) result.power = drive.power;
-        var auxPower = null;
-        if (vehicle.aux_battery_power != null) {
-            auxPower = vehicle.aux_battery_power;
-        } else if (vehicle.aux_battery_voltage != null && vehicle.aux_battery_current != null) {
-            auxPower = Math.round(vehicle.aux_battery_voltage * vehicle.aux_battery_current);
-        }
-        if (auxPower != null) result.aux_battery_power = auxPower;
-    }
-
-    return result;
-}
 
 function updateUI(data) {
-    var html = '';
     var status = getStatus(data);
-    parkStart = data.park_start || null;
-    var parkSinceText = parkStart ? formatParkDuration(parkStart) : '';
-    html += '<h2>' + status + '</h2>';
-    if (status === 'Geparkt') {
-        html += '<p id="park-since">Geparkt seit <span id="park-time">' + parkSinceText + '</span></p>';
-    }
-    // Only show status and parking duration, omit detailed tables
-    $('#info').html(html);
-    if (status === 'Geparkt' && parkStart) {
-        updateParkTime();
-        if (!parkTimer) {
-            parkTimer = setInterval(updateParkTime, 60000);
-        }
-    } else {
-        if (parkTimer) {
-            clearInterval(parkTimer);
-            parkTimer = null;
-        }
-        if (status === 'Geparkt') {
-            $('#park-time').text('?');
-        }
-    }
+    $('#vehicle-status').text('Status: ' + status);
 }
 
 
