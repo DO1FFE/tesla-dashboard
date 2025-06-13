@@ -13,6 +13,27 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 }).addTo(map);
 var polyline = null;
 
+// Marker and polyline for active navigation destination
+var flagIcon = L.divIcon({
+    html: [
+        '<svg width="25" height="30" viewBox="0 0 20 30">',
+        '<defs>',
+        '<pattern id="checker" width="4" height="4" patternUnits="userSpaceOnUse">',
+        '<rect width="2" height="2" fill="#000"/>',
+        '<rect x="2" y="2" width="2" height="2" fill="#000"/>',
+        '</pattern>',
+        '</defs>',
+        '<path d="M5 2v26" stroke="black" stroke-width="2" fill="none"/>',
+        '<path d="M7 4l10 5-10 5z" fill="url(#checker)" stroke="black" stroke-width="1"/>',
+        '</svg>'
+    ].join(''),
+    className: 'flag-icon',
+    iconSize: [25, 30],
+    iconAnchor: [5, 28]
+});
+var destMarker = null;
+var destLine = null;
+
 var arrowIcon = L.divIcon({
     html: '<svg width="30" height="30" viewBox="0 0 30 30"><polygon points="15,0 30,30 15,22 0,30" /></svg>',
     className: 'arrow-icon',
@@ -98,6 +119,33 @@ function handleData(data) {
     } else {
         // Fall back to Essen if no coordinates are available
         map.setView(DEFAULT_POS, DEFAULT_ZOOM);
+    }
+
+    // Show destination flag and route line if navigation is active
+    if (drive.active_route_destination && drive.active_route_latitude && drive.active_route_longitude) {
+        var dLat = drive.active_route_latitude;
+        var dLng = drive.active_route_longitude;
+        if (!destMarker) {
+            destMarker = L.marker([dLat, dLng], { icon: flagIcon }).addTo(map);
+        } else {
+            destMarker.setLatLng([dLat, dLng]);
+        }
+        if (lat && lng) {
+            if (!destLine) {
+                destLine = L.polyline([[lat, lng], [dLat, dLng]], { color: 'red', dashArray: '5, 5', weight: 2 }).addTo(map);
+            } else {
+                destLine.setLatLngs([[lat, lng], [dLat, dLng]]);
+            }
+        }
+    } else {
+        if (destMarker) {
+            map.removeLayer(destMarker);
+            destMarker = null;
+        }
+        if (destLine) {
+            map.removeLayer(destLine);
+            destLine = null;
+        }
     }
     if (data.path && data.path.length > 1) {
         if (polyline) {
