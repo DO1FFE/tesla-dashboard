@@ -189,7 +189,7 @@ function updateLockStatus(locked) {
 
 function updateUserPresence(present) {
     if (present == null) {
-        $('#user-presence').text('');
+        $('#user-presence').empty();
         return;
     }
     var isPresent = false;
@@ -199,8 +199,12 @@ function updateUserPresence(present) {
     } else {
         isPresent = !!present;
     }
-    // use text variant of the bust in silhouette emoji so color can be applied
-    $('#user-presence').text('\uD83D\uDC64\uFE0E');
+    var icon = '<svg width="30" height="30" viewBox="0 0 24 24" ' +
+               'fill="currentColor" aria-hidden="true">' +
+               '<circle cx="12" cy="7" r="5" />' +
+               '<path d="M2 22c0-5.5 4.5-10 10-10s10 4.5 10 10" />' +
+               '</svg>';
+    $('#user-presence').html(icon);
     if (isPresent) {
         $('#user-presence').css('color', '#4caf50').attr('title', 'Person im Fahrzeug');
     } else {
