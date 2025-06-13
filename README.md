@@ -42,7 +42,17 @@ The `/history` page lists these files so previous trips can be selected and disp
 
 Data is streamed to the frontend via `/stream/<vehicle_id>` using Server-Sent Events so the dashboard updates instantly when new information arrives.
 The endpoint `/apiliste` exposes a text file listing all seen API variables and their latest values.
+
 The same information is also stored as hierarchical JSON in `data/api-liste.json`.
+
+## Version
+
+The dashboard reports its own version in the footer. The version string is derived
+from the number of Git commits so it increases automatically with every pull request.
+The footer also includes a copyright notice:
+```
+Dashboard Version 1.0.X - © <current year> Erik Schauer, do1ffe@darc.de
+```
 
 ## Reference
 
