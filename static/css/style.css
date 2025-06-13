@@ -72,6 +72,7 @@
   margin: 0;
 }
 
+#charging-info,
 /* Navigation bar below the status bar */
 #nav-bar {
   margin: 5px 0 10px;
@@ -80,10 +81,13 @@
   border-radius: 5px;
 }
 
+#charging-info table,
 #nav-bar table {
   border-collapse: collapse;
 }
 
+#charging-info th,
+#charging-info td,
 #nav-bar th,
 #nav-bar td {
   border: 1px solid #ccc;
@@ -91,11 +95,13 @@
   text-align: left;
 }
 
+#charging-info th,
 #nav-bar th {
   white-space: nowrap;
   font-weight: normal;
 }
 
+#charging-info span.icon,
 #nav-bar span.icon {
   margin-right: 4px;
 }

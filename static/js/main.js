@@ -106,6 +106,7 @@ function handleData(data) {
         rangeMiles = charge.est_battery_range;
     }
     updateBatteryIndicator(charge.battery_level, rangeMiles);
+    updateChargingInfo(charge);
     var climate = data.climate_state || {};
     updateThermometers(climate.inside_temp, climate.outside_temp);
     updateClimateStatus(climate.is_climate_on);
@@ -378,6 +379,47 @@ function updateBatteryIndicator(level, rangeMiles) {
 function batteryBar(level) {
     var pct = level != null ? level : 0;
     return '<div class="battery-block"><div class="battery"><div class="level" style="height:' + pct + '%;"></div></div><div class="battery-value">' + pct + '%</div></div>';
+}
+
+function updateChargingInfo(charge) {
+    var $info = $('#charging-info');
+    if (!charge || charge.charging_state !== 'Charging') {
+        $info.empty().hide();
+        return;
+    }
+
+    var rows = [];
+    if (charge.charging_state) {
+        rows.push('<tr><th>Status:</th><td>' + charge.charging_state + '</td></tr>');
+    }
+    if (charge.charge_energy_added != null) {
+        rows.push('<tr><th>Geladene Energie:</th><td>' + Number(charge.charge_energy_added).toFixed(2) + ' kWh</td></tr>');
+    }
+    if (charge.charger_actual_current != null) {
+        rows.push('<tr><th>Ladestrom:</th><td>' + Number(charge.charger_actual_current).toFixed(0) + ' A</td></tr>');
+    } else if (charge.charger_power != null) {
+        rows.push('<tr><th>Ladeleistung:</th><td>' + Number(charge.charger_power).toFixed(0) + ' kW</td></tr>');
+    }
+    if (charge.charger_voltage != null) {
+        rows.push('<tr><th>Spannung:</th><td>' + Number(charge.charger_voltage).toFixed(0) + ' V</td></tr>');
+    }
+    if (charge.conn_charge_cable) {
+        rows.push('<tr><th>Kabel:</th><td>' + charge.conn_charge_cable + '</td></tr>');
+    }
+    if (charge.fast_charger_brand) {
+        rows.push('<tr><th>Schnelllader Marke:</th><td>' + charge.fast_charger_brand + '</td></tr>');
+    }
+    if (charge.fast_charger_type) {
+        rows.push('<tr><th>Schnelllader Typ:</th><td>' + charge.fast_charger_type + '</td></tr>');
+    }
+    if (charge.minutes_to_full_charge != null) {
+        rows.push('<tr><th>Minuten bis voll:</th><td>' + Math.round(charge.minutes_to_full_charge) + ' min</td></tr>');
+    }
+    if (charge.time_to_full_charge != null) {
+        rows.push('<tr><th>Zeit bis voll:</th><td>' + Number(charge.time_to_full_charge).toFixed(2) + ' h</td></tr>');
+    }
+
+    $info.html('<table>' + rows.join('') + '</table>').show();
 }
 
 function updateNavBar(drive) {
