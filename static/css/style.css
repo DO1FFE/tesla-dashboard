@@ -229,6 +229,11 @@
   margin-top: 2px;
 }
 
+#speedometer .odometer {
+  font-size: 0.9em;
+  margin-top: 2px;
+}
+
 /* Thermometers for inside/outside temperature */
 #thermometers {
   display: inline-block;
