@@ -100,7 +100,11 @@ function handleData(data) {
     updateNavBar(drive);
     updateSpeedometer(drive.speed, drive.power);
     var charge = data.charge_state || {};
-    updateBatteryIndicator(charge.battery_level, charge.est_battery_range);
+    var rangeMiles = charge.ideal_battery_range;
+    if (rangeMiles == null) {
+        rangeMiles = charge.est_battery_range;
+    }
+    updateBatteryIndicator(charge.battery_level, rangeMiles);
     var climate = data.climate_state || {};
     updateThermometers(climate.inside_temp, climate.outside_temp);
     updateClimateStatus(climate.is_climate_on);
