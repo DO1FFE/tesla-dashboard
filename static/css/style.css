@@ -100,6 +100,34 @@
   margin-right: 4px;
 }
 
+/* Media player below the navigation bar */
+#media-player {
+  margin: 5px 0 10px;
+  padding: 5px 10px;
+  background: #f2f2f2;
+  border-radius: 5px;
+}
+
+#media-player table {
+  border-collapse: collapse;
+}
+
+#media-player th,
+#media-player td {
+  border: 1px solid #ccc;
+  padding: 4px 8px;
+  text-align: left;
+}
+
+#media-player th {
+  white-space: nowrap;
+  font-weight: normal;
+}
+
+#media-player span.icon {
+  margin-right: 4px;
+}
+
 /* Simple automatic gear shift display */
 #gear-shift {
   display: inline-block;

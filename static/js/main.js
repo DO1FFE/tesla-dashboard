@@ -109,6 +109,7 @@ function handleData(data) {
                vehicle.tpms_pressure_fr,
                vehicle.tpms_pressure_rl,
                vehicle.tpms_pressure_rr);
+    updateMediaPlayer(vehicle.media_info);
     var lat = drive.latitude;
     var lng = drive.longitude;
     if (lat && lng) {
@@ -385,6 +386,55 @@ function updateNavBar(drive) {
         rows.push('<tr><th><span class="icon">🚦</span>Stau-Verzögerung:</th><td>+' + Math.round(drive.active_route_traffic_minutes_delay) + ' min</td></tr>');
     }
     $nav.html('<table>' + rows.join('') + '</table>');
+}
+
+function updateMediaPlayer(media) {
+    var $player = $('#media-player');
+    if (!media || (!media.now_playing_title && !media.now_playing_artist && !media.now_playing_album)) {
+        $player.html('<table><tr><td colspan="2"><span class="icon">🎵</span>Keine Wiedergabe</td></tr></table>');
+        return;
+    }
+
+    var rows = [];
+    var title = media.now_playing_title || '';
+    var artist = media.now_playing_artist || '';
+    var album = media.now_playing_album || '';
+    var source = media.now_playing_source || '';
+    var station = media.now_playing_station || '';
+    var status = media.media_playback_status || '';
+    var vol = media.audio_volume;
+    var elapsed = media.now_playing_elapsed;
+    var duration = media.now_playing_duration;
+
+    if (title || artist || album) {
+        var info = title;
+        if (artist) {
+            info += (info ? ' - ' : '') + artist;
+        }
+        if (album) {
+            info += (info ? ' (' + album + ')' : album);
+        }
+        rows.push('<tr><th colspan="2">' + info + '</th></tr>');
+    }
+    if (source) {
+        rows.push('<tr><th>Quelle:</th><td>' + source + '</td></tr>');
+    }
+    if (station) {
+        rows.push('<tr><th>Sender:</th><td>' + station + '</td></tr>');
+    }
+    if (status) {
+        rows.push('<tr><th>Status:</th><td>' + status + '</td></tr>');
+    }
+    if (vol != null && !isNaN(vol)) {
+        rows.push('<tr><th>Lautstärke:</th><td>' + Number(vol).toFixed(1) + '</td></tr>');
+    }
+    if (duration != null && elapsed != null && duration > 0) {
+        var pct = Math.min(Math.max(elapsed / duration * 100, 0), 100);
+        var pos = Math.round(elapsed / 1000);
+        var dur = Math.round(duration / 1000);
+        rows.push('<tr><th>Position:</th><td>' + pos + 's / ' + dur + 's (' + Math.round(pct) + '%)</td></tr>');
+    }
+    $player.html('<table>' + rows.join('') + '</table>');
 }
 
 function getStatus(data) {
