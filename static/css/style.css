@@ -265,3 +265,20 @@
   margin: 2px;
   font-size: 0.8em;
 }
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  #vehicle-info,
+  #vehicle-status {
+    float: none;
+    display: block;
+    margin-left: 0;
+  }
+  #status-bar {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  #map {
+    height: 50vh !important;
+  }
+}
