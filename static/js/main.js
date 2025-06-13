@@ -107,6 +107,10 @@ function handleData(data) {
     updateCabinProtection(climate.cabin_overheat_protection);
     updateFanStatus(climate.fan_status);
     updateDesiredTemp(climate.driver_temp_setting);
+    updateTPMS(vehicle.tpms_pressure_fl,
+               vehicle.tpms_pressure_fr,
+               vehicle.tpms_pressure_rl,
+               vehicle.tpms_pressure_rr);
     var lat = drive.latitude;
     var lng = drive.longitude;
     if (lat && lng) {
@@ -288,6 +292,30 @@ function updateDesiredTemp(temp) {
     }
     $('#desired-temp').text('\uD83C\uDF21\uFE0F ' + temp.toFixed(1) + ' \u00B0C')
         .attr('title', 'Wunschtemperatur');
+}
+
+function updateTPMS(fl, fr, rl, rr) {
+    function set(id, val) {
+        var $el = $('#tpms-' + id);
+        if (val == null || isNaN(val)) {
+            $el.text('--').css('border-color', '#555');
+            return;
+        }
+        var num = Number(val);
+        $el.text(num.toFixed(1));
+        var color = '#4caf50';
+        if (num < 2.5 || num > 3.4) {
+            color = '#ff9800';
+        }
+        if (num < 2.0 || num > 3.7) {
+            color = '#d00';
+        }
+        $el.css('border-color', color);
+    }
+    set('VL', fl);
+    set('VR', fr);
+    set('HL', rl);
+    set('HR', rr);
 }
 
 var MAX_SPEED = 240;
