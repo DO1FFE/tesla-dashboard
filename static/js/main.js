@@ -91,7 +91,6 @@ function fetchVehicles() {
 function handleData(data) {
     updateHeader(data);
     updateUI(data);
-    updateModules(data);
     var drive = data.drive_state || {};
     var vehicle = data.vehicle_state || {};
     updateLockStatus(vehicle.locked);
@@ -599,44 +598,6 @@ function updateUI(data) {
     }
 }
 
-function updateModules(data) {
-    var drive = data.drive_state || {};
-    $('#module-drive').html('<h3>Fahrstatus</h3>' + generateTable(drive));
-
-    var climate = data.climate_state || {};
-    $('#module-climate').html('<h3>Klima</h3>' + generateTable(climate));
-
-    var charge = data.charge_state || {};
-    var battery = {
-        battery_level: charge.battery_level,
-        est_battery_range: charge.est_battery_range != null ? (charge.est_battery_range * MILES_TO_KM).toFixed(1) : null
-    };
-    $('#module-battery').html('<h3>Batterie</h3>' + generateTable(battery));
-
-    $('#module-charge').html('<h3>Laden</h3>' + generateTable(charge));
-
-    var vehicle = data.vehicle_state || {};
-    var tires = {
-        tpms_pressure_fl: vehicle.tpms_pressure_fl,
-        tpms_pressure_fr: vehicle.tpms_pressure_fr,
-        tpms_pressure_rl: vehicle.tpms_pressure_rl,
-        tpms_pressure_rr: vehicle.tpms_pressure_rr
-    };
-    $('#module-tires').html('<h3>Reifen</h3>' + generateTable(tires));
-
-    if (vehicle.media_info) {
-        $('#module-media').html('<h3>Media</h3>' + generateTable(vehicle.media_info));
-    } else {
-        $('#module-media').html('<h3>Media</h3><p>Keine Daten</p>');
-    }
-
-    var update = vehicle.software_update || {};
-    if (Object.keys(update).length > 0) {
-        $('#module-updates').html('<h3>Updates</h3>' + generateTable(update));
-    } else {
-        $('#module-updates').html('<h3>Updates</h3><p>Keine Daten</p>');
-    }
-}
 
 $('#vehicle-select').on('change', function() {
     currentVehicle = $(this).val();
