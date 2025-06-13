@@ -310,3 +310,10 @@
     height: 50vh !important;
   }
 }
+
+.app-version {
+  text-align: center;
+  font-size: 0.8em;
+  margin-top: 10px;
+  color: #666;
+}

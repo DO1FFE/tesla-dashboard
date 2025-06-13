@@ -7,6 +7,8 @@ import logging
 from logging.handlers import RotatingFileHandler
 from flask import Flask, render_template, jsonify, Response, request
 from dotenv import load_dotenv
+from version import get_version
+from datetime import datetime
 
 try:
     import teslapy
@@ -15,6 +17,8 @@ except ImportError:
 
 load_dotenv()
 app = Flask(__name__)
+__version__ = get_version()
+CURRENT_YEAR = datetime.now().year
 
 # Ensure data paths are relative to this file regardless of the
 # current working directory.  This allows running the application
@@ -483,7 +487,7 @@ def _start_thread(vehicle_id):
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html', version=__version__, year=CURRENT_YEAR)
 
 
 @app.route('/map')
