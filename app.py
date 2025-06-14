@@ -594,27 +594,44 @@ def api_version():
     return jsonify({'version': __version__})
 
 
-@app.route('/cop', methods=['POST'])
+@app.route('/cop', methods=['GET', 'POST'])
 def set_cop_temp():
-    """Set cabin overheat protection temperature."""
+    """Interactively set cabin overheat protection temperature."""
+    if request.method == 'GET':
+        return render_template('cop.html', result=None)
+
     data = request.get_json(silent=True) or {}
-    temp = data.get('temp') or request.values.get('temp')
-    vehicle_id = data.get('vehicle_id') or request.values.get('vehicle_id')
+    temp = (data.get('temp') or request.form.get('temp') or
+            request.values.get('temp'))
+    vehicle_id = (data.get('vehicle_id') or request.form.get('vehicle_id') or
+                  request.values.get('vehicle_id'))
 
     if temp is None:
-        return jsonify({'error': 'Missing temp'}), 400
+        error = {'error': 'Missing temp'}
+        if request.is_json:
+            return jsonify(error), 400
+        return render_template('cop.html', result=error), 400
     try:
         temp = float(temp)
     except (TypeError, ValueError):
-        return jsonify({'error': 'Invalid temp'}), 400
+        error = {'error': 'Invalid temp'}
+        if request.is_json:
+            return jsonify(error), 400
+        return render_template('cop.html', result=error), 400
 
     tesla = get_tesla()
     if tesla is None:
-        return jsonify({'error': 'Missing Tesla credentials or teslapy not installed'})
+        error = {'error': 'Missing Tesla credentials or teslapy not installed'}
+        if request.is_json:
+            return jsonify(error)
+        return render_template('cop.html', result=error)
 
     vehicles = _cached_vehicle_list(tesla)
     if not vehicles:
-        return jsonify({'error': 'No vehicles found'})
+        error = {'error': 'No vehicles found'}
+        if request.is_json:
+            return jsonify(error)
+        return render_template('cop.html', result=error)
 
     vehicle = None
     if vehicle_id is not None:
@@ -625,10 +642,16 @@ def set_cop_temp():
     try:
         result = vehicle.command('SET_COP_TEMP', temp=temp)
         log_api_data('SET_COP_TEMP', {'result': result})
-        return jsonify({'result': result})
+        result_data = {'result': result}
+        if request.is_json:
+            return jsonify(result_data)
+        return render_template('cop.html', result=result_data)
     except Exception as exc:
         _log_api_error(exc)
-        return jsonify({'error': str(exc)})
+        error = {'error': str(exc)}
+        if request.is_json:
+            return jsonify(error)
+        return render_template('cop.html', result=error)
 
 
 @app.route('/error')
