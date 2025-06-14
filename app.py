@@ -438,6 +438,25 @@ def get_vehicle_data(vehicle_id=None):
     track_park_time(vehicle_data)
     track_drive_path(vehicle_data)
     sanitized = sanitize(vehicle_data)
+    try:
+        v_state = sanitized.get('vehicle_state', {})
+        v_config = sanitized.get('vehicle_config', {})
+        name = v_state.get('vehicle_name')
+        car_type = v_config.get('car_type')
+        trim = v_config.get('trim_badging')
+        if name and car_type and trim:
+            car_map = {
+                'models': 'Model S',
+                'modelx': 'Model X',
+                'model3': 'Model 3',
+                'modely': 'Model Y',
+                'roadster': 'Roadster',
+                'cybertruck': 'Cybertruck'
+            }
+            car_desc = car_map.get(str(car_type).lower(), car_type)
+            v_state['vehicle_name'] = f"{name} ({car_desc} {trim.upper()})"
+    except Exception:
+        pass
     log_api_data('get_vehicle_data', sanitized)
     sanitized['park_start'] = park_start_ms
     sanitized['path'] = trip_path
