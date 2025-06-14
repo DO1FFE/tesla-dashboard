@@ -594,66 +594,6 @@ def api_version():
     return jsonify({'version': __version__})
 
 
-@app.route('/cop', methods=['GET', 'POST'])
-def set_cop_temp():
-    """Interactively set cabin overheat protection temperature."""
-    if request.method == 'GET':
-        return render_template('cop.html', result=None)
-
-    data = request.get_json(silent=True) or {}
-    temp = (data.get('temp') or request.form.get('temp') or
-            request.values.get('temp'))
-    vehicle_id = (data.get('vehicle_id') or request.form.get('vehicle_id') or
-                  request.values.get('vehicle_id'))
-
-    if temp is None:
-        error = {'error': 'Missing temp'}
-        if request.is_json:
-            return jsonify(error), 400
-        return render_template('cop.html', result=error), 400
-    try:
-        temp = float(temp)
-    except (TypeError, ValueError):
-        error = {'error': 'Invalid temp'}
-        if request.is_json:
-            return jsonify(error), 400
-        return render_template('cop.html', result=error), 400
-
-    tesla = get_tesla()
-    if tesla is None:
-        error = {'error': 'Missing Tesla credentials or teslapy not installed'}
-        if request.is_json:
-            return jsonify(error)
-        return render_template('cop.html', result=error)
-
-    vehicles = _cached_vehicle_list(tesla)
-    if not vehicles:
-        error = {'error': 'No vehicles found'}
-        if request.is_json:
-            return jsonify(error)
-        return render_template('cop.html', result=error)
-
-    vehicle = None
-    if vehicle_id is not None:
-        vehicle = next((v for v in vehicles if str(v['id_s']) == str(vehicle_id)), None)
-    if vehicle is None:
-        vehicle = vehicles[0]
-
-    try:
-        # Tesla API expects the parameter name "cop_temp"
-        result = vehicle.command('SET_COP_TEMP', cop_temp=temp)
-        log_api_data('SET_COP_TEMP', {'result': result})
-        result_data = {'result': result}
-        if request.is_json:
-            return jsonify(result_data)
-        return render_template('cop.html', result=result_data)
-    except Exception as exc:
-        _log_api_error(exc)
-        error = {'error': str(exc)}
-        if request.is_json:
-            return jsonify(error)
-        return render_template('cop.html', result=error)
-
 
 @app.route('/error')
 def error_page():
