@@ -347,7 +347,9 @@ function updateOpenings(vehicle) {
 
     parts.forEach(function(p) {
         if (vehicle[p.key] == null) return;
-        var open = Number(vehicle[p.key]) === 1;
+        // Values are 0 when the part is closed and non-zero when open.
+        // Use loose inequality to handle any non-zero value as "open".
+        var open = Number(vehicle[p.key]) !== 0;
         $('#' + p.id).attr('class', open ? 'part-open' : 'part-closed');
     });
 

@@ -73,3 +73,8 @@ Tesla-Dashboard Version 1.0.X - © <current year> Erik Schauer, do1ffe@darc.de
 ## Reference
 
 For a sample API response from Tesla, see [docs/sample_api_response.json](docs/sample_api_response.json).
+
+The API reports doors, windows, trunk and frunk using numeric values. These
+values are `0` when the part is closed and `1` (or any non-zero value) when the
+part is open. The dashboard therefore treats any non-zero value as "open" to
+handle potential future variations.
