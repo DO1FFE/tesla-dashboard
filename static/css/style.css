@@ -391,6 +391,8 @@ select {
 #openings-indicator svg {
   width: 100px;
   height: 200px;
+  transform: rotate(180deg);
+  transform-origin: center;
 }
 
 #openings-indicator .part-open {
