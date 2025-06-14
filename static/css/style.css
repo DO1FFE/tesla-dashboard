@@ -394,6 +394,31 @@ select {
   }
 }
 
+#openings-indicator {
+  display: inline-block;
+  margin: 0;
+  vertical-align: top;
+  text-align: left;
+  font-weight: bold;
+}
+
+#openings-indicator table {
+  border-collapse: collapse;
+}
+
+#openings-indicator th,
+#openings-indicator td {
+  padding: 2px 4px;
+}
+
+#openings-indicator .status-open {
+  color: #4caf50;
+}
+
+#openings-indicator .status-closed {
+  color: #d32f2f;
+}
+
 .app-version {
   text-align: center;
   font-size: 0.8em;

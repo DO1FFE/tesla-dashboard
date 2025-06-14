@@ -133,6 +133,7 @@ function handleData(data) {
                vehicle.tpms_pressure_fr,
                vehicle.tpms_pressure_rl,
                vehicle.tpms_pressure_rr);
+    updateOpenings(vehicle);
     updateMediaPlayer(vehicle.media_info);
     var lat = drive.latitude;
     var lng = drive.longitude;
@@ -325,6 +326,43 @@ function updateTPMS(fl, fr, rl, rr) {
     set('VR', fr);
     set('HL', rl);
     set('HR', rr);
+}
+
+function updateOpenings(vehicle) {
+    var entries = [
+        {key: 'df', label: 'T\u00FCr VL'},
+        {key: 'dr', label: 'T\u00FCr HL'},
+        {key: 'pf', label: 'T\u00FCr VR'},
+        {key: 'pr', label: 'T\u00FCr HR'},
+        {key: 'fd_window', label: 'Fenster VL'},
+        {key: 'rd_window', label: 'Fenster HL'},
+        {key: 'fp_window', label: 'Fenster VR'},
+        {key: 'rp_window', label: 'Fenster HR'},
+        {key: 'ft', label: 'Frunk'},
+        {key: 'rt', label: 'Kofferraum'}
+    ];
+
+    var rows = [];
+    entries.forEach(function(e) {
+        if (vehicle[e.key] == null) return;
+        var val = Number(vehicle[e.key]);
+        var open = val === 1;
+        var cls = open ? 'status-open' : 'status-closed';
+        var text = open ? 'Offen' : 'Zu';
+        rows.push('<tr><th>' + e.label + ':</th><td class="' + cls + '">' + text + '</td></tr>');
+    });
+
+    var srPct = vehicle.sun_roof_percent_open;
+    var srState = vehicle.sun_roof_state;
+    if (srPct != null || srState) {
+        var pctStr = srPct != null && !isNaN(srPct) ? Math.round(Number(srPct)) + '%' : '';
+        var open = srState && srState.toLowerCase() !== 'closed' && Number(srPct) > 0;
+        var cls = open ? 'status-open' : 'status-closed';
+        var text = (srState || '') + (pctStr ? ' (' + pctStr + ')' : '');
+        rows.push('<tr><th>Schiebedach:</th><td class="' + cls + '">' + text + '</td></tr>');
+    }
+
+    $('#openings-indicator').html('<table>' + rows.join('') + '</table>');
 }
 
 var MAX_SPEED = 250;

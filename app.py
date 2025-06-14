@@ -207,6 +207,7 @@ CONFIG_ITEMS = [
     {'id': 'thermometers', 'desc': 'Temperaturen'},
     {'id': 'climate-indicator', 'desc': 'Klimaanlage'},
     {'id': 'tpms-indicator', 'desc': 'Reifendruck'},
+    {'id': 'openings-indicator', 'desc': 'Türen/Fenster'},
     {'id': 'charging-info', 'desc': 'Ladeinformationen'},
     {'id': 'nav-bar', 'desc': 'Navigationsleiste'},
     {'id': 'media-player', 'desc': 'Medienwiedergabe'},
