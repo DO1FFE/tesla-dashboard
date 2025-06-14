@@ -312,7 +312,7 @@ function updateTPMS(fl, fr, rl, rr) {
     set('HR', rr);
 }
 
-var MAX_SPEED = 240;
+var MAX_SPEED = 250;
 var MIN_TEMP = -20;
 var MAX_TEMP = 50;
 
