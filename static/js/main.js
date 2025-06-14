@@ -50,8 +50,14 @@ var eventSource = null;
 
 function updateHeader(data) {
     var info = '';
-    if (data && data.display_name) {
-        info = 'für ' + data.display_name;
+    if (data) {
+        var name = data.vehicle_state && data.vehicle_state.vehicle_name;
+        if (!name && data.display_name) {
+            name = data.display_name;
+        }
+        if (name) {
+            info = 'für ' + name;
+        }
         var version = data.vehicle_state && data.vehicle_state.car_version;
         if (version) {
             version = version.split(' ')[0];
