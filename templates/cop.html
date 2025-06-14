@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cabin Overheat Protection</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        pre { background:#f0f0f0; padding:10px; overflow-x:auto; }
+    </style>
+</head>
+<body>
+    <h1>Cabin Overheat Protection</h1>
+    <form method="post">
+        <label for="temp">Temperatur (°C):</label>
+        <input type="number" step="0.1" id="temp" name="temp" required>
+        <button type="submit">Senden</button>
+    </form>
+    {% if result %}
+    <h2>Antwort:</h2>
+    <pre>{{ result|tojson(indent=2) }}</pre>
+    {% endif %}
+</body>
+</html>
