@@ -1,0 +1,65 @@
+ACTUATE_TRUNK - Kofferraum oder Frunk betätigen
+ADD_MANAGED_CHARGING_SITE - Ladeort verwalten hinzufügen
+ADJUST_VOLUME - Medienlautstärke einstellen
+CALENDAR_SYNC - Kalender mit Fahrzeug synchronisieren
+CANCEL_SOFTWARE_UPDATE - Geplantes Update abbrechen
+CHANGE_CHARGE_LIMIT - Maximale Ladegrenze setzen
+CHANGE_CHARGE_MAX - Auf 100 % laden
+CHANGE_CHARGE_STANDARD - Auf Standardgrenze laden
+CHANGE_CLIMATE_TEMPERATURE_SETTING - Innenraumtemperatur einstellen
+CHANGE_SUNROOF_STATE - Schiebedach öffnen oder schließen
+CHARGE_PORT_DOOR_CLOSE - Ladeanschlussklappe schließen
+CHARGE_PORT_DOOR_OPEN - Ladeanschlussklappe öffnen
+CHARGING_AMPS - Ladestrom einstellen
+CLIMATE_OFF - Klimaanlage ausschalten
+CLIMATE_ON - Klimaanlage einschalten
+DASHCAM_SAVE_CLIP - Dashcam-Clip speichern
+FLASH_LIGHTS - Lichter aufblinken lassen
+GET_CHARGE_ON_SOLAR_FEATURE - Status "Laden mit Solar" abrufen
+GET_MANAGED_CHARGING_SITES - Verwaltete Ladeorte auflisten
+HONK_HORN - Hupe betätigen
+HVAC_BIOWEAPON_MODE - Biowaffen-Modus einschalten
+LOCK - Fahrzeug verriegeln
+MAX_DEFROST - Maximale Defrost-Einstellung
+MEDIA_NEXT_FAVORITE - Nächster Favorit in der Medienliste
+MEDIA_NEXT_TRACK - Nächster Titel
+MEDIA_PREVIOUS_FAVORITE - Vorheriger Favorit
+MEDIA_PREVIOUS_TRACK - Vorheriger Titel
+MEDIA_TOGGLE_PLAYBACK - Wiedergabe starten oder stoppen
+MEDIA_VOLUME_DOWN - Lautstärke verringern
+MEDIA_VOLUME_UP - Lautstärke erhöhen
+NAVIGATION_ROUTE - Aktive Route abfragen
+REMOTE_AUTO_SEAT_CLIMATE_REQUEST - Automatische Sitzklimatisierung
+REMOTE_AUTO_STEERING_WHEEL_HEAT_CLIMATE_REQUEST - Automatische Lenkradheizung
+REMOTE_BOOMBOX - Audio über Außenlautsprecher abspielen
+REMOTE_SEAT_COOLING_REQUEST - Sitzkühlung steuern
+REMOTE_SEAT_HEATER_REQUEST - Sitzheizung steuern
+REMOTE_START - Fahrzeug per Fernstart aktivieren
+REMOTE_STEERING_WHEEL_HEATER_REQUEST - Lenkradheizung schalten
+REMOTE_STEERING_WHEEL_HEAT_LEVEL_REQUEST - Heizstufe des Lenkrads setzen
+REMOVE_MANAGED_CHARGING_SITE - Ladeort entfernen
+RESET_VALET_PIN - Valet-PIN zurücksetzen
+SCHEDULED_CHARGING - Zeitgesteuertes Laden einstellen
+SCHEDULED_DEPARTURE - Geplante Abfahrt setzen
+SCHEDULE_SOFTWARE_UPDATE - Softwareupdate planen
+SEND_GPS_TO_VEHICLE - GPS-Position ans Fahrzeug senden
+SEND_SC_TO_VEHICLE - Supercharger-Ziel senden
+SEND_TO_VEHICLE - Adresse an Fahrzeug senden
+SEND_WAYPOINTS_TO_VEHICLE - Wegpunkte übertragen
+SET_CABIN_OVERHEAT_PROTECTION - Überhitzungsschutz konfigurieren
+SET_CLIMATE_KEEPER_MODE - Climate Keeper Mode wählen
+SET_COP_TEMP - Temperatur für Überhitzungsschutz setzen
+SET_SENTRY_MODE - Wächtermodus schalten
+SET_VALET_MODE - Valet-Modus aktivieren
+SET_VEHICLE_NAME - Fahrzeugnamen ändern
+SPEED_LIMIT_ACTIVATE - Geschwindigkeitsbegrenzung aktivieren
+SPEED_LIMIT_CLEAR_PIN - PIN der Begrenzung löschen
+SPEED_LIMIT_DEACTIVATE - Geschwindigkeitsbegrenzung deaktivieren
+SPEED_LIMIT_SET_LIMIT - Geschwindigkeitslimit festlegen
+START_CHARGE - Ladevorgang starten
+STOP_CHARGE - Ladevorgang beenden
+TAKE_DRIVENOTE - Fahrnotiz aufnehmen
+TRIGGER_HOMELINK - HomeLink auslösen
+UNLOCK - Fahrzeug entriegeln
+UPDATE_CHARGE_ON_SOLAR_FEATURE - Einstellung "Laden mit Solar" anpassen
+WINDOW_CONTROL - Fenster steuern
