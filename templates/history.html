@@ -17,7 +17,7 @@
     </style>
 </head>
 <body>
-    <form id="trip-form" method="get" action="/history" style="position:absolute;top:10px;left:10px;z-index:1000;background:#fff;padding:5px;">
+    <form id="trip-form" method="get" action="/history">
         <label for="file">Fahrt auswählen:</label>
         <select id="file" name="file" onchange="document.getElementById('trip-form').submit();">
             {% for f in files %}
