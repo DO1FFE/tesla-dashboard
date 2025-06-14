@@ -362,6 +362,8 @@ select {
   font-size: 8px;
   text-anchor: middle;
   dominant-baseline: central;
+  /* ensure rotation uses the text's own bounding box */
+  transform-box: fill-box;
   transform: rotate(180deg);
   transform-origin: center;
 }
