@@ -401,13 +401,14 @@ function updateChargingInfo(charge) {
     if (charge.charge_energy_added != null) {
         rows.push('<tr><th>Geladene Energie:</th><td>' + Number(charge.charge_energy_added).toFixed(2) + ' kWh</td></tr>');
     }
-    if (charge.charger_actual_current != null) {
-        rows.push('<tr><th>Ladestrom:</th><td>' + Number(charge.charger_actual_current).toFixed(0) + ' A</td></tr>');
-    } else if (charge.charger_power != null) {
-        rows.push('<tr><th>Ladeleistung:</th><td>' + Number(charge.charger_power).toFixed(0) + ' kW</td></tr>');
-    }
     if (charge.charger_voltage != null) {
         rows.push('<tr><th>Spannung:</th><td>' + Number(charge.charger_voltage).toFixed(0) + ' V</td></tr>');
+    }
+    if (charge.charge_rate != null) {
+        rows.push('<tr><th>Ladestrom:</th><td>' + Number(charge.charge_rate).toFixed(0) + ' A</td></tr>');
+    } 
+    if (charge.charger_power != null) {
+        rows.push('<tr><th>Ladeleistung:</th><td>' + Number(charge.charger_power).toFixed(0) + ' kW</td></tr>');
     }
     if (charge.conn_charge_cable) {
         rows.push('<tr><th>Kabel:</th><td>' + charge.conn_charge_cable + '</td></tr>');
@@ -421,10 +422,6 @@ function updateChargingInfo(charge) {
     if (charge.minutes_to_full_charge != null) {
         rows.push('<tr><th>Minuten bis voll:</th><td>' + Math.round(charge.minutes_to_full_charge) + ' min</td></tr>');
     }
-    if (charge.time_to_full_charge != null) {
-        rows.push('<tr><th>Zeit bis voll:</th><td>' + Number(charge.time_to_full_charge).toFixed(2) + ' h</td></tr>');
-    }
-
     $info.html('<table>' + rows.join('') + '</table>').show();
 }
 
