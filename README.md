@@ -55,7 +55,6 @@ The same information is also stored as hierarchical JSON in `data/api-liste.json
 * `/history` – select and display recorded trips
 * `/error` – show recent API errors (JSON via `/api/errors`)
 * `/debug` – display environment info and recent log lines
-* `/cop` – set Cabin Overheat Protection temperature
 * `/api/vehicles` – list available vehicles as JSON
 * `/api/version` – return the current dashboard version as JSON
 * `/stream/<vehicle_id>` – Server-Sent Events endpoint used by the frontend
