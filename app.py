@@ -640,7 +640,8 @@ def set_cop_temp():
         vehicle = vehicles[0]
 
     try:
-        result = vehicle.command('SET_COP_TEMP', temp=temp)
+        # Tesla API expects the parameter name "cop_temp"
+        result = vehicle.command('SET_COP_TEMP', cop_temp=temp)
         log_api_data('SET_COP_TEMP', {'result': result})
         result_data = {'result': result}
         if request.is_json:
