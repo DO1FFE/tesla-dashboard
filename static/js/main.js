@@ -329,40 +329,31 @@ function updateTPMS(fl, fr, rl, rr) {
 }
 
 function updateOpenings(vehicle) {
-    var entries = [
-        {key: 'df', label: 'T\u00FCr VL'},
-        {key: 'dr', label: 'T\u00FCr HL'},
-        {key: 'pf', label: 'T\u00FCr VR'},
-        {key: 'pr', label: 'T\u00FCr HR'},
-        {key: 'fd_window', label: 'Fenster VL'},
-        {key: 'rd_window', label: 'Fenster HL'},
-        {key: 'fp_window', label: 'Fenster VR'},
-        {key: 'rp_window', label: 'Fenster HR'},
-        {key: 'ft', label: 'Frunk'},
-        {key: 'rt', label: 'Kofferraum'}
+    var parts = [
+        {key: 'df', id: 'door-fl'},
+        {key: 'dr', id: 'door-rl'},
+        {key: 'pf', id: 'door-fr'},
+        {key: 'pr', id: 'door-rr'},
+        {key: 'fd_window', id: 'window-fl'},
+        {key: 'rd_window', id: 'window-rl'},
+        {key: 'fp_window', id: 'window-fr'},
+        {key: 'rp_window', id: 'window-rr'},
+        {key: 'ft', id: 'frunk'},
+        {key: 'rt', id: 'trunk'}
     ];
 
-    var rows = [];
-    entries.forEach(function(e) {
-        if (vehicle[e.key] == null) return;
-        var val = Number(vehicle[e.key]);
-        var open = val === 1;
-        var cls = open ? 'status-open' : 'status-closed';
-        var text = open ? 'Offen' : 'Zu';
-        rows.push('<tr><th>' + e.label + ':</th><td class="' + cls + '">' + text + '</td></tr>');
+    parts.forEach(function(p) {
+        if (vehicle[p.key] == null) return;
+        var open = Number(vehicle[p.key]) === 1;
+        $('#' + p.id).attr('class', open ? 'part-open' : 'part-closed');
     });
 
     var srPct = vehicle.sun_roof_percent_open;
     var srState = vehicle.sun_roof_state;
     if (srPct != null || srState) {
-        var pctStr = srPct != null && !isNaN(srPct) ? Math.round(Number(srPct)) + '%' : '';
         var open = srState && srState.toLowerCase() !== 'closed' && Number(srPct) > 0;
-        var cls = open ? 'status-open' : 'status-closed';
-        var text = (srState || '') + (pctStr ? ' (' + pctStr + ')' : '');
-        rows.push('<tr><th>Schiebedach:</th><td class="' + cls + '">' + text + '</td></tr>');
+        $('#sunroof').attr('class', open ? 'part-open' : 'part-closed');
     }
-
-    $('#openings-indicator').html('<table>' + rows.join('') + '</table>');
 }
 
 var MAX_SPEED = 250;

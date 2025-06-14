@@ -398,25 +398,26 @@ select {
   display: inline-block;
   margin: 0;
   vertical-align: top;
-  text-align: left;
-  font-weight: bold;
+  text-align: center;
 }
 
-#openings-indicator table {
-  border-collapse: collapse;
+#openings-indicator svg {
+  width: 100px;
+  height: 200px;
 }
 
-#openings-indicator th,
-#openings-indicator td {
-  padding: 2px 4px;
+#openings-indicator .part-open {
+  fill: #4caf50;
 }
 
-#openings-indicator .status-open {
-  color: #4caf50;
+#openings-indicator .part-closed {
+  fill: #555;
 }
 
-#openings-indicator .status-closed {
-  color: #d32f2f;
+#openings-indicator .car-body {
+  fill: #333;
+  stroke: #777;
+  stroke-width: 2px;
 }
 
 .app-version {
