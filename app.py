@@ -594,6 +594,43 @@ def api_version():
     return jsonify({'version': __version__})
 
 
+@app.route('/cop', methods=['POST'])
+def set_cop_temp():
+    """Set cabin overheat protection temperature."""
+    data = request.get_json(silent=True) or {}
+    temp = data.get('temp') or request.values.get('temp')
+    vehicle_id = data.get('vehicle_id') or request.values.get('vehicle_id')
+
+    if temp is None:
+        return jsonify({'error': 'Missing temp'}), 400
+    try:
+        temp = float(temp)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid temp'}), 400
+
+    tesla = get_tesla()
+    if tesla is None:
+        return jsonify({'error': 'Missing Tesla credentials or teslapy not installed'})
+
+    vehicles = _cached_vehicle_list(tesla)
+    if not vehicles:
+        return jsonify({'error': 'No vehicles found'})
+
+    vehicle = None
+    if vehicle_id is not None:
+        vehicle = next((v for v in vehicles if str(v['id_s']) == str(vehicle_id)), None)
+    if vehicle is None:
+        vehicle = vehicles[0]
+
+    try:
+        result = vehicle.command('SET_COP_TEMP', temp=temp)
+        log_api_data('SET_COP_TEMP', {'result': result})
+        return jsonify({'result': result})
+    except Exception as exc:
+        _log_api_error(exc)
+        return jsonify({'error': str(exc)})
+
+
 @app.route('/error')
 def error_page():
     """Display collected API errors."""
