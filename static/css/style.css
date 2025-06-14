@@ -350,31 +350,18 @@ select {
   stroke-width: 2px;
 }
 
-/* TPMS indicator showing tire pressures */
-#tpms-indicator {
-  display: inline-block;
-  margin: 0;
-  vertical-align: top;
-  text-align: center;
-  font-weight: bold;
+/* TPMS indicator integrated into openings graphic */
+#openings-indicator .tpms-tire circle {
+  fill: #222;
+  stroke: var(--accent-color);
+  stroke-width: 2px;
 }
 
-#tpms-indicator .tpms-row {
-  display: flex;
-  justify-content: space-between;
-}
-
-#tpms-indicator .tpms-tire {
-  width: 35px;
-  height: 35px;
-  border: 2px solid var(--accent-color);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 2px;
-  font-size: 0.8em;
-  color: var(--text-color);
+#openings-indicator .tpms-tire text {
+  fill: var(--text-color);
+  font-size: 8px;
+  text-anchor: middle;
+  dominant-baseline: central;
 }
 
 /* Responsive adjustments */

@@ -306,13 +306,16 @@ function updateDesiredTemp(temp) {
 
 function updateTPMS(fl, fr, rl, rr) {
     function set(id, val) {
-        var $el = $('#tpms-' + id);
+        var $group = $('#tpms-' + id);
+        var $text = $group.find('text');
+        var $circle = $group.find('circle');
         if (val == null || isNaN(val)) {
-            $el.text('--').css('border-color', '#555');
+            $text.text('--');
+            $circle.css('stroke', '#555');
             return;
         }
         var num = Number(val);
-        $el.text(num.toFixed(1));
+        $text.text(num.toFixed(1));
         var color = '#4caf50';
         if (num < 2.5 || num > 3.4) {
             color = '#ff9800';
@@ -320,7 +323,7 @@ function updateTPMS(fl, fr, rl, rr) {
         if (num < 2.0 || num > 3.7) {
             color = '#d00';
         }
-        $el.css('border-color', color);
+        $circle.css('stroke', color);
     }
     set('VL', fl);
     set('VR', fr);
