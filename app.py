@@ -6,6 +6,7 @@ import time
 import logging
 from logging.handlers import RotatingFileHandler
 from flask import Flask, render_template, jsonify, Response, request
+from functools import wraps
 from dotenv import load_dotenv
 from version import get_version
 from datetime import datetime
@@ -26,6 +27,7 @@ CURRENT_YEAR = datetime.now().year
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 os.makedirs(DATA_DIR, exist_ok=True)
+CONFIG_FILE = os.path.join(DATA_DIR, 'config.json')
 api_logger = logging.getLogger('api_logger')
 if not api_logger.handlers:
     handler = RotatingFileHandler(
@@ -193,6 +195,62 @@ def log_api_data(endpoint, data):
 
 
 TRIP_DIR = os.path.join(DATA_DIR, 'trips')
+
+# Elements on the dashboard that can be toggled via the config page
+CONFIG_ITEMS = [
+    {'id': 'map', 'desc': 'Karte'},
+    {'id': 'lock-status', 'desc': 'Verriegelungsstatus'},
+    {'id': 'user-presence', 'desc': 'Anwesenheit Fahrer'},
+    {'id': 'gear-shift', 'desc': 'Ganghebel'},
+    {'id': 'battery-indicator', 'desc': 'Batteriestand'},
+    {'id': 'speedometer', 'desc': 'Tacho'},
+    {'id': 'thermometers', 'desc': 'Temperaturen'},
+    {'id': 'climate-indicator', 'desc': 'Klimaanlage'},
+    {'id': 'tpms-indicator', 'desc': 'Reifendruck'},
+    {'id': 'charging-info', 'desc': 'Ladeinformationen'},
+    {'id': 'nav-bar', 'desc': 'Navigationsleiste'},
+    {'id': 'media-player', 'desc': 'Medienwiedergabe'},
+]
+
+
+def load_config():
+    try:
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+            if isinstance(cfg, dict):
+                return cfg
+    except Exception:
+        pass
+    return {}
+
+
+def save_config(cfg):
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def check_auth(username, password):
+    user = os.getenv('TESLA_EMAIL')
+    pw = os.getenv('TESLA_PASSWORD')
+    return username == user and password == pw
+
+
+def authenticate():
+    return Response('Authentication required', 401,
+                    {'WWW-Authenticate': 'Basic realm="Login Required"'})
+
+
+def requires_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_auth(auth.username, auth.password):
+            return authenticate()
+        return f(*args, **kwargs)
+    return decorated
 
 park_start_ms = None
 last_shift_state = None
@@ -611,6 +669,23 @@ def api_vehicles():
 def api_version():
     """Return the current application version."""
     return jsonify({'version': __version__})
+
+
+@app.route('/api/config')
+def api_config():
+    """Return visibility configuration as JSON."""
+    return jsonify(load_config())
+
+
+@app.route('/config', methods=['GET', 'POST'])
+@requires_auth
+def config_page():
+    cfg = load_config()
+    if request.method == 'POST':
+        for item in CONFIG_ITEMS:
+            cfg[item['id']] = item['id'] in request.form
+        save_config(cfg)
+    return render_template('config.html', items=CONFIG_ITEMS, config=cfg)
 
 
 

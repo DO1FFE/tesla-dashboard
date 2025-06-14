@@ -13,6 +13,15 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 var polyline = null;
 var lastDataTimestamp = null;
 
+function applyConfig(cfg) {
+    if (!cfg) return;
+    Object.keys(cfg).forEach(function(id) {
+        if (!cfg[id]) {
+            $('#' + id).hide();
+        }
+    });
+}
+
 // Marker and polyline for active navigation destination
 var flagIcon = L.divIcon({
     html: [
@@ -604,7 +613,10 @@ function startStream() {
     };
 }
 
-fetchVehicles();
+$.getJSON('/api/config', function(cfg) {
+    applyConfig(cfg);
+    fetchVehicles();
+});
 
 function checkAppVersion() {
     $.getJSON('/api/version', function(resp) {

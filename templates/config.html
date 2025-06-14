@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <title>Dashboard Konfiguration</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+    <h1>Dashboard Konfiguration</h1>
+    <form method="post">
+        {% for item in items %}
+        <div>
+            <label>
+                <input type="checkbox" name="{{ item.id }}" value="1" {% if config.get(item.id, True) %}checked{% endif %}>
+                {{ item.desc }}
+            </label>
+        </div>
+        {% endfor %}
+        <button type="submit">Speichern</button>
+    </form>
+</body>
+</html>
