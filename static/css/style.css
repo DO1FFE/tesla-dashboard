@@ -169,12 +169,18 @@ select {
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
   display: flex;
+  flex-direction: column;
   gap: 10px;
   align-items: center;
 }
 
 #slider-container input[type="range"] {
-  width: 200px;
+  width: 75vw;
+}
+
+#point-info {
+  text-align: center;
+  color: var(--text-color);
 }
 
 #charging-info table,
