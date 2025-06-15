@@ -208,6 +208,7 @@ CONFIG_ITEMS = [
     {'id': 'climate-indicator', 'desc': 'Klimaanlage'},
     {'id': 'tpms-indicator', 'desc': 'Reifendruck'},
     {'id': 'openings-indicator', 'desc': 'Türen/Fenster'},
+    {'id': 'blue-openings', 'desc': 'Türen/Fenster blau einfärben', 'default': False},
     {'id': 'charging-info', 'desc': 'Ladeinformationen'},
     {'id': 'nav-bar', 'desc': 'Navigationsleiste'},
     {'id': 'media-player', 'desc': 'Medienwiedergabe'},
