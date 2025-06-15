@@ -526,7 +526,7 @@ select {
 #window-fr.window-open,
 #window-rl.window-open,
 #window-rr.window-open {
-  transform: translateY(20px);
+  /* only change the color when open */
   fill: #4caf50;
 }
 
@@ -540,7 +540,7 @@ select {
  * Example:
  *   <path id="window-fl" class="part-open window-open window-highlight">
  * Without this rule the fill from ".window-highlight" would override
- * the green color. With it, open windows remain green while sliding down.
+ * the green color. With it, open windows remain green.
  */
 #window-fl.window-open.window-highlight,
 #window-fr.window-open.window-highlight,
