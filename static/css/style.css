@@ -414,6 +414,40 @@ select {
   stroke-width: 2px;
 }
 
+/* animated doors */
+#door-fl,
+#door-rl,
+#door-fr,
+#door-rr {
+  transition: transform 0.5s ease;
+}
+
+#door-fl {
+  transform-origin: 20px 62.5px;
+}
+
+#door-rl {
+  transform-origin: 20px 117.5px;
+}
+
+#door-fr {
+  transform-origin: 80px 62.5px;
+}
+
+#door-rr {
+  transform-origin: 80px 117.5px;
+}
+
+#door-fl.part-open,
+#door-rl.part-open {
+  transform: rotate(-75deg);
+}
+
+#door-fr.part-open,
+#door-rr.part-open {
+  transform: rotate(75deg);
+}
+
 .app-version {
   text-align: center;
   font-size: 0.8em;
