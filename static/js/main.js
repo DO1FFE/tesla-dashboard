@@ -12,11 +12,15 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 }).addTo(map);
 var polyline = null;
 var lastDataTimestamp = null;
+var CONFIG = {};
+var HIGHLIGHT_BLUE = false;
 
 function applyConfig(cfg) {
     if (!cfg) return;
-    Object.keys(cfg).forEach(function(id) {
-        if (!cfg[id]) {
+    CONFIG = cfg;
+    HIGHLIGHT_BLUE = !!CONFIG['blue-openings'];
+    Object.keys(CONFIG).forEach(function(id) {
+        if (!CONFIG[id]) {
             $('#' + id).hide();
         }
     });
@@ -351,6 +355,14 @@ function updateOpenings(vehicle) {
         // Use loose inequality to handle any non-zero value as "open".
         var open = Number(vehicle[p.key]) !== 0;
         $('#' + p.id).attr('class', open ? 'part-open' : 'part-closed');
+    });
+
+    var highlightParts = [
+        'door-fl', 'door-fr', 'door-rl', 'door-rr',
+        'window-fl', 'window-fr', 'window-rl', 'window-rr'
+    ];
+    highlightParts.forEach(function(id) {
+        $('#' + id).toggleClass('blue-highlight', HIGHLIGHT_BLUE);
     });
 
     var srPct = vehicle.sun_roof_percent_open;

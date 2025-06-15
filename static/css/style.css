@@ -408,6 +408,10 @@ select {
   fill: #555;
 }
 
+#openings-indicator .blue-highlight {
+  fill: blue;
+}
+
 #openings-indicator .car-body {
   fill: #333;
   stroke: #777;

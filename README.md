@@ -41,6 +41,7 @@ While driving, a blue path is drawn on the map using the reported GPS positions.
 The `/history` page lists these files so previous trips can be selected and displayed on an interactive map.
 When multiple cars are available a drop-down menu lets you switch between vehicles.
 Below the navigation bar a small media player section shows details of the currently playing track if provided by the API.
+The configuration page also offers an option to highlight doors and windows in blue.
 
 Data is streamed to the frontend via `/stream/<vehicle_id>` using Server-Sent Events so the dashboard updates instantly when new information arrives.
 The endpoint `/apiliste` exposes a text file listing all seen API variables and their latest values.
