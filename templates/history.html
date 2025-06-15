@@ -26,6 +26,10 @@
         </select>
     </form>
     <div id="map"></div>
+    <div id="slider-container">
+        <input type="range" id="point-slider" min="0" max="0" value="0" step="1">
+        <span id="point-info"></span>
+    </div>
     <script>
         var tripPath = {{ path|tojson }};
         var tripHeading = {{ heading|tojson }};

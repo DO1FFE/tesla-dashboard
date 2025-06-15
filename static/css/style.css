@@ -146,6 +146,25 @@ select {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
 }
 
+#slider-container {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  background: var(--surface-color);
+  padding: 10px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+#slider-container input[type="range"] {
+  width: 200px;
+}
+
 #charging-info table,
 #nav-bar table {
   width: 100%;
