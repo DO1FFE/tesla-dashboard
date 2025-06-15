@@ -494,9 +494,16 @@ select {
   color: var(--accent-color);
 }
 
-.app-version #client-count {
+.app-version #vehicle-state {
   position: absolute;
   left: 10px;
+  bottom: 0;
+  color: var(--accent-color);
+}
+
+.app-version #client-count {
+  position: absolute;
+  left: 120px;
   bottom: 0;
   color: var(--accent-color);
 }

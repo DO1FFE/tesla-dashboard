@@ -110,6 +110,7 @@ function fetchVehicles() {
 function handleData(data) {
     updateHeader(data);
     updateUI(data);
+    updateVehicleState(data.state);
     var drive = data.drive_state || {};
     var vehicle = data.vehicle_state || {};
     updateDataAge(vehicle.timestamp);
@@ -610,6 +611,14 @@ function updateDataAge(ts) {
     }
     var timeStr = new Date(lastDataTimestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
     $el.text('Letztes Update vor ' + text + ' (' + timeStr + ')');
+}
+
+function updateVehicleState(state) {
+    if (typeof state === 'string' && state.length > 0) {
+        $('#vehicle-state').text('State: ' + state);
+    } else {
+        $('#vehicle-state').text('');
+    }
 }
 
 function updateClientCount() {
