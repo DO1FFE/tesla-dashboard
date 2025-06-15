@@ -364,7 +364,8 @@ select {
   dominant-baseline: central;
   /* ensure rotation uses the text's own bounding box */
   transform-box: fill-box;
-  transform: rotate(180deg);
+  /* rotate text only when the car is flipped */
+  transform: rotate(0deg);
   transform-origin: center;
 }
 
@@ -395,7 +396,7 @@ select {
 #openings-indicator svg {
   width: 100px;
   height: 200px;
-  transform: rotate(180deg);
+  transform: rotate(0deg);
   transform-origin: center;
 }
 
