@@ -63,8 +63,28 @@ if (Array.isArray(tripPath) && tripPath.length) {
     var slider = document.getElementById('point-slider');
     slider.max = tripPath.length - 1;
     slider.value = tripPath.length - 1;
+
+    var originalZoom = null;
+    var zoomTimeout = null;
+
     slider.addEventListener('input', function() {
         updateMarker(parseInt(this.value, 10));
+
+        if (originalZoom === null) {
+            originalZoom = map.getZoom();
+        }
+        var maxZoom = typeof map.getMaxZoom === 'function' ? map.getMaxZoom() : 18;
+        map.setZoom(maxZoom);
+
+        if (zoomTimeout) {
+            clearTimeout(zoomTimeout);
+        }
+        zoomTimeout = setTimeout(function() {
+            if (originalZoom !== null) {
+                map.setZoom(originalZoom);
+                originalZoom = null;
+            }
+        }, 3000);
     });
 
     updateMarker(tripPath.length - 1);
