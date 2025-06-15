@@ -3,6 +3,8 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
 }).addTo(map);
 
+var MILES_TO_KM = 1.60934;
+
 function bearing(p1, p2) {
     var lat1 = p1[0] * Math.PI / 180;
     var lon1 = p1[1] * Math.PI / 180;
@@ -41,7 +43,8 @@ if (Array.isArray(tripPath) && tripPath.length) {
             text.push(date.toLocaleString());
         }
         if (point[2] !== null && point[2] !== undefined && point[2] !== '') {
-            text.push('Geschwindigkeit: ' + point[2] + ' km/h');
+            var kmh = Math.round(point[2] * MILES_TO_KM);
+            text.push('Geschwindigkeit: ' + kmh + ' km/h');
         }
         if (point[3] !== null && point[3] !== undefined && point[3] !== '') {
             text.push('Power: ' + point[3] + ' kW');
