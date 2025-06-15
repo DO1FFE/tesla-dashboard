@@ -68,7 +68,9 @@ if (Array.isArray(tripPath) && tripPath.length) {
     var zoomTimeout = null;
 
     slider.addEventListener('input', function() {
-        updateMarker(parseInt(this.value, 10));
+        var idx = parseInt(this.value, 10);
+        updateMarker(idx);
+        map.panTo(marker.getLatLng());
 
         if (originalZoom === null) {
             originalZoom = map.getZoom();
