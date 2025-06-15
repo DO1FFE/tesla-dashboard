@@ -318,7 +318,7 @@ select {
   vertical-align: top;
   text-align: center;
   font-weight: bold;
-  align-self: flex-end;
+  align-self: flex-start;
   height: 110px;
 }
 
