@@ -517,6 +517,9 @@ select {
 #window-rr {
   transition: transform 0.5s ease;
   transform-box: fill-box;
+  stroke: black;
+  stroke-opacity: 0.3;
+  stroke-width: 0.5px;
 }
 
 #window-fl.window-open,
