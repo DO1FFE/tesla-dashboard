@@ -38,6 +38,18 @@ select {
   border-radius: 4px;
 }
 
+#dashboard-content {
+  padding: 0 1rem;
+}
+
+#sleep-msg {
+  display: none;
+  text-align: center;
+  font-size: 1.2em;
+  margin: 20px;
+  color: var(--accent-color);
+}
+
 #map {
   height: 400px;
   margin-top: 10px;

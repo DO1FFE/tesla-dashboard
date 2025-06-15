@@ -12,9 +12,10 @@
 </head>
 <body>
     <h1>Tesla Dashboard <span id="vehicle-status"></span>&nbsp;&nbsp;&nbsp;<span id="vehicle-info"></span></h1>
-    <label for="vehicle-select">Fahrzeug auswählen:</label>
-    <select id="vehicle-select"></select>
-    <div id="map"></div>
+    <div id="dashboard-content">
+        <label for="vehicle-select">Fahrzeug auswählen:</label>
+        <select id="vehicle-select"></select>
+        <div id="map"></div>
     <div id="status-bar">
         <div id="lock-container">
             <div id="lock-status" title="Verriegelt">🔒</div>
@@ -118,6 +119,8 @@
     <div id="charging-info"></div>
     <div id="nav-bar"></div>
     <div id="media-player"></div>
+    </div>
+    <div id="sleep-msg">Das Fahrzeug schläft.</div>
 
     <footer class="app-version">
         <span id="vehicle-state"></span>

@@ -14,16 +14,29 @@ var polyline = null;
 var lastDataTimestamp = null;
 var CONFIG = {};
 var HIGHLIGHT_BLUE = false;
+var ASLEEP = false;
 
 function applyConfig(cfg) {
     if (!cfg) return;
     CONFIG = cfg;
     HIGHLIGHT_BLUE = !!CONFIG['blue-openings'];
+    showConfigured();
+}
+
+function showConfigured() {
     Object.keys(CONFIG).forEach(function(id) {
-        if (!CONFIG[id]) {
-            $('#' + id).hide();
-        }
+        if (id === 'blue-openings') return;
+        $('#' + id).toggle(!!CONFIG[id]);
     });
+    $('#dashboard-content').show();
+    $('#sleep-msg').hide();
+    ASLEEP = false;
+}
+
+function hideForSleep() {
+    $('#dashboard-content').hide();
+    $('#sleep-msg').show();
+    ASLEEP = true;
 }
 
 // Marker and polyline for active navigation destination
@@ -111,6 +124,11 @@ function handleData(data) {
     updateHeader(data);
     updateUI(data);
     updateVehicleState(data.state);
+    if (data.state && data.state.toLowerCase() === 'asleep') {
+        hideForSleep();
+    } else if (ASLEEP && data.state && data.state.toLowerCase() === 'online') {
+        showConfigured();
+    }
     var drive = data.drive_state || {};
     var vehicle = data.vehicle_state || {};
     updateDataAge(vehicle.timestamp);
