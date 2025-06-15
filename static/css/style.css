@@ -318,15 +318,23 @@ select {
   vertical-align: top;
   text-align: center;
   font-weight: bold;
+  align-self: flex-end;
+  height: 110px;
 }
 
 #thermometers .thermometer {
-  display: inline-block;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
   margin: 0 5px;
+  height: 100%;
 }
 
 #thermometers svg {
   display: block;
+  height: 70px;
+  width: auto;
 }
 
 #thermometers .label {
