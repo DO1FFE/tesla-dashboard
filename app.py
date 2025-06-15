@@ -57,6 +57,27 @@ if not state_logger.handlers:
     state_logger.setLevel(logging.INFO)
 
 
+def _load_last_state(filename=os.path.join(DATA_DIR, 'state.log')):
+    """Load the last logged state for each vehicle from ``state.log``."""
+    result = {}
+    try:
+        with open(filename, 'r', encoding='utf-8') as f:
+            for line in f:
+                idx = line.find('{')
+                if idx != -1:
+                    try:
+                        entry = json.loads(line[idx:])
+                        vid = entry.get('vehicle_id')
+                        state = entry.get('state')
+                        if vid is not None and state is not None:
+                            result[vid] = state
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return result
+
+
 # Tools to build an aggregated list of API keys ------------------------------
 
 def _collect_keys(data, prefix='', keys=None):
@@ -283,7 +304,7 @@ _vehicle_list_lock = threading.Lock()
 api_errors = []
 api_errors_lock = threading.Lock()
 state_lock = threading.Lock()
-last_vehicle_state = {}
+last_vehicle_state = _load_last_state()
 
 
 def track_park_time(vehicle_data):
@@ -380,7 +401,7 @@ def _log_api_error(exc):
 
 
 def log_vehicle_state(vehicle_id, state):
-    """Log vehicle state changes to ``state.log``."""
+    """Log vehicle state changes to ``state.log`` if changed."""
     try:
         with state_lock:
             if last_vehicle_state.get(vehicle_id) != state:
@@ -792,6 +813,18 @@ def api_list_file():
     except Exception:
         content = ''
     return Response(content, mimetype='text/plain')
+
+
+@app.route('/state')
+def state_log_page():
+    """Display the vehicle state log."""
+    log_lines = []
+    try:
+        with open(os.path.join(DATA_DIR, 'state.log'), 'r', encoding='utf-8') as f:
+            log_lines = f.readlines()
+    except Exception:
+        pass
+    return render_template('state.html', log_lines=log_lines)
 
 
 @app.route('/debug')

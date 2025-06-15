@@ -57,6 +57,7 @@ The same information is also stored as hierarchical JSON in `data/api-liste.json
 * `/daten` – vehicle data without the map
 * `/history` – select and display recorded trips
 * `/error` – show recent API errors (JSON via `/api/errors`)
+* `/state` – display the vehicle state log
 * `/debug` – display environment info and recent log lines
 * `/api/vehicles` – list available vehicles as JSON
 * `/api/version` – return the current dashboard version as JSON
