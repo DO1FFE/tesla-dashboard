@@ -612,6 +612,14 @@ function updateDataAge(ts) {
     $el.text('Letztes Update vor ' + text + ' (' + timeStr + ')');
 }
 
+function updateClientCount() {
+    $.getJSON('/api/clients', function(resp) {
+        if (typeof resp.clients === 'number') {
+            $('#client-count').text('Clients: ' + resp.clients);
+        }
+    });
+}
+
 
 
 
@@ -674,3 +682,5 @@ function checkAppVersion() {
 
 setInterval(checkAppVersion, 60000);
 setInterval(function() { updateDataAge(); }, 1000);
+setInterval(updateClientCount, 5000);
+updateClientCount();
