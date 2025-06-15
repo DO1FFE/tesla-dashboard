@@ -491,29 +491,29 @@ select {
 }
 
 #door-fl {
-  transform-origin: 25px 40px;
+  transform-origin: 0px 40px;
 }
 
 #door-rl {
-  transform-origin: 25px 95px;
+  transform-origin: 0px 95px;
 }
 
 #door-fr {
-  transform-origin: 75px 40px;
+  transform-origin: 100px 40px;
 }
 
 #door-rr {
-  transform-origin: 75px 95px;
+  transform-origin: 100px 95px;
 }
 
 #door-fl.part-open,
 #door-rl.part-open {
-  transform: perspective(200px) rotateX(-75deg) rotateY(-15deg);
+  transform: perspective(200px) rotateY(-70deg);
 }
 
 #door-fr.part-open,
 #door-rr.part-open {
-  transform: perspective(200px) rotateX(-75deg) rotateY(15deg);
+  transform: perspective(200px) rotateY(70deg);
 }
 
 /* animated windows */
