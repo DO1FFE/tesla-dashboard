@@ -506,14 +506,17 @@ select {
   transform-origin: 100px 95px;
 }
 
+/* Geöffnete Türen */
 #door-fl.part-open,
 #door-rl.part-open {
-  transform: perspective(200px) rotateY(-70deg);
+  transform-origin: left;
+  transform: perspective(1200px) rotateX(-70deg) rotateY(-140deg);
 }
 
 #door-fr.part-open,
 #door-rr.part-open {
-  transform: perspective(200px) rotateY(70deg);
+  transform-origin: right;
+  transform: perspective(1200px) rotateX(-70deg) rotateY(140deg);
 }
 
 /* animated windows */
