@@ -527,6 +527,7 @@ select {
 #window-rl.window-open,
 #window-rr.window-open {
   transform: translateY(20px);
+  fill: #4caf50;
 }
 
 .app-version {
