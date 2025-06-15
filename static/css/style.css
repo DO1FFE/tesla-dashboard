@@ -485,29 +485,29 @@ select {
 }
 
 #door-fl {
-  transform-origin: 20px 62.5px;
+  transform-origin: 25px 40px;
 }
 
 #door-rl {
-  transform-origin: 20px 117.5px;
+  transform-origin: 25px 95px;
 }
 
 #door-fr {
-  transform-origin: 80px 62.5px;
+  transform-origin: 75px 40px;
 }
 
 #door-rr {
-  transform-origin: 80px 117.5px;
+  transform-origin: 75px 95px;
 }
 
 #door-fl.part-open,
 #door-rl.part-open {
-  transform: rotate(-75deg);
+  transform: perspective(200px) rotateX(-75deg) rotateY(-15deg);
 }
 
 #door-fr.part-open,
 #door-rr.part-open {
-  transform: rotate(75deg);
+  transform: perspective(200px) rotateX(-75deg) rotateY(15deg);
 }
 
 /* animated windows */
