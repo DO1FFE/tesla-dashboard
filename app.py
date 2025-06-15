@@ -409,17 +409,18 @@ def _load_trip(filename):
                 parts = line.strip().split(',')
                 if len(parts) < 3:
                     continue
-                _ts, lat, lon = parts[:3]
+                ts, lat, lon = parts[:3]
                 speed = parts[3] if len(parts) >= 4 and parts[3] else None
                 power = parts[4] if len(parts) >= 5 and parts[4] else None
                 try:
+                    ts = int(float(ts)) if ts else None
                     lat = float(lat)
                     lon = float(lon)
                     speed = float(speed) if speed is not None else None
                     power = float(power) if power is not None else None
                 except Exception:
                     continue
-                points.append([lat, lon, speed, power])
+                points.append([lat, lon, speed, power, ts])
     except Exception:
         pass
     return points
