@@ -474,3 +474,10 @@ select {
   bottom: 0;
   color: var(--accent-color);
 }
+
+.app-version #client-count {
+  position: absolute;
+  left: 10px;
+  bottom: 0;
+  color: var(--accent-color);
+}

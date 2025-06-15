@@ -673,6 +673,13 @@ def api_version():
     return jsonify({'version': __version__})
 
 
+@app.route('/api/clients')
+def api_clients():
+    """Return the current number of connected streaming clients."""
+    count = sum(len(v) for v in subscribers.values())
+    return jsonify({'clients': count})
+
+
 @app.route('/api/config')
 def api_config():
     """Return visibility configuration as JSON."""
