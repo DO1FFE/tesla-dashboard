@@ -47,6 +47,15 @@ if not api_logger.handlers:
     except Exception:
         pass
 
+state_logger = logging.getLogger('state_logger')
+if not state_logger.handlers:
+    handler = RotatingFileHandler(
+        os.path.join(DATA_DIR, 'state.log'), maxBytes=100_000, backupCount=1)
+    formatter = logging.Formatter('%(asctime)s %(message)s')
+    handler.setFormatter(formatter)
+    state_logger.addHandler(handler)
+    state_logger.setLevel(logging.INFO)
+
 
 # Tools to build an aggregated list of API keys ------------------------------
 
@@ -273,6 +282,8 @@ _vehicle_list_cache_ts = 0.0
 _vehicle_list_lock = threading.Lock()
 api_errors = []
 api_errors_lock = threading.Lock()
+state_lock = threading.Lock()
+last_vehicle_state = {}
 
 
 def track_park_time(vehicle_data):
@@ -366,6 +377,18 @@ def _log_api_error(exc):
         api_errors.append({'timestamp': ts, 'message': msg})
         if len(api_errors) > 50:
             api_errors.pop(0)
+
+
+def log_vehicle_state(vehicle_id, state):
+    """Log vehicle state changes to ``state.log``."""
+    try:
+        with state_lock:
+            if last_vehicle_state.get(vehicle_id) != state:
+                last_vehicle_state[vehicle_id] = state
+                state_logger.info(json.dumps({'vehicle_id': vehicle_id,
+                                             'state': state}))
+    except Exception:
+        pass
 
 
 def _cache_file(vehicle_id):
@@ -516,24 +539,27 @@ def get_vehicle_data(vehicle_id=None):
         vehicle = vehicles[0]
 
     try:
+        vehicle.get_vehicle_summary()
+        state = vehicle.get('state') or vehicle['state']
+        log_vehicle_state(vehicle['id_s'], state)
+    except Exception as exc:
+        _log_api_error(exc)
+        log_vehicle_state(vehicle['id_s'], 'offline')
+        return {"error": "Vehicle unavailable", "state": "offline"}
+
+    if state != 'online':
+        log_api_data('get_vehicle_summary', {'state': state})
+        return {'state': state}
+
+    try:
         vehicle_data = vehicle.get_vehicle_data()
-    except Exception as exc:  # vehicle may be asleep/offline
-        status_code = getattr(getattr(exc, 'response', None), 'status_code', None)
-        if status_code == 408:
-            try:
-                # wake the vehicle and retry once
-                if hasattr(vehicle, 'sync_wake_up'):
-                    vehicle.sync_wake_up()
-                vehicle_data = vehicle.get_vehicle_data()
-            except Exception as exc2:
-                _log_api_error(exc2)
-                return {"error": "Vehicle is offline or asleep"}
-        else:
-            _log_api_error(exc)
-            return {"error": str(exc)}
+    except Exception as exc:
+        _log_api_error(exc)
+        return {"error": str(exc), "state": state}
     track_park_time(vehicle_data)
     track_drive_path(vehicle_data)
     sanitized = sanitize(vehicle_data)
+    sanitized['state'] = state
     try:
         v_state = sanitized.get('vehicle_state', {})
         v_config = sanitized.get('vehicle_config', {})
@@ -574,7 +600,7 @@ def get_vehicle_list():
     return sanitized
 
 
-def _fetch_loop(vehicle_id, interval=3):
+def _fetch_loop(vehicle_id, online_interval=3, offline_interval=60):
     """Continuously fetch data for a vehicle and notify subscribers."""
     while True:
         vid = None if vehicle_id == 'default' else vehicle_id
@@ -588,7 +614,9 @@ def _fetch_loop(vehicle_id, interval=3):
         latest_data[vehicle_id] = data
         for q in subscribers.get(vehicle_id, []):
             q.put(data)
-        time.sleep(interval)
+        state = data.get('state') if isinstance(data, dict) else None
+        sleep_time = online_interval if state == 'online' else offline_interval
+        time.sleep(sleep_time)
 
 
 def _start_thread(vehicle_id):
