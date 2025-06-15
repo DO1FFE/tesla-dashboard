@@ -263,6 +263,7 @@ park_start_ms = None
 last_shift_state = None
 trip_path = []
 current_trip_file = None
+current_trip_date = None
 drive_pause_ms = None
 latest_data = {}
 subscribers = {}
@@ -321,7 +322,7 @@ def _log_trip_point(ts, lat, lon, speed=None, power=None, filename=None):
 
 def track_drive_path(vehicle_data):
     """Maintain the current trip path and log points when driving."""
-    global trip_path, current_trip_file, drive_pause_ms
+    global trip_path, current_trip_file, current_trip_date, drive_pause_ms
     drive = vehicle_data.get('drive_state', {}) if isinstance(vehicle_data, dict) else {}
     shift = drive.get('shift_state')
     lat = drive.get('latitude')
@@ -341,13 +342,15 @@ def track_drive_path(vehicle_data):
         if ts - drive_pause_ms > 600000:
             trip_path = []
             current_trip_file = None
+            current_trip_date = None
         drive_pause_ms = None
     if lat is not None and lon is not None:
-        if current_trip_file is None:
-            if ts is None:
-                ts = int(time.time() * 1000)
-            timestr = time.strftime('%Y%m%d_%H%M%S', time.localtime(ts / 1000))
-            current_trip_file = os.path.join(TRIP_DIR, f'trip_{timestr}.csv')
+        if ts is None:
+            ts = int(time.time() * 1000)
+        date_str = time.strftime('%Y%m%d', time.localtime(ts / 1000))
+        if current_trip_file is None or current_trip_date != date_str:
+            current_trip_file = os.path.join(TRIP_DIR, f'trip_{date_str}.csv')
+            current_trip_date = date_str
         point = [lat, lon]
         if not trip_path or trip_path[-1] != point:
             trip_path.append(point)
