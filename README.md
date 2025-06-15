@@ -37,7 +37,7 @@ The backend continuously polls the Tesla API and pushes new data to clients usin
 
 The dashboard shows a short overview depending on whether the vehicle is parked, driving or charging. Below this, additional tables are grouped by category (battery/charging, climate, drive state, vehicle status and media information) to make the raw API data easier to read. While parked the dashboard also displays tire pressures, power usage of the drive unit and the 12V battery as well as how long the vehicle has been parked.
 
-While driving, a blue path is drawn on the map using the reported GPS positions. Each trip is logged to its own CSV file under `data/trips` for later analysis.
+While driving, a blue path is drawn on the map using the reported GPS positions. All trips of a day are logged to a single CSV file under `data/trips` for later analysis.
 The `/history` page lists these files so previous trips can be selected and displayed on an interactive map.
 Using the slider you can inspect each recorded point and see the exact timestamp along with speed and power information.
 When multiple cars are available a drop-down menu lets you switch between vehicles.
