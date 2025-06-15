@@ -451,6 +451,17 @@ select {
   fill: blue;
 }
 
+#openings-indicator .window-highlight {
+  fill: #00bfff;
+}
+
+#openings-indicator #sunroof-percent {
+  fill: var(--text-color);
+  font-size: 8px;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
 #openings-indicator .car-body {
   fill: #333;
   stroke: #777;
