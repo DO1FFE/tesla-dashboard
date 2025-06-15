@@ -373,7 +373,11 @@ function updateOpenings(vehicle) {
         // Values are 0 when the part is closed and non-zero when open.
         // Use loose inequality to handle any non-zero value as "open".
         var open = Number(vehicle[p.key]) !== 0;
-        $('#' + p.id).attr('class', open ? 'part-open' : 'part-closed');
+        var $el = $('#' + p.id);
+        $el.attr('class', open ? 'part-open' : 'part-closed');
+        if (p.id.startsWith('window-')) {
+            $el.toggleClass('window-open', open);
+        }
     });
 
     var doorParts = ['door-fl', 'door-fr', 'door-rl', 'door-rr'];
