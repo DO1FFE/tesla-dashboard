@@ -136,6 +136,7 @@ select {
   margin: 0;
 }
 
+#v2l-infos,
 #charging-info,
 /* Navigation bar below the status bar */
 #nav-bar {
@@ -183,12 +184,15 @@ select {
   color: var(--text-color);
 }
 
+#v2l-infos table,
 #charging-info table,
 #nav-bar table {
   width: 100%;
   border-collapse: collapse;
 }
 
+#v2l-infos th,
+#v2l-infos td,
 #charging-info th,
 #charging-info td,
 #nav-bar th,
@@ -198,12 +202,14 @@ select {
   text-align: left;
 }
 
+#v2l-infos th,
 #charging-info th,
 #nav-bar th {
   white-space: nowrap;
   font-weight: normal;
 }
 
+#v2l-infos span.icon,
 #charging-info span.icon,
 #nav-bar span.icon {
   margin-right: 4px;

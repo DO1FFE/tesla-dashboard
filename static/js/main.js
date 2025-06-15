@@ -144,6 +144,7 @@ function handleData(data) {
         rangeMiles = charge.est_battery_range;
     }
     updateBatteryIndicator(charge.battery_level, rangeMiles);
+    updateV2LInfos(charge, drive);
     updateChargingInfo(charge);
     var climate = data.climate_state || {};
     updateThermometers(climate.inside_temp, climate.outside_temp);
@@ -469,42 +470,100 @@ function batteryBar(level) {
     return '<div class="battery-block"><div class="battery"><div class="level" style="height:' + pct + '%;"></div></div><div class="battery-value">' + pct + '%</div></div>';
 }
 
+var lastChargeInfo = null;
+var lastChargeStop = null;
+
+function updateV2LInfos(charge, drive) {
+    var $info = $('#v2l-infos');
+    if (!charge || !CONFIG['v2l-infos']) {
+        $info.empty().hide();
+        return;
+    }
+    var cond = charge.charging_state === 'Starting' &&
+               String(charge.charger_power) === '4' &&
+               charge.charge_port_color === 'FlashingGreen' &&
+               charge.conn_charge_cable === 'IEC';
+    if (cond) {
+        var html = '<p>V2L-Adapter eingesteckt. Nun stehen mir 2x 220V/16A zur Verfügung. ' +
+                   'Der Kaffeevollautomat wartet auf dich. Komm vorbei.</p>';
+        var lat = drive && drive.latitude;
+        var lng = drive && drive.longitude;
+        if (lat != null && lng != null) {
+            var url = 'https://www.google.com/maps/search/?api=1&query=' +
+                      encodeURIComponent(lat + ',' + lng);
+            html += '<p><a href="' + url + '" target="_blank">Standort in Google Maps</a></p>';
+        }
+        $info.html(html).show();
+    } else {
+        $info.empty().hide();
+    }
+}
+
 function updateChargingInfo(charge) {
     var $info = $('#charging-info');
-    if (!charge || charge.charging_state !== 'Charging') {
+    if (!charge) {
         $info.empty().hide();
         return;
     }
 
+    var state = charge.charging_state;
+    var now = Date.now();
+
+    if (state === 'Charging') {
+        lastChargeInfo = JSON.parse(JSON.stringify(charge));
+        lastChargeStop = null;
+    } else {
+        if (lastChargeInfo && !lastChargeStop) {
+            lastChargeStop = now;
+        }
+    }
+
+    var showFull = false;
+    if (state === 'Charging') {
+        showFull = true;
+    } else if (lastChargeStop && now - lastChargeStop <= 600000) {
+        charge = lastChargeInfo || charge;
+        showFull = true;
+    }
+
     var rows = [];
-    if (charge.charging_state) {
-        rows.push('<tr><th>Status:</th><td>' + charge.charging_state + '</td></tr>');
+    if (showFull) {
+        if (charge.charging_state) {
+            rows.push('<tr><th>Status:</th><td>' + charge.charging_state + '</td></tr>');
+        }
+        if (charge.charge_energy_added != null) {
+            rows.push('<tr><th>Geladene Energie:</th><td>' + Number(charge.charge_energy_added).toFixed(2) + ' kWh</td></tr>');
+        }
+        if (charge.charger_voltage != null) {
+            rows.push('<tr><th>Spannung:</th><td>' + Number(charge.charger_voltage).toFixed(0) + ' V</td></tr>');
+        }
+        if (charge.charge_rate != null) {
+            rows.push('<tr><th>Ladestrom:</th><td>' + Number(charge.charge_rate).toFixed(0) + ' A</td></tr>');
+        }
+        if (charge.charger_power != null) {
+            rows.push('<tr><th>Ladeleistung:</th><td>' + Number(charge.charger_power).toFixed(0) + ' kW</td></tr>');
+        }
+        if (charge.conn_charge_cable) {
+            rows.push('<tr><th>Kabel:</th><td>' + charge.conn_charge_cable + '</td></tr>');
+        }
+        if (charge.fast_charger_brand) {
+            rows.push('<tr><th>Schnelllader Marke:</th><td>' + charge.fast_charger_brand + '</td></tr>');
+        }
+        if (charge.fast_charger_type) {
+            rows.push('<tr><th>Schnelllader Typ:</th><td>' + charge.fast_charger_type + '</td></tr>');
+        }
+        if (charge.minutes_to_full_charge != null) {
+            rows.push('<tr><th>Minuten bis voll:</th><td>' + Math.round(charge.minutes_to_full_charge) + ' min</td></tr>');
+        }
+    } else if (lastChargeInfo && lastChargeInfo.charge_energy_added != null) {
+        rows.push('<tr><th>Beim letzten Stopp hinzugefügte Energie:</th><td>' + Number(lastChargeInfo.charge_energy_added).toFixed(2) + ' kWh</td></tr>');
     }
-    if (charge.charge_energy_added != null) {
-        rows.push('<tr><th>Geladene Energie:</th><td>' + Number(charge.charge_energy_added).toFixed(2) + ' kWh</td></tr>');
+
+    if (rows.length) {
+        $info.html('<table>' + rows.join('') + '</table>').show();
+    } else {
+        $info.empty().hide();
     }
-    if (charge.charger_voltage != null) {
-        rows.push('<tr><th>Spannung:</th><td>' + Number(charge.charger_voltage).toFixed(0) + ' V</td></tr>');
-    }
-    if (charge.charge_rate != null) {
-        rows.push('<tr><th>Ladestrom:</th><td>' + Number(charge.charge_rate).toFixed(0) + ' A</td></tr>');
-    } 
-    if (charge.charger_power != null) {
-        rows.push('<tr><th>Ladeleistung:</th><td>' + Number(charge.charger_power).toFixed(0) + ' kW</td></tr>');
-    }
-    if (charge.conn_charge_cable) {
-        rows.push('<tr><th>Kabel:</th><td>' + charge.conn_charge_cable + '</td></tr>');
-    }
-    if (charge.fast_charger_brand) {
-        rows.push('<tr><th>Schnelllader Marke:</th><td>' + charge.fast_charger_brand + '</td></tr>');
-    }
-    if (charge.fast_charger_type) {
-        rows.push('<tr><th>Schnelllader Typ:</th><td>' + charge.fast_charger_type + '</td></tr>');
-    }
-    if (charge.minutes_to_full_charge != null) {
-        rows.push('<tr><th>Minuten bis voll:</th><td>' + Math.round(charge.minutes_to_full_charge) + ' min</td></tr>');
-    }
-    $info.html('<table>' + rows.join('') + '</table>').show();
 }
 
 function updateNavBar(drive) {

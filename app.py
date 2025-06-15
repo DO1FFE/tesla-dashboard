@@ -245,6 +245,7 @@ CONFIG_ITEMS = [
     {'id': 'openings-indicator', 'desc': 'Türen/Fenster'},
     {'id': 'blue-openings', 'desc': 'Türen/Fenster blau einfärben', 'default': False},
     {'id': 'charging-info', 'desc': 'Ladeinformationen'},
+    {'id': 'v2l-infos', 'desc': 'V2L-Hinweis'},
     {'id': 'nav-bar', 'desc': 'Navigationsleiste'},
     {'id': 'media-player', 'desc': 'Medienwiedergabe'},
 ]
