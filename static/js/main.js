@@ -340,10 +340,10 @@ function updateTPMS(fl, fr, rl, rr) {
         var num = Number(val);
         $text.text(num.toFixed(1));
         var color = '#4caf50';
-        if (num < 2.5 || num > 3.4) {
+        if (num < 2.9 || num > 3.3) {
             color = '#ff9800';
         }
-        if (num < 2.0 || num > 3.7) {
+        if (num < 2.5 || num > 3.6) {
             color = '#d00';
         }
         $circle.css('stroke', color);
