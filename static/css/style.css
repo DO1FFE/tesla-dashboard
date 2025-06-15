@@ -526,8 +526,11 @@ select {
 #window-fr.window-open,
 #window-rl.window-open,
 #window-rr.window-open {
-  /* only change the color when open */
+  /* keep a visible outline when open */
   fill: #4caf50;
+  stroke: black;
+  stroke-opacity: 1;
+  stroke-width: 0.5px;
 }
 
 /*
@@ -547,6 +550,9 @@ select {
 #window-rl.window-open.window-highlight,
 #window-rr.window-open.window-highlight {
   fill: #4caf50;
+  stroke: black;
+  stroke-opacity: 1;
+  stroke-width: 0.5px;
 }
 
 .app-version {
