@@ -474,6 +474,8 @@ select {
 #door-fr,
 #door-rr {
   transition: transform 0.5s ease;
+  /* ensure doors rotate around their own bounding box so orientation flips work */
+  transform-box: fill-box;
 }
 
 #door-fl {
