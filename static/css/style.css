@@ -504,6 +504,22 @@ select {
   transform: rotate(75deg);
 }
 
+/* animated windows */
+#window-fl,
+#window-fr,
+#window-rl,
+#window-rr {
+  transition: transform 0.5s ease;
+  transform-box: fill-box;
+}
+
+#window-fl.window-open,
+#window-fr.window-open,
+#window-rl.window-open,
+#window-rr.window-open {
+  transform: translateY(20px);
+}
+
 .app-version {
   text-align: center;
   font-size: 0.8em;
