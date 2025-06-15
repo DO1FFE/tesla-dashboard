@@ -457,7 +457,7 @@ select {
 
 #openings-indicator #sunroof-percent {
   fill: var(--text-color);
-  font-size: 8px;
+  font-size: 10px; /* slightly larger for better readability */
   text-anchor: middle;
   dominant-baseline: central;
 }
