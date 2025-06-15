@@ -530,27 +530,24 @@ select {
   fill: #4caf50;
 }
 
-# ensure blue highlighting does not override the open color
-# when the "blue-openings" option is enabled
-# (window-highlight is applied in addition to window-open)
-# using separate rule maintains green fill for open windows
-# regardless of highlight setting
-# (specificity matches the existing rule so order matters)
-#
-# Example: <path id="window-fl" class="part-open window-open window-highlight">
-# Without this rule the fill from .window-highlight would override
-# the green color.
-# With this rule open windows stay green while still sliding down.
-#
-# Tested with and without the blue highlight option enabled.
-#
-# Same fill color as part-open to match doors
- #window-fl.window-open.window-highlight,
- #window-fr.window-open.window-highlight,
- #window-rl.window-open.window-highlight,
- #window-rr.window-open.window-highlight {
-   fill: #4caf50;
- }
+/*
+ * Ensure blue highlighting does not override the open color when the
+ * "blue-openings" option is enabled. The "window-highlight" class is
+ * applied in addition to "window-open", so this separate rule preserves
+ * the green fill for open windows regardless of the highlight setting.
+ * Specificity matches the existing rule so order matters.
+ *
+ * Example:
+ *   <path id="window-fl" class="part-open window-open window-highlight">
+ * Without this rule the fill from ".window-highlight" would override
+ * the green color. With it, open windows remain green while sliding down.
+ */
+#window-fl.window-open.window-highlight,
+#window-fr.window-open.window-highlight,
+#window-rl.window-open.window-highlight,
+#window-rr.window-open.window-highlight {
+  fill: #4caf50;
+}
 
 .app-version {
   text-align: center;
