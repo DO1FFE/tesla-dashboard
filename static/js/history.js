@@ -36,6 +36,10 @@ if (Array.isArray(tripPath) && tripPath.length) {
     function updateInfo(idx) {
         var point = tripPath[idx];
         var text = [];
+        if (point[4]) {
+            var date = new Date(point[4]);
+            text.push(date.toLocaleString());
+        }
         if (point[2] !== null && point[2] !== undefined && point[2] !== '') {
             text.push('Geschwindigkeit: ' + point[2] + ' km/h');
         }
