@@ -376,19 +376,23 @@ function updateOpenings(vehicle) {
         $('#' + p.id).attr('class', open ? 'part-open' : 'part-closed');
     });
 
-    var highlightParts = [
-        'door-fl', 'door-fr', 'door-rl', 'door-rr',
-        'window-fl', 'window-fr', 'window-rl', 'window-rr'
-    ];
-    highlightParts.forEach(function(id) {
+    var doorParts = ['door-fl', 'door-fr', 'door-rl', 'door-rr'];
+    doorParts.forEach(function(id) {
         $('#' + id).toggleClass('blue-highlight', HIGHLIGHT_BLUE);
+    });
+
+    var windowParts = ['window-fl', 'window-fr', 'window-rl', 'window-rr'];
+    windowParts.forEach(function(id) {
+        $('#' + id).toggleClass('window-highlight', HIGHLIGHT_BLUE);
     });
 
     var srPct = vehicle.sun_roof_percent_open;
     var srState = vehicle.sun_roof_state;
     if (srPct != null || srState) {
-        var open = srState && srState.toLowerCase() !== 'closed' && Number(srPct) > 0;
+        var pct = Number(srPct);
+        var open = srState && srState.toLowerCase() !== 'closed' && pct > 0;
         $('#sunroof').attr('class', open ? 'part-open' : 'part-closed');
+        $('#sunroof-percent').text(open && !isNaN(pct) ? Math.round(pct) + '%' : '');
     }
 }
 
