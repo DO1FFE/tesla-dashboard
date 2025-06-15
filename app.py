@@ -258,6 +258,7 @@ park_start_ms = None
 last_shift_state = None
 trip_path = []
 current_trip_file = None
+drive_pause_ms = None
 latest_data = {}
 subscribers = {}
 threads = {}
@@ -312,7 +313,7 @@ def _log_trip_point(ts, lat, lon, filename=None):
 
 def track_drive_path(vehicle_data):
     """Maintain the current trip path and log points when driving."""
-    global trip_path, current_trip_file
+    global trip_path, current_trip_file, drive_pause_ms
     drive = vehicle_data.get('drive_state', {}) if isinstance(vehicle_data, dict) else {}
     shift = drive.get('shift_state')
     lat = drive.get('latitude')
@@ -321,9 +322,16 @@ def track_drive_path(vehicle_data):
     if ts and ts < 1e12:
         ts = int(ts * 1000)
     if shift in (None, 'P'):
-        trip_path = []
-        current_trip_file = None
+        if drive_pause_ms is None:
+            drive_pause_ms = ts if ts is not None else int(time.time() * 1000)
         return
+    if drive_pause_ms is not None:
+        if ts is None:
+            ts = int(time.time() * 1000)
+        if ts - drive_pause_ms > 600000:
+            trip_path = []
+            current_trip_file = None
+        drive_pause_ms = None
     if lat is not None and lon is not None:
         if current_trip_file is None:
             if ts is None:
