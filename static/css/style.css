@@ -522,6 +522,19 @@ select {
   stroke-width: 0.5px;
 }
 
+#sunroof {
+  stroke: black;
+  stroke-opacity: 0.3;
+  stroke-width: 0.5px;
+}
+
+#sunroof.part-open {
+  /* keep a visible outline when open */
+  stroke: black;
+  stroke-opacity: 1;
+  stroke-width: 0.5px;
+}
+
 #window-fl.window-open,
 #window-fr.window-open,
 #window-rl.window-open,
