@@ -304,14 +304,17 @@ def park_duration_string(start_ms):
     return ' '.join(parts)
 
 
-def _log_trip_point(ts, lat, lon, filename=None):
+def _log_trip_point(ts, lat, lon, speed=None, power=None, filename=None):
     """Append a GPS point to a trip history CSV."""
     if filename is None:
         filename = os.path.join(DATA_DIR, 'trip_history.csv')
     try:
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, 'a', encoding='utf-8') as f:
-            f.write(f"{ts},{lat},{lon}\n")
+            row = [ts, lat, lon,
+                   '' if speed is None else speed,
+                   '' if power is None else power]
+            f.write(','.join(str(v) for v in row) + '\n')
     except Exception:
         pass
 
@@ -324,6 +327,8 @@ def track_drive_path(vehicle_data):
     lat = drive.get('latitude')
     lon = drive.get('longitude')
     ts = drive.get('timestamp') or drive.get('gps_as_of')
+    speed = drive.get('speed')
+    power = drive.get('power')
     if ts and ts < 1e12:
         ts = int(ts * 1000)
     if shift in (None, 'P'):
@@ -347,7 +352,7 @@ def track_drive_path(vehicle_data):
         if not trip_path or trip_path[-1] != point:
             trip_path.append(point)
             if ts is not None:
-                _log_trip_point(ts, lat, lon, current_trip_file)
+                _log_trip_point(ts, lat, lon, speed, power, current_trip_file)
 
 
 def _log_api_error(exc):
@@ -396,14 +401,28 @@ def _get_trip_files(directory=TRIP_DIR):
 
 
 def _load_trip(filename):
-    """Load all coordinates from a trip history CSV."""
+    """Load all coordinates with optional speed and power from a trip CSV."""
+    points = []
     try:
         with open(filename, 'r', encoding='utf-8') as f:
-            rows = [line.strip().split(',') for line in f if line.strip()]
-            rows = [(float(lat), float(lon)) for _t, lat, lon in rows]
-        return [[lat, lon] for lat, lon in rows]
+            for line in f:
+                parts = line.strip().split(',')
+                if len(parts) < 3:
+                    continue
+                _ts, lat, lon = parts[:3]
+                speed = parts[3] if len(parts) >= 4 and parts[3] else None
+                power = parts[4] if len(parts) >= 5 and parts[4] else None
+                try:
+                    lat = float(lat)
+                    lon = float(lon)
+                    speed = float(speed) if speed is not None else None
+                    power = float(power) if power is not None else None
+                except Exception:
+                    continue
+                points.append([lat, lon, speed, power])
     except Exception:
-        return []
+        pass
+    return points
 
 
 def _bearing(p1, p2):
@@ -598,7 +617,7 @@ def trip_history():
     path = _load_trip(os.path.join(TRIP_DIR, selected)) if selected else []
     heading = 0.0
     if len(path) >= 2:
-        heading = _bearing(path[-2], path[-1])
+        heading = _bearing(path[-2][:2], path[-1][:2])
     return render_template('history.html', path=path, heading=heading,
                            files=files, selected=selected)
 
