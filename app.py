@@ -114,7 +114,11 @@ def _update_api_json(data, filename=os.path.join(DATA_DIR, 'api-liste.json')):
         else:
             current = {}
 
-        merged = _merge_data(current, data)
+        # drop the dynamic drive path to keep the file small
+        filtered = data.copy() if isinstance(data, dict) else data
+        if isinstance(filtered, dict):
+            filtered.pop('path', None)
+        merged = _merge_data(current, filtered)
 
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(merged, f, ensure_ascii=False, indent=2)
@@ -140,6 +144,7 @@ def update_api_list(data, filename=os.path.join(DATA_DIR, 'api-liste.txt')):
 
         existing_map = {k: i for i, (k, _v) in enumerate(existing_lines)}
         kv = _collect_key_values(data)
+        kv = [(k, v) for k, v in kv if not k.startswith('path[') and k != 'path']
 
         lines = existing_lines[:]
         for idx, (k, v) in enumerate(kv):
@@ -731,7 +736,8 @@ def api_list_file():
     """Return the aggregated API key list as plain text."""
     try:
         with open(os.path.join(DATA_DIR, 'api-liste.txt'), 'r', encoding='utf-8') as f:
-            content = f.read()
+            lines = [line for line in f if not line.startswith('path[') and not line.startswith('path:')]
+            content = ''.join(lines)
     except Exception:
         content = ''
     return Response(content, mimetype='text/plain')
