@@ -70,13 +70,13 @@ if (Array.isArray(tripPath) && tripPath.length) {
     slider.addEventListener('input', function() {
         var idx = parseInt(this.value, 10);
         updateMarker(idx);
-        map.panTo(marker.getLatLng());
+        var latlng = marker.getLatLng();
 
         if (originalZoom === null) {
             originalZoom = map.getZoom();
         }
         var maxZoom = typeof map.getMaxZoom === 'function' ? map.getMaxZoom() : 18;
-        map.setZoom(maxZoom);
+        map.setView(latlng, maxZoom);
 
         if (zoomTimeout) {
             clearTimeout(zoomTimeout);
@@ -90,4 +90,5 @@ if (Array.isArray(tripPath) && tripPath.length) {
     });
 
     updateMarker(tripPath.length - 1);
+    map.setView(marker.getLatLng(), map.getZoom());
 }
