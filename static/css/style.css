@@ -511,14 +511,14 @@ select {
 #door-rl.part-open {
   transform-origin: left;
 /*  transform: rotateX(-70deg) rotateY(-140deg); */
-  transform: rotateX(-180deg) rotateY(-90deg);
+  transform: perspective(1200px) rotateX(-180deg) rotateY(-90deg);
 }
 
 #door-fr.part-open,
 #door-rr.part-open {
   transform-origin: right;
 /*  transform: rotateX(-70deg) rotateY(140deg); */
-  transform: rotateX(-180deg) rotateY(90deg);
+  transform: perspective(1200px) rotateX(-180deg) rotateY(90deg);
 }
 
 /* animated windows */
