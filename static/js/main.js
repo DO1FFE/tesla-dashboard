@@ -1,6 +1,8 @@
 var currentVehicle = null;
 var APP_VERSION = window.APP_VERSION || null;
 var MILES_TO_KM = 1.60934;
+var lastSuperchargerFetch = 0;
+var superchargerData = [];
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 19;
@@ -208,6 +210,8 @@ function handleData(data) {
         map.removeLayer(polyline);
         polyline = null;
     }
+    updateSuperchargerList();
+    fetchSuperchargers();
 }
 
 
@@ -714,6 +718,32 @@ function updateClientCount() {
     });
 }
 
+function updateSuperchargerList() {
+    var $list = $('#supercharger-list');
+    if (!superchargerData.length) {
+        $list.empty();
+        return;
+    }
+    var items = superchargerData.map(function(sc) {
+        var dist = sc.distance_km != null ? sc.distance_km.toFixed(1) : '?';
+        return '<li>' + sc.name + ' (' + dist + ' km)</li>';
+    });
+    $list.html('<ul>' + items.join('') + '</ul>');
+}
+
+function fetchSuperchargers() {
+    if (!currentVehicle) return;
+    var now = Date.now();
+    if (now - lastSuperchargerFetch < 60000) return;
+    lastSuperchargerFetch = now;
+    $.getJSON('/api/superchargers/' + currentVehicle, function(resp) {
+        if (Array.isArray(resp)) {
+            superchargerData = resp;
+            updateSuperchargerList();
+        }
+    });
+}
+
 
 
 
@@ -736,7 +766,11 @@ function startStream() {
     if (eventSource) {
         eventSource.close();
     }
+    superchargerData = [];
+    updateSuperchargerList();
+    lastSuperchargerFetch = 0;
     eventSource = new EventSource('/stream/' + currentVehicle);
+    fetchSuperchargers();
     eventSource.onmessage = function(e) {
         var data = JSON.parse(e.data);
         if (!data.error) {

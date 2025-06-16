@@ -136,6 +136,20 @@ select {
   margin: 0;
 }
 
+#supercharger-list {
+  margin-left: auto;
+  text-align: left;
+  font-size: 0.9em;
+}
+#supercharger-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+#supercharger-list li {
+  white-space: nowrap;
+}
+
 #v2l-infos,
 #charging-info,
 /* Navigation bar below the status bar */
