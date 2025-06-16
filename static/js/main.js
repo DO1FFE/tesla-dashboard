@@ -484,14 +484,14 @@ function updateV2LInfos(charge, drive) {
                charge.charge_port_color === 'FlashingGreen' &&
                charge.conn_charge_cable === 'IEC';
     if (cond) {
-        var html = '<p><h1><a href="https://bit.ly/49Vp3wN" target="_blank">V2L-Adapter</a> (Vehicle 2 Load) eingesteckt. Nun stehen mir 220V/18A (4kW) zur Verfügung. ' +
-                   'Der Kaffeevollautomat wartet auf dich. Komm vorbei.</h1></p>';
+        var html = '<p><center><h2><a href="https://bit.ly/49Vp3wN" target="_blank">V2L-Adapter</a> (Vehicle 2 Load) eingesteckt. Nun stehen mir 220V/18A (4kW) zur Verfügung.<br> ' +
+                   'Der Kaffeevollautomat wartet auf dich. Komm vorbei.</h2></center></p>';
         var lat = drive && drive.latitude;
         var lng = drive && drive.longitude;
         if (lat != null && lng != null) {
             var url = 'https://www.google.com/maps/search/?api=1&query=' +
                       encodeURIComponent(lat + ',' + lng);
-            html += '<p><h3><a href="' + url + '" target="_blank">Standort in Google Maps</a></h3></p>';
+            html += '<p><center><h3><a href="' + url + '" target="_blank">Standort in Google Maps</a></h3></center></p>';
         }
         $info.html(html).show();
     } else {
