@@ -698,12 +698,41 @@ function updateDataAge(ts) {
     $el.text('Letztes Update vor ' + text + ' (' + timeStr + ')');
 }
 
+function updateStateInfo(state) {
+    var msg = '';
+    if (state === 'online') {
+        msg = 'Fahrzeug ist online.';
+    } else if (state === 'offline') {
+        msg = 'Fahrzeug ist offline.';
+    } else if (state === 'asleep') {
+        msg = 'Fahrzeug schläft gerade. Bitte nicht wecken!';
+    }
+    $('#state-info').text(msg);
+}
+
 function updateVehicleState(state) {
     if (typeof state === 'string' && state.length > 0) {
         $('#vehicle-state').text('State: ' + state);
     } else {
         $('#vehicle-state').text('');
     }
+    updateStateInfo(state);
+}
+
+function checkState(callback) {
+    var url = '/api/state';
+    if (currentVehicle) {
+        url += '/' + currentVehicle;
+    }
+    $.getJSON(url, function(resp) {
+        var state = resp && resp.state;
+        updateVehicleState(state);
+        if (state === 'online' && typeof callback === 'function') {
+            callback();
+        } else if (state === 'offline' || state === 'asleep') {
+            hideForSleep();
+        }
+    });
 }
 
 function updateClientCount() {
@@ -736,29 +765,33 @@ function startStream() {
     if (eventSource) {
         eventSource.close();
     }
-    eventSource = new EventSource('/stream/' + currentVehicle);
-    eventSource.onmessage = function(e) {
-        var data = JSON.parse(e.data);
-        if (!data.error) {
-            handleData(data);
-        }
-    };
-    eventSource.onerror = function() {
-        if (eventSource) {
-            eventSource.close();
-        }
-        var url = '/api/data';
-        if (currentVehicle) {
-            url += '/' + currentVehicle;
-        }
-        $.getJSON(url, function(data) {
-            if (data && !data.error) {
+    checkState(function() {
+        eventSource = new EventSource('/stream/' + currentVehicle);
+        eventSource.onmessage = function(e) {
+            var data = JSON.parse(e.data);
+            if (!data.error) {
                 handleData(data);
             }
-        });
-        // Ensure the map shows Essen if no cached data was found
-        map.setView(DEFAULT_POS, DEFAULT_ZOOM);
-    };
+        };
+        eventSource.onerror = function() {
+            if (eventSource) {
+                eventSource.close();
+            }
+            checkState(function() {
+                var url = '/api/data';
+                if (currentVehicle) {
+                    url += '/' + currentVehicle;
+                }
+                $.getJSON(url, function(data) {
+                    if (data && !data.error) {
+                        handleData(data);
+                    }
+                });
+            });
+            // Ensure the map shows Essen if no cached data was found
+            map.setView(DEFAULT_POS, DEFAULT_ZOOM);
+        };
+    });
 }
 
 $.getJSON('/api/config', function(cfg) {

@@ -33,6 +33,12 @@ can be started from any location while still accessing existing trips and logs.
 All required JavaScript and CSS libraries are bundled under `static/` so the dashboard works even without Internet access.
 
 The backend continuously polls the Tesla API and pushes new data to clients using Server-Sent Events (SSE).
+Before each API call the dashboard checks the vehicle state. Data is only
+retrieved when the car reports `online` so the vehicle does not wake up
+unnecessarily. A lightweight endpoint `/api/state` returns the current
+state (`online`, `asleep` or `offline`).
+The dashboard shows this information above the V2L section so you always know
+whether the car is reachable.
 
 ## Features
 
@@ -62,6 +68,8 @@ The same information is also stored as hierarchical JSON in `data/api-liste.json
 * `/api/vehicles` – list available vehicles as JSON
 * `/api/version` – return the current dashboard version as JSON
 * `/api/clients` – number of connected clients as JSON
+* `/api/state` – return the current vehicle state as JSON
+* `/api/state/<vehicle_id>` – state for a specific vehicle
 * `/stream/<vehicle_id>` – Server-Sent Events endpoint used by the frontend
 
 ## Version
