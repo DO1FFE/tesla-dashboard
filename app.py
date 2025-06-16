@@ -551,8 +551,8 @@ def _cached_vehicle_list(tesla, ttl=300):
         return _vehicle_list_cache
 
 
-def get_vehicle_data(vehicle_id=None):
-    """Fetch vehicle data for a given vehicle id."""
+def get_vehicle_state(vehicle_id=None):
+    """Return the current vehicle state without waking the car."""
     tesla = get_tesla()
     if tesla is None:
         return {"error": "Missing Tesla credentials or teslapy not installed"}
@@ -571,13 +571,43 @@ def get_vehicle_data(vehicle_id=None):
         vehicle.get_vehicle_summary()
         state = vehicle.get('state') or vehicle['state']
         log_vehicle_state(vehicle['id_s'], state)
+        log_api_data('get_vehicle_summary', {'state': state})
     except Exception as exc:
         _log_api_error(exc)
         log_vehicle_state(vehicle['id_s'], 'offline')
         return {"error": "Vehicle unavailable", "state": "offline"}
 
+    return {'state': state}
+
+
+def get_vehicle_data(vehicle_id=None, state=None):
+    """Fetch vehicle data for a given vehicle id."""
+    tesla = get_tesla()
+    if tesla is None:
+        return {"error": "Missing Tesla credentials or teslapy not installed"}
+
+    vehicles = _cached_vehicle_list(tesla)
+    if not vehicles:
+        return {"error": "No vehicles found"}
+
+    vehicle = None
+    if vehicle_id is not None:
+        vehicle = next((v for v in vehicles if str(v['id_s']) == str(vehicle_id)), None)
+    if vehicle is None:
+        vehicle = vehicles[0]
+
+    if state is None:
+        try:
+            vehicle.get_vehicle_summary()
+            state = vehicle.get('state') or vehicle['state']
+            log_vehicle_state(vehicle['id_s'], state)
+            log_api_data('get_vehicle_summary', {'state': state})
+        except Exception as exc:
+            _log_api_error(exc)
+            log_vehicle_state(vehicle['id_s'], 'offline')
+            return {"error": "Vehicle unavailable", "state": "offline"}
+
     if state != 'online':
-        log_api_data('get_vehicle_summary', {'state': state})
         return {'state': state}
 
     try:
@@ -629,23 +659,33 @@ def get_vehicle_list():
     return sanitized
 
 
-def _fetch_loop(vehicle_id, online_interval=3, offline_interval=60):
+def _fetch_loop(vehicle_id, interval=3):
     """Continuously fetch data for a vehicle and notify subscribers."""
     while True:
         vid = None if vehicle_id == 'default' else vehicle_id
-        data = get_vehicle_data(vid)
-        if isinstance(data, dict) and not data.get('error'):
-            _save_cached(vehicle_id, data)
+        state_info = get_vehicle_state(vid)
+        state = state_info.get('state') if isinstance(state_info, dict) else None
+        data = None
+        if state == 'online':
+            data = get_vehicle_data(vid, state=state)
+            if isinstance(data, dict) and not data.get('error'):
+                _save_cached(vehicle_id, data)
+            else:
+                cached = _load_cached(vehicle_id)
+                if cached is not None:
+                    data = cached
         else:
             cached = _load_cached(vehicle_id)
             if cached is not None:
                 data = cached
+                if isinstance(data, dict):
+                    data['state'] = state
+            else:
+                data = {'state': state}
         latest_data[vehicle_id] = data
         for q in subscribers.get(vehicle_id, []):
             q.put(data)
-        state = data.get('state') if isinstance(data, dict) else None
-        sleep_time = online_interval if state == 'online' else offline_interval
-        time.sleep(sleep_time)
+        time.sleep(interval)
 
 
 def _start_thread(vehicle_id):
@@ -758,6 +798,14 @@ def stream_vehicle(vehicle_id='default'):
 def api_vehicles():
     vehicles = get_vehicle_list()
     return jsonify(vehicles)
+
+
+@app.route('/api/state')
+@app.route('/api/state/<vehicle_id>')
+def api_state(vehicle_id=None):
+    """Return the last known state of the vehicle."""
+    state_info = get_vehicle_state(vehicle_id)
+    return jsonify(state_info)
 
 
 @app.route('/api/version')
