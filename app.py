@@ -650,21 +650,30 @@ def get_vehicle_state(vehicle_id=None):
     return {"state": state}
 
 
-def _fetch_loop(vehicle_id, online_interval=3, offline_interval=60):
-    """Continuously fetch data for a vehicle and notify subscribers."""
+def _fetch_loop(vehicle_id, online_interval=3, offline_interval=3):
+    """Continuously fetch data for a vehicle and notify subscribers.
+
+    The function checks the vehicle state every ``online_interval`` seconds.
+    Previously a separate ``offline_interval`` of 60 seconds was used, which
+    delayed recognising when a sleeping vehicle became reachable again.  Both
+    intervals now default to three seconds so the dashboard notices state
+    changes immediately without waking the car.
+    """
     while True:
         vid = None if vehicle_id == 'default' else vehicle_id
         data = get_vehicle_data(vid)
-        if isinstance(data, dict) and not data.get('error'):
+        state = data.get('state') if isinstance(data, dict) else None
+        if state == 'online' and isinstance(data, dict) and not data.get('error'):
             _save_cached(vehicle_id, data)
         else:
             cached = _load_cached(vehicle_id)
             if cached is not None:
+                if isinstance(cached, dict) and state:
+                    cached['state'] = state
                 data = cached
         latest_data[vehicle_id] = data
         for q in subscribers.get(vehicle_id, []):
             q.put(data)
-        state = data.get('state') if isinstance(data, dict) else None
         sleep_time = online_interval if state == 'online' else offline_interval
         time.sleep(sleep_time)
 
@@ -711,11 +720,14 @@ def data_only():
     data = latest_data.get('default')
     if data is None:
         data = get_vehicle_data()
-        if isinstance(data, dict) and not data.get('error'):
+        state = data.get('state') if isinstance(data, dict) else None
+        if state == 'online' and isinstance(data, dict) and not data.get('error'):
             _save_cached('default', data)
         else:
             cached = _load_cached('default')
             if cached is not None:
+                if isinstance(cached, dict) and state:
+                    cached['state'] = state
                 data = cached
         latest_data['default'] = data
     return render_template('data.html', data=data)
@@ -727,11 +739,14 @@ def api_data():
     data = latest_data.get('default')
     if data is None:
         data = get_vehicle_data()
-        if isinstance(data, dict) and not data.get('error'):
+        state = data.get('state') if isinstance(data, dict) else None
+        if state == 'online' and isinstance(data, dict) and not data.get('error'):
             _save_cached('default', data)
         else:
             cached = _load_cached('default')
             if cached is not None:
+                if isinstance(cached, dict) and state:
+                    cached['state'] = state
                 data = cached
         latest_data['default'] = data
     return jsonify(data)
@@ -743,11 +758,14 @@ def api_data_vehicle(vehicle_id):
     data = latest_data.get(vehicle_id)
     if data is None:
         data = get_vehicle_data(vehicle_id)
-        if isinstance(data, dict) and not data.get('error'):
+        state = data.get('state') if isinstance(data, dict) else None
+        if state == 'online' and isinstance(data, dict) and not data.get('error'):
             _save_cached(vehicle_id, data)
         else:
             cached = _load_cached(vehicle_id)
             if cached is not None:
+                if isinstance(cached, dict) and state:
+                    cached['state'] = state
                 data = cached
         latest_data[vehicle_id] = data
     return jsonify(data)
