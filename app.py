@@ -671,7 +671,7 @@ def _fetch_data_once(vehicle_id='default'):
     if state == 'online':
         data = get_vehicle_data(vid, state=state)
         if isinstance(data, dict) and not data.get('error'):
-            _save_cached(cache_id, data)
+            pass
         else:
             cached = _load_cached(cache_id)
             if cached is not None:
@@ -690,6 +690,11 @@ def _fetch_data_once(vehicle_id='default'):
             data = {'state': state}
 
     latest_data[cache_id] = data
+    if isinstance(data, dict):
+        try:
+            _save_cached(cache_id, data)
+        except Exception:
+            pass
     return data
 
 
