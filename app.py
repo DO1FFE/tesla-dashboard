@@ -320,6 +320,8 @@ threads = {}
 _vehicle_list_cache = []
 _vehicle_list_cache_ts = 0.0
 _vehicle_list_lock = threading.Lock()
+_supercharger_cache = {}
+_supercharger_cache_ts = {}
 api_errors = []
 api_errors_lock = threading.Lock()
 state_lock = threading.Lock()
@@ -677,6 +679,44 @@ def get_vehicle_list():
     return sanitized
 
 
+def get_superchargers(vehicle_id=None, ttl=300):
+    """Return nearby Superchargers for the given vehicle."""
+    tesla = get_tesla()
+    if tesla is None:
+        return []
+
+    vehicles = _cached_vehicle_list(tesla)
+    if not vehicles:
+        return []
+
+    vehicle = None
+    if vehicle_id is not None:
+        vehicle = next((v for v in vehicles if str(v['id_s']) == str(vehicle_id)), None)
+    if vehicle is None:
+        vehicle = vehicles[0]
+
+    vid = vehicle['id_s']
+    now = time.time()
+    if vid in _supercharger_cache and now - _supercharger_cache_ts.get(vid, 0) < ttl:
+        return _supercharger_cache[vid]
+
+    try:
+        sites = vehicle.get_nearby_charging_sites()
+        log_api_data('get_nearby_charging_sites', sanitize(sites))
+        chargers = []
+        for s in sites.get('superchargers', []):
+            dist = s.get('distance_miles')
+            if dist is not None:
+                dist = round(dist * 1.60934, 1)
+            chargers.append({'name': s.get('name'), 'distance_km': dist})
+        _supercharger_cache[vid] = chargers
+        _supercharger_cache_ts[vid] = now
+        return chargers
+    except Exception as exc:
+        _log_api_error(exc)
+        return []
+
+
 def _fetch_data_once(vehicle_id='default'):
     """Return current data or cached values based on vehicle state."""
     vid = None if vehicle_id in (None, 'default') else vehicle_id
@@ -835,6 +875,14 @@ def api_clients():
     """Return the current number of connected streaming clients."""
     count = sum(len(v) for v in subscribers.values())
     return jsonify({'clients': count})
+
+
+@app.route('/api/superchargers')
+@app.route('/api/superchargers/<vehicle_id>')
+def api_superchargers(vehicle_id=None):
+    """Return nearby Superchargers as JSON."""
+    chargers = get_superchargers(vehicle_id)
+    return jsonify(chargers)
 
 
 @app.route('/api/config')
