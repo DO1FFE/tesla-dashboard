@@ -509,6 +509,7 @@ select {
 /* Geöffnete Türen */
 #door-fl.part-open,
 #door-rl.part-open {
+  fill: #4caf50;
   transform-origin: left;
 /*  transform: rotateX(-70deg) rotateY(-140deg); */
   transform: rotateY(-180deg);
@@ -516,6 +517,7 @@ select {
 
 #door-fr.part-open,
 #door-rr.part-open {
+  fill: #4caf50;
   transform-origin: right;
 /*  transform: rotateX(-70deg) rotateY(140deg); */
   transform: rotateY(180deg);
