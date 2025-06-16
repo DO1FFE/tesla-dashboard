@@ -567,13 +567,21 @@ def get_vehicle_data(vehicle_id=None):
     if vehicle is None:
         vehicle = vehicles[0]
 
-    state_resp = get_vehicle_state(vehicle['id_s'])
-    state = state_resp.get('state')
+    try:
+        vehicle.get_vehicle_summary()
+        state = vehicle.get('state') or vehicle['state']
+        log_vehicle_state(vehicle['id_s'], state)
+    except Exception as exc:
+        _log_api_error(exc)
+        log_vehicle_state(vehicle['id_s'], 'offline')
+        return {"error": "Vehicle unavailable", "state": "offline"}
+
     if state != 'online':
+        log_api_data('get_vehicle_summary', {'state': state})
         return {'state': state}
 
     try:
-        vehicle_data = vehicle.get_vehicle_data(wake_if_asleep=False)
+        vehicle_data = vehicle.get_vehicle_data()
     except Exception as exc:
         _log_api_error(exc)
         return {"error": str(exc), "state": state}
@@ -621,59 +629,21 @@ def get_vehicle_list():
     return sanitized
 
 
-def get_vehicle_state(vehicle_id=None):
-    """Return the current state of the vehicle."""
-    tesla = get_tesla()
-    if tesla is None:
-        return {"error": "Missing Tesla credentials or teslapy not installed"}
-
-    vehicles = _cached_vehicle_list(tesla)
-    if not vehicles:
-        return {"error": "No vehicles found"}
-
-    vehicle = None
-    if vehicle_id is not None:
-        vehicle = next((v for v in vehicles if str(v['id_s']) == str(vehicle_id)), None)
-    if vehicle is None:
-        vehicle = vehicles[0]
-
-    try:
-        vehicle.get_vehicle_summary()
-        state = vehicle.get('state') or vehicle['state']
-        log_vehicle_state(vehicle['id_s'], state)
-    except Exception as exc:
-        _log_api_error(exc)
-        log_vehicle_state(vehicle['id_s'], 'offline')
-        return {"state": "offline"}
-
-    log_api_data('get_vehicle_summary', {'state': state})
-    return {"state": state}
-
-
-def _fetch_loop(vehicle_id, online_interval=3, offline_interval=3):
-    """Continuously fetch data for a vehicle and notify subscribers.
-
-    The function checks the vehicle state every ``online_interval`` seconds.
-    Previously a separate ``offline_interval`` of 60 seconds was used, which
-    delayed recognising when a sleeping vehicle became reachable again.  Both
-    intervals now default to three seconds so the dashboard notices state
-    changes immediately without waking the car.
-    """
+def _fetch_loop(vehicle_id, online_interval=3, offline_interval=60):
+    """Continuously fetch data for a vehicle and notify subscribers."""
     while True:
         vid = None if vehicle_id == 'default' else vehicle_id
         data = get_vehicle_data(vid)
-        state = data.get('state') if isinstance(data, dict) else None
-        if state == 'online' and isinstance(data, dict) and not data.get('error'):
+        if isinstance(data, dict) and not data.get('error'):
             _save_cached(vehicle_id, data)
         else:
             cached = _load_cached(vehicle_id)
             if cached is not None:
-                if isinstance(cached, dict) and state:
-                    cached['state'] = state
                 data = cached
         latest_data[vehicle_id] = data
         for q in subscribers.get(vehicle_id, []):
             q.put(data)
+        state = data.get('state') if isinstance(data, dict) else None
         sleep_time = online_interval if state == 'online' else offline_interval
         time.sleep(sleep_time)
 
@@ -720,14 +690,11 @@ def data_only():
     data = latest_data.get('default')
     if data is None:
         data = get_vehicle_data()
-        state = data.get('state') if isinstance(data, dict) else None
-        if state == 'online' and isinstance(data, dict) and not data.get('error'):
+        if isinstance(data, dict) and not data.get('error'):
             _save_cached('default', data)
         else:
             cached = _load_cached('default')
             if cached is not None:
-                if isinstance(cached, dict) and state:
-                    cached['state'] = state
                 data = cached
         latest_data['default'] = data
     return render_template('data.html', data=data)
@@ -739,14 +706,11 @@ def api_data():
     data = latest_data.get('default')
     if data is None:
         data = get_vehicle_data()
-        state = data.get('state') if isinstance(data, dict) else None
-        if state == 'online' and isinstance(data, dict) and not data.get('error'):
+        if isinstance(data, dict) and not data.get('error'):
             _save_cached('default', data)
         else:
             cached = _load_cached('default')
             if cached is not None:
-                if isinstance(cached, dict) and state:
-                    cached['state'] = state
                 data = cached
         latest_data['default'] = data
     return jsonify(data)
@@ -758,14 +722,11 @@ def api_data_vehicle(vehicle_id):
     data = latest_data.get(vehicle_id)
     if data is None:
         data = get_vehicle_data(vehicle_id)
-        state = data.get('state') if isinstance(data, dict) else None
-        if state == 'online' and isinstance(data, dict) and not data.get('error'):
+        if isinstance(data, dict) and not data.get('error'):
             _save_cached(vehicle_id, data)
         else:
             cached = _load_cached(vehicle_id)
             if cached is not None:
-                if isinstance(cached, dict) and state:
-                    cached['state'] = state
                 data = cached
         latest_data[vehicle_id] = data
     return jsonify(data)
@@ -810,20 +771,6 @@ def api_clients():
     """Return the current number of connected streaming clients."""
     count = sum(len(v) for v in subscribers.values())
     return jsonify({'clients': count})
-
-
-@app.route('/api/state')
-def api_state_default():
-    """Return the current state of the default vehicle."""
-    state = get_vehicle_state().get('state')
-    return jsonify({'state': state})
-
-
-@app.route('/api/state/<vehicle_id>')
-def api_state_vehicle(vehicle_id):
-    """Return the current state of the specified vehicle."""
-    state = get_vehicle_state(vehicle_id).get('state')
-    return jsonify({'state': state})
 
 
 @app.route('/api/config')
