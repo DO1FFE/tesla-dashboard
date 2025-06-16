@@ -510,13 +510,15 @@ select {
 #door-fl.part-open,
 #door-rl.part-open {
   transform-origin: left;
-  transform: rotateX(-70deg) rotateY(-140deg);
+/*  transform: rotateX(-70deg) rotateY(-140deg); */
+  transform: rotateY(-140deg);
 }
 
 #door-fr.part-open,
 #door-rr.part-open {
   transform-origin: right;
-  transform: rotateX(-70deg) rotateY(140deg);
+/*  transform: rotateX(-70deg) rotateY(140deg); */
+  transform: rotateX(-70deg);
 }
 
 /* animated windows */
