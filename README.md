@@ -26,7 +26,8 @@ grow to at most 1&nbsp;MB.
 Vehicle state changes are written to `data/state.log`.
 The latest successful API response is also stored in `data/cache_<vehicle_id>.json`
 so the dashboard can display the most recently fetched data if the Tesla API is
-temporarily unavailable.
+temporarily unavailable. When the vehicle is asleep or offline the server only
+checks the vehicle state and serves this cached data back to the client.
 All data paths are resolved relative to the application directory, so the server
 can be started from any location while still accessing existing trips and logs.
 

@@ -659,30 +659,44 @@ def get_vehicle_list():
     return sanitized
 
 
-def _fetch_loop(vehicle_id, interval=3):
-    """Continuously fetch data for a vehicle and notify subscribers."""
-    while True:
-        vid = None if vehicle_id == 'default' else vehicle_id
-        state_info = get_vehicle_state(vid)
-        state = state_info.get('state') if isinstance(state_info, dict) else None
-        data = None
-        if state == 'online':
-            data = get_vehicle_data(vid, state=state)
-            if isinstance(data, dict) and not data.get('error'):
-                _save_cached(vehicle_id, data)
-            else:
-                cached = _load_cached(vehicle_id)
-                if cached is not None:
-                    data = cached
+def _fetch_data_once(vehicle_id='default'):
+    """Return current data or cached values based on vehicle state."""
+    vid = None if vehicle_id in (None, 'default') else vehicle_id
+    cache_id = 'default' if vehicle_id in (None, 'default') else vehicle_id
+
+    state_info = get_vehicle_state(vid)
+    state = state_info.get('state') if isinstance(state_info, dict) else None
+
+    data = None
+    if state == 'online':
+        data = get_vehicle_data(vid, state=state)
+        if isinstance(data, dict) and not data.get('error'):
+            _save_cached(cache_id, data)
         else:
-            cached = _load_cached(vehicle_id)
+            cached = _load_cached(cache_id)
             if cached is not None:
                 data = cached
                 if isinstance(data, dict):
                     data['state'] = state
             else:
                 data = {'state': state}
-        latest_data[vehicle_id] = data
+    else:
+        cached = _load_cached(cache_id)
+        if cached is not None:
+            data = cached
+            if isinstance(data, dict):
+                data['state'] = state
+        else:
+            data = {'state': state}
+
+    latest_data[cache_id] = data
+    return data
+
+
+def _fetch_loop(vehicle_id, interval=3):
+    """Continuously fetch data for a vehicle and notify subscribers."""
+    while True:
+        data = _fetch_data_once(vehicle_id)
         for q in subscribers.get(vehicle_id, []):
             q.put(data)
         time.sleep(interval)
@@ -729,14 +743,7 @@ def data_only():
     _start_thread('default')
     data = latest_data.get('default')
     if data is None:
-        data = get_vehicle_data()
-        if isinstance(data, dict) and not data.get('error'):
-            _save_cached('default', data)
-        else:
-            cached = _load_cached('default')
-            if cached is not None:
-                data = cached
-        latest_data['default'] = data
+        data = _fetch_data_once('default')
     return render_template('data.html', data=data)
 
 
@@ -745,14 +752,7 @@ def api_data():
     _start_thread('default')
     data = latest_data.get('default')
     if data is None:
-        data = get_vehicle_data()
-        if isinstance(data, dict) and not data.get('error'):
-            _save_cached('default', data)
-        else:
-            cached = _load_cached('default')
-            if cached is not None:
-                data = cached
-        latest_data['default'] = data
+        data = _fetch_data_once('default')
     return jsonify(data)
 
 
@@ -761,14 +761,7 @@ def api_data_vehicle(vehicle_id):
     _start_thread(vehicle_id)
     data = latest_data.get(vehicle_id)
     if data is None:
-        data = get_vehicle_data(vehicle_id)
-        if isinstance(data, dict) and not data.get('error'):
-            _save_cached(vehicle_id, data)
-        else:
-            cached = _load_cached(vehicle_id)
-            if cached is not None:
-                data = cached
-        latest_data[vehicle_id] = data
+        data = _fetch_data_once(vehicle_id)
     return jsonify(data)
 
 
