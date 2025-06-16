@@ -567,21 +567,13 @@ def get_vehicle_data(vehicle_id=None):
     if vehicle is None:
         vehicle = vehicles[0]
 
-    try:
-        vehicle.get_vehicle_summary()
-        state = vehicle.get('state') or vehicle['state']
-        log_vehicle_state(vehicle['id_s'], state)
-    except Exception as exc:
-        _log_api_error(exc)
-        log_vehicle_state(vehicle['id_s'], 'offline')
-        return {"error": "Vehicle unavailable", "state": "offline"}
-
+    state_resp = get_vehicle_state(vehicle['id_s'])
+    state = state_resp.get('state')
     if state != 'online':
-        log_api_data('get_vehicle_summary', {'state': state})
         return {'state': state}
 
     try:
-        vehicle_data = vehicle.get_vehicle_data()
+        vehicle_data = vehicle.get_vehicle_data(wake_if_asleep=False)
     except Exception as exc:
         _log_api_error(exc)
         return {"error": str(exc), "state": state}
@@ -627,6 +619,35 @@ def get_vehicle_list():
             name = f"Fahrzeug {idx}"
         sanitized.append({"id": v['id_s'], "display_name": name})
     return sanitized
+
+
+def get_vehicle_state(vehicle_id=None):
+    """Return the current state of the vehicle."""
+    tesla = get_tesla()
+    if tesla is None:
+        return {"error": "Missing Tesla credentials or teslapy not installed"}
+
+    vehicles = _cached_vehicle_list(tesla)
+    if not vehicles:
+        return {"error": "No vehicles found"}
+
+    vehicle = None
+    if vehicle_id is not None:
+        vehicle = next((v for v in vehicles if str(v['id_s']) == str(vehicle_id)), None)
+    if vehicle is None:
+        vehicle = vehicles[0]
+
+    try:
+        vehicle.get_vehicle_summary()
+        state = vehicle.get('state') or vehicle['state']
+        log_vehicle_state(vehicle['id_s'], state)
+    except Exception as exc:
+        _log_api_error(exc)
+        log_vehicle_state(vehicle['id_s'], 'offline')
+        return {"state": "offline"}
+
+    log_api_data('get_vehicle_summary', {'state': state})
+    return {"state": state}
 
 
 def _fetch_loop(vehicle_id, online_interval=3, offline_interval=60):
@@ -771,6 +792,20 @@ def api_clients():
     """Return the current number of connected streaming clients."""
     count = sum(len(v) for v in subscribers.values())
     return jsonify({'clients': count})
+
+
+@app.route('/api/state')
+def api_state_default():
+    """Return the current state of the default vehicle."""
+    state = get_vehicle_state().get('state')
+    return jsonify({'state': state})
+
+
+@app.route('/api/state/<vehicle_id>')
+def api_state_vehicle(vehicle_id):
+    """Return the current state of the specified vehicle."""
+    state = get_vehicle_state(vehicle_id).get('state')
+    return jsonify({'state': state})
 
 
 @app.route('/api/config')
