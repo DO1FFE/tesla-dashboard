@@ -60,6 +60,7 @@ The same information is also stored as hierarchical JSON in `data/api-liste.json
 * `/state` – display the vehicle state log
 * `/debug` – display environment info and recent log lines
 * `/api/vehicles` – list available vehicles as JSON
+* `/api/state` – return the current vehicle state as JSON
 * `/api/version` – return the current dashboard version as JSON
 * `/api/clients` – number of connected clients as JSON
 * `/stream/<vehicle_id>` – Server-Sent Events endpoint used by the frontend
