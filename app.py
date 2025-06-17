@@ -662,7 +662,7 @@ def get_vehicle_list():
     return sanitized
 
 
-def get_superchargers(vehicle_id=None, ttl=300):
+def get_superchargers(vehicle_id=None, ttl=60):
     """Return nearby Superchargers for the given vehicle."""
     tesla = get_tesla()
     if tesla is None:
