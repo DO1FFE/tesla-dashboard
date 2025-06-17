@@ -3,7 +3,6 @@ import json
 import queue
 import threading
 import time
-import subprocess
 import logging
 from logging.handlers import RotatingFileHandler
 from flask import Flask, render_template, jsonify, Response, request
@@ -57,26 +56,6 @@ if not state_logger.handlers:
     state_logger.addHandler(handler)
     state_logger.setLevel(logging.INFO)
 
-
-def _check_for_git_updates(interval=600):
-    """Periodically check for updates from Git and run ``erneuern`` if found."""
-    while True:
-        try:
-            subprocess.check_call(['git', 'fetch'], cwd=BASE_DIR)
-            count = int(subprocess.check_output([
-                'git', 'rev-list', 'HEAD..@{u}', '--count'
-            ], cwd=BASE_DIR).decode().strip())
-            if count > 0:
-                logging.info('Found %d updates, executing "erneuern"', count)
-                subprocess.Popen(
-                    ['sh', '-c', 'erneuern'],
-                    cwd=BASE_DIR,
-                    start_new_session=True
-                )
-                break
-        except Exception as e:
-            logging.error('Git update check failed: %s', e)
-        time.sleep(interval)
 
 
 def _load_last_state(filename=os.path.join(DATA_DIR, 'state.log')):
@@ -974,5 +953,4 @@ def debug_info():
 
 
 if __name__ == '__main__':
-    threading.Thread(target=_check_for_git_updates, daemon=True).start()
     app.run(host='0.0.0.0', port=8013, debug=True)
