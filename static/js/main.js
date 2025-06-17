@@ -21,6 +21,8 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 }).addTo(map);
 var polyline = null;
 var lastDataTimestamp = null;
+var lastAddressLat = null;
+var lastAddressLng = null;
 var CONFIG = {};
 var HIGHLIGHT_BLUE = false;
 var ASLEEP = false;
@@ -173,9 +175,11 @@ function handleData(data) {
         if (typeof drive.heading === 'number') {
             marker.setRotationAngle(drive.heading);
         }
+        fetchAddress(lat, lng);
     } else {
         // Fall back to Essen if no coordinates are available
         map.setView(DEFAULT_POS, DEFAULT_ZOOM);
+        $('#location-address').text('');
     }
 
     // Show destination flag and route line if navigation is active
@@ -792,6 +796,20 @@ function fetchSuperchargers() {
             superchargerData = resp;
             updateSuperchargerList();
         }
+    });
+}
+
+function fetchAddress(lat, lon) {
+    if (lat == null || lon == null) return;
+    if (lastAddressLat === lat && lastAddressLng === lon) return;
+    lastAddressLat = lat;
+    lastAddressLng = lon;
+    $.getJSON('/api/reverse_geocode', {lat: lat, lon: lon}, function(resp) {
+        var addr = resp.address || resp.display_name;
+        if (!addr && resp.raw && resp.raw.display_name) {
+            addr = resp.raw.display_name;
+        }
+        $('#location-address').text(addr || '');
     });
 }
 
