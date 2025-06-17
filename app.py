@@ -308,6 +308,31 @@ _supercharger_cache_ts = {}
 api_errors = []
 api_errors_lock = threading.Lock()
 state_lock = threading.Lock()
+
+
+def get_service_data(vehicle_id=None):
+    """Return service data for a given vehicle id."""
+    tesla = get_tesla()
+    if tesla is None:
+        return {"error": "Missing Tesla credentials or teslapy not installed"}
+
+    vehicles = _cached_vehicle_list(tesla)
+    if not vehicles:
+        return {"error": "No vehicles found"}
+
+    vehicle = None
+    if vehicle_id is not None:
+        vehicle = next((v for v in vehicles if str(v['id_s']) == str(vehicle_id)), None)
+    if vehicle is None:
+        vehicle = vehicles[0]
+
+    try:
+        data = vehicle.api('VEHICLE_SERVICE_DATA')
+        log_api_data('VEHICLE_SERVICE_DATA', sanitize(data))
+        return data
+    except Exception as exc:
+        _log_api_error(exc)
+        return {"error": str(exc)}
 last_vehicle_state = _load_last_state()
 
 
@@ -868,6 +893,14 @@ def api_superchargers(vehicle_id=None):
     return jsonify(chargers)
 
 
+@app.route('/api/service')
+@app.route('/api/service/<vehicle_id>')
+def api_service(vehicle_id=None):
+    """Return vehicle service data as JSON."""
+    data = get_service_data(vehicle_id)
+    return jsonify(data)
+
+
 @app.route('/api/config')
 def api_config():
     """Return visibility configuration as JSON."""
@@ -928,6 +961,14 @@ def state_log_page():
     except Exception:
         pass
     return render_template('state.html', log_lines=log_lines)
+
+
+@app.route('/service')
+@app.route('/service/<vehicle_id>')
+def service_page(vehicle_id=None):
+    """Display service data of the vehicle."""
+    data = get_service_data(vehicle_id)
+    return render_template('service.html', data=data)
 
 
 @app.route('/debug')
