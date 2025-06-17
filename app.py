@@ -728,6 +728,20 @@ def get_superchargers(vehicle_id=None, ttl=60):
         return _supercharger_cache.get(vid, [])
 
 
+def reverse_geocode(lat, lon):
+    """Return address information for given coordinates."""
+    tesla = get_tesla()
+    if tesla is None:
+        return {}
+    try:
+        resp = tesla.api('REVERSE_GEOCODING', params={'latitude': lat, 'longitude': lon})
+        log_api_data('REVERSE_GEOCODING', sanitize(resp))
+        return resp
+    except Exception as exc:
+        _log_api_error(exc)
+        return {}
+
+
 def _fetch_data_once(vehicle_id='default'):
     """Return current data or cached values based on vehicle state."""
     vid = None if vehicle_id in (None, 'default') else vehicle_id
@@ -902,6 +916,18 @@ def api_superchargers(vehicle_id=None):
     """Return nearby Superchargers as JSON."""
     chargers = get_superchargers(vehicle_id)
     return jsonify(chargers)
+
+
+@app.route('/api/reverse_geocode')
+def api_reverse_geocode():
+    """Return address for given coordinates using Tesla API."""
+    try:
+        lat = float(request.args.get('lat'))
+        lon = float(request.args.get('lon'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Missing coordinates'}), 400
+    result = reverse_geocode(lat, lon)
+    return jsonify(result)
 
 
 @app.route('/api/config')
