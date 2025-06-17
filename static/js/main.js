@@ -805,9 +805,36 @@ function fetchAddress(lat, lon) {
     lastAddressLat = lat;
     lastAddressLng = lon;
     $.getJSON('/api/reverse_geocode', {lat: lat, lon: lon}, function(resp) {
-        var addr = resp.address || resp.display_name;
-        if (!addr && resp.raw && resp.raw.display_name) {
-            addr = resp.raw.display_name;
+        var addr = null;
+        if (resp.raw && resp.raw.address) {
+            var a = resp.raw.address;
+            var line1 = '';
+            if (a.road) {
+                line1 += a.road;
+                if (a.house_number) {
+                    line1 += ' ' + a.house_number;
+                }
+            }
+            var city = a.city || a.town || a.village;
+            var line2 = '';
+            if (a.postcode) {
+                line2 += a.postcode;
+            }
+            if (city) {
+                line2 += (line2 ? ' ' : '') + city;
+            }
+            if (line1 || line2) {
+                addr = line1;
+                if (line2) {
+                    addr += (addr ? ', ' : '') + line2;
+                }
+            }
+        }
+        if (!addr) {
+            addr = resp.address || resp.display_name;
+            if (!addr && resp.raw && resp.raw.display_name) {
+                addr = resp.raw.display_name;
+            }
         }
         $('#location-address').text(addr || '');
     });
