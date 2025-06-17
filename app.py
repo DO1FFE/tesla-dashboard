@@ -68,7 +68,11 @@ def _check_for_git_updates(interval=600):
             ], cwd=BASE_DIR).decode().strip())
             if count > 0:
                 logging.info('Found %d updates, executing "erneuern"', count)
-                subprocess.Popen(['sh', '-c', 'erneuern'], cwd=BASE_DIR)
+                subprocess.Popen(
+                    ['sh', '-c', 'erneuern'],
+                    cwd=BASE_DIR,
+                    start_new_session=True
+                )
                 break
         except Exception as e:
             logging.error('Git update check failed: %s', e)
