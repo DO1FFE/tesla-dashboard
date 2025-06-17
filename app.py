@@ -683,6 +683,11 @@ def get_superchargers(vehicle_id=None, ttl=300):
     if vid in _supercharger_cache and now - _supercharger_cache_ts.get(vid, 0) < ttl:
         return _supercharger_cache[vid]
 
+    state_info = get_vehicle_state(vid)
+    state = state_info.get('state') if isinstance(state_info, dict) else None
+    if state != 'online':
+        return _supercharger_cache.get(vid, [])
+
     try:
         sites = vehicle.get_nearby_charging_sites()
         log_api_data('get_nearby_charging_sites', sanitize(sites))
@@ -697,7 +702,7 @@ def get_superchargers(vehicle_id=None, ttl=300):
         return chargers
     except Exception as exc:
         _log_api_error(exc)
-        return []
+        return _supercharger_cache.get(vid, [])
 
 
 def _fetch_data_once(vehicle_id='default'):
@@ -705,8 +710,10 @@ def _fetch_data_once(vehicle_id='default'):
     vid = None if vehicle_id in (None, 'default') else vehicle_id
     cache_id = 'default' if vehicle_id in (None, 'default') else vehicle_id
 
-    state_info = get_vehicle_state(vid)
-    state = state_info.get('state') if isinstance(state_info, dict) else None
+    state = last_vehicle_state.get(cache_id)
+    if state in (None, 'online'):
+        state_info = get_vehicle_state(vid)
+        state = state_info.get('state') if isinstance(state_info, dict) else state
 
     data = None
     if state == 'online':
