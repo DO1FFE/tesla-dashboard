@@ -6,6 +6,7 @@ import time
 import logging
 from logging.handlers import RotatingFileHandler
 from flask import Flask, render_template, jsonify, Response, request
+import requests
 from functools import wraps
 from dotenv import load_dotenv
 from version import get_version
@@ -731,12 +732,24 @@ def get_superchargers(vehicle_id=None, ttl=60):
 def reverse_geocode(lat, lon):
     """Return address information for given coordinates."""
     tesla = get_tesla()
-    if tesla is None:
-        return {}
+    if tesla is not None:
+        try:
+            resp = tesla.api('REVERSE_GEOCODING', params={'latitude': lat, 'longitude': lon})
+            log_api_data('REVERSE_GEOCODING', sanitize(resp))
+            if resp:
+                return resp
+        except Exception as exc:
+            _log_api_error(exc)
+
+    # Fallback to OpenStreetMap if Tesla API fails or returns nothing
     try:
-        resp = tesla.api('REVERSE_GEOCODING', params={'latitude': lat, 'longitude': lon})
-        log_api_data('REVERSE_GEOCODING', sanitize(resp))
-        return resp
+        url = 'https://nominatim.openstreetmap.org/reverse'
+        params = {'lat': lat, 'lon': lon, 'format': 'jsonv2'}
+        headers = {'User-Agent': 'TeslaDashboard/1.0'}
+        r = requests.get(url, params=params, headers=headers, timeout=5)
+        r.raise_for_status()
+        data = r.json()
+        return {'address': data.get('display_name'), 'raw': data}
     except Exception as exc:
         _log_api_error(exc)
         return {}

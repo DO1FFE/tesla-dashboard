@@ -1,3 +1,4 @@
 flask
 teslapy
 python-dotenv
+requests
