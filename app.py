@@ -309,6 +309,7 @@ api_errors = []
 api_errors_lock = threading.Lock()
 state_lock = threading.Lock()
 last_vehicle_state = _load_last_state()
+occupant_present = False
 
 
 def track_park_time(vehicle_data):
@@ -611,7 +612,19 @@ def get_vehicle_data(vehicle_id=None, state=None):
             return {"error": "Vehicle unavailable", "state": "offline"}
 
     if state != 'online':
-        return {'state': state}
+        if occupant_present and state in ('asleep', 'offline'):
+            try:
+                vehicle.sync_wake_up()
+                state = vehicle.get('state') or vehicle['state']
+                log_vehicle_state(vehicle['id_s'], state)
+                log_api_data('wake_up', {'state': state})
+            except Exception as exc:
+                _log_api_error(exc)
+                return {'error': str(exc), 'state': state}
+            if state != 'online':
+                return {'state': state}
+        else:
+            return {'state': state}
 
     try:
         vehicle_data = vehicle.get_vehicle_data()
@@ -721,14 +734,14 @@ def _fetch_data_once(vehicle_id='default'):
     cache_id = 'default' if vehicle_id in (None, 'default') else vehicle_id
 
     state = last_vehicle_state.get(cache_id)
-    if state in (None, 'online'):
+    if state in (None, 'online') or occupant_present:
         state_info = get_vehicle_state(vid)
         state = state_info.get('state') if isinstance(state_info, dict) else state
 
     data = None
-    if state == 'online':
+    if state == 'online' or occupant_present:
         data = get_vehicle_data(vid, state=state)
-        if isinstance(data, dict) and not data.get('error'):
+        if isinstance(data, dict) and not data.get('error') and data.get('state') == 'online':
             pass
         else:
             cached = _load_cached(cache_id)
@@ -889,6 +902,16 @@ def api_superchargers(vehicle_id=None):
 def api_config():
     """Return visibility configuration as JSON."""
     return jsonify(load_config())
+
+
+@app.route('/api/occupant', methods=['GET', 'POST'])
+def api_occupant():
+    """Return or update occupant presence status."""
+    global occupant_present
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        occupant_present = bool(data.get('present'))
+    return jsonify({'present': occupant_present})
 
 
 @app.route('/config', methods=['GET', 'POST'])

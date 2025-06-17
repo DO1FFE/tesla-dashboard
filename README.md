@@ -65,6 +65,7 @@ The same information is also stored as hierarchical JSON in `data/api-liste.json
 * `/api/state` – return the current vehicle state as JSON
 * `/api/version` – return the current dashboard version as JSON
 * `/api/clients` – number of connected clients as JSON
+* `/api/occupant` – get or set occupant presence flag
 * `/stream/<vehicle_id>` – Server-Sent Events endpoint used by the frontend
 
 ## Version
