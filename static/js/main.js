@@ -17,6 +17,7 @@ var lastDataTimestamp = null;
 var CONFIG = {};
 var HIGHLIGHT_BLUE = false;
 var ASLEEP = false;
+var OFFLINE_TEXT = 'Das Fahrzeug ist offline und schläft - Bitte nicht wecken! - Die Daten sind die zuletzt bekannten und somit nicht aktuell!';
 
 function applyConfig(cfg) {
     if (!cfg) return;
@@ -126,11 +127,7 @@ function handleData(data) {
     updateHeader(data);
     updateUI(data);
     updateVehicleState(data.state);
-    if (data.state && data.state.toLowerCase() === 'asleep') {
-        hideForSleep();
-    } else if (ASLEEP && data.state && data.state.toLowerCase() === 'online') {
-        showConfigured();
-    }
+    updateOfflineInfo(data.state);
     var drive = data.drive_state || {};
     var vehicle = data.vehicle_state || {};
     updateDataAge(vehicle.timestamp);
@@ -716,6 +713,18 @@ function updateVehicleState(state) {
     } else {
         $('#vehicle-state').text('');
     }
+}
+
+function updateOfflineInfo(state) {
+    var $msg = $('#offline-msg');
+    if (typeof state === 'string') {
+        var st = state.toLowerCase();
+        if (st === 'offline' || st === 'asleep') {
+            $msg.text(OFFLINE_TEXT).show();
+            return;
+        }
+    }
+    $msg.hide().text('');
 }
 
 function updateClientCount() {

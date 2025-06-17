@@ -50,6 +50,14 @@ select {
   color: var(--accent-color);
 }
 
+#offline-msg {
+  display: none;
+  text-align: center;
+  font-size: 1.1em;
+  margin: 10px 0;
+  color: var(--accent-color);
+}
+
 #map {
   height: 400px;
   margin-top: 10px;
