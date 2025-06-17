@@ -581,6 +581,9 @@ function updateChargingInfo(charge) {
         if (charge.minutes_to_full_charge != null) {
             rows.push('<tr><th>Minuten bis voll:</th><td>' + Math.round(charge.minutes_to_full_charge) + ' min</td></tr>');
         }
+        if (state !== 'Charging' && lastChargeInfo && lastChargeInfo.charge_energy_added != null) {
+            rows.push('<tr><th>Beim letzten Stopp hinzugefügte Energie:</th><td>' + Number(lastChargeInfo.charge_energy_added).toFixed(2) + ' kWh</td></tr>');
+        }
     } else if (lastChargeInfo && lastChargeInfo.charge_energy_added != null) {
         rows.push('<tr><th>Beim letzten Stopp hinzugefügte Energie:</th><td>' + Number(lastChargeInfo.charge_energy_added).toFixed(2) + ' kWh</td></tr>');
     }
