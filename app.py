@@ -760,6 +760,12 @@ def _fetch_data_once(vehicle_id='default'):
         else:
             data = {'state': state}
 
+    if isinstance(data, dict):
+        try:
+            data['superchargers'] = get_superchargers(vid)
+        except Exception:
+            pass
+
     latest_data[cache_id] = data
     if isinstance(data, dict):
         try:
