@@ -724,11 +724,11 @@ function updateSuperchargerList() {
         $list.empty();
         return;
     }
-    var items = superchargerData.map(function(sc) {
+    var rows = superchargerData.slice(0, 10).map(function(sc) {
         var dist = sc.distance_km != null ? sc.distance_km.toFixed(1) : '?';
-        return '<li>' + sc.name + ' (' + dist + ' km)</li>';
+        return '<tr><td>' + sc.name + '</td><td class="sc-distance">' + dist + ' km</td></tr>';
     });
-    $list.html('<ul>' + items.join('') + '</ul>');
+    $list.html('<h3>Nächstgelegene Supercharger:</h3><table><tbody>' + rows.join('') + '</tbody></table>');
 }
 
 function fetchSuperchargers() {
