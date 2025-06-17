@@ -696,7 +696,17 @@ def get_superchargers(vehicle_id=None, ttl=300):
             dist = s.get('distance_miles')
             if dist is not None:
                 dist = round(dist * 1.60934, 1)
-            chargers.append({'name': s.get('name'), 'distance_km': dist})
+            loc = s.get('location') or {}
+            chargers.append({
+                'name': s.get('name'),
+                'distance_km': dist,
+                'available_stalls': s.get('available_stalls'),
+                'total_stalls': s.get('total_stalls'),
+                'location': {
+                    'lat': loc.get('lat'),
+                    'long': loc.get('long')
+                }
+            })
         _supercharger_cache[vid] = chargers
         _supercharger_cache_ts[vid] = now
         return chargers
