@@ -70,7 +70,7 @@ select {
 #location-address {
   position: absolute;
   left: 50%;
-  bottom: 4px;
+  bottom: 24px;
   transform: translateX(-50%);
   background: rgba(0, 0, 0, 0.6);
   color: #fff;
