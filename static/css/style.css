@@ -99,6 +99,17 @@ select {
   );
 }
 
+.battery .bolt {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 20px;
+  color: #ffd700;
+  text-shadow: 0 0 2px #000;
+  pointer-events: none;
+}
+
 #park-since {
   font-size: 1.2em;
   font-weight: bold;

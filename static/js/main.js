@@ -145,7 +145,7 @@ function handleData(data) {
     if (rangeMiles == null) {
         rangeMiles = charge.est_battery_range;
     }
-    updateBatteryIndicator(charge.battery_level, rangeMiles);
+    updateBatteryIndicator(charge.battery_level, rangeMiles, charge.charging_state);
     updateV2LInfos(charge, drive);
     updateChargingInfo(charge);
     var climate = data.climate_state || {};
@@ -462,10 +462,16 @@ function updateThermometers(inside, outside) {
     set('outside', outside);
 }
 
-function updateBatteryIndicator(level, rangeMiles) {
+function updateBatteryIndicator(level, rangeMiles, chargingState) {
     var pct = level != null ? level : 0;
     var range = rangeMiles != null ? Math.round(rangeMiles * MILES_TO_KM) : '?';
-    var html = '<div class="battery"><div class="level" style="height:' + pct + '%;"></div></div>';
+    var charging = chargingState === 'Charging';
+    var html = '<div class="battery">';
+    html += '<div class="level" style="height:' + pct + '%;"></div>';
+    if (charging) {
+        html += '<div class="bolt">\u26A1</div>';
+    }
+    html += '</div>';
     html += '<div class="battery-value">' + pct + '%</div>';
     html += '<div class="range">' + range + ' km</div>';
     $('#battery-indicator').html(html);
