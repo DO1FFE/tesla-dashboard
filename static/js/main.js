@@ -214,13 +214,8 @@ function handleData(data) {
         map.removeLayer(polyline);
         polyline = null;
     }
-    if (Array.isArray(data.superchargers)) {
-        superchargerData = data.superchargers;
-    }
     updateSuperchargerList();
-    if (!superchargerData.length) {
-        fetchSuperchargers();
-    }
+    fetchSuperchargers();
 }
 
 
@@ -822,8 +817,8 @@ function startStream() {
     superchargerMarkers = [];
     updateSuperchargerList();
     lastSuperchargerFetch = 0;
-    fetchSuperchargers();
     eventSource = new EventSource('/stream/' + currentVehicle);
+    fetchSuperchargers();
     eventSource.onmessage = function(e) {
         var data = JSON.parse(e.data);
         if (!data.error) {
