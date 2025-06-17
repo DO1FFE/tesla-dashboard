@@ -159,7 +159,7 @@ function handleData(data) {
                vehicle.tpms_pressure_fr,
                vehicle.tpms_pressure_rl,
                vehicle.tpms_pressure_rr);
-    updateOpenings(vehicle);
+    updateOpenings(vehicle, charge);
     updateMediaPlayer(vehicle.media_info);
     var lat = drive.latitude;
     var lng = drive.longitude;
@@ -359,7 +359,7 @@ function updateTPMS(fl, fr, rl, rr) {
     set('HR', rr);
 }
 
-function updateOpenings(vehicle) {
+function updateOpenings(vehicle, charge) {
     var parts = [
         {key: 'df', id: 'door-fl'},
         {key: 'dr', id: 'door-rl'},
@@ -370,14 +370,16 @@ function updateOpenings(vehicle) {
         {key: 'fp_window', id: 'window-fr'},
         {key: 'rp_window', id: 'window-rr'},
         {key: 'ft', id: 'frunk'},
-        {key: 'rt', id: 'trunk'}
+        {key: 'rt', id: 'trunk'},
+        {key: 'charge_port_door_open', id: 'charge-port', src: charge}
     ];
 
     parts.forEach(function(p) {
-        if (vehicle[p.key] == null) return;
+        var obj = p.src || vehicle;
+        if (!obj || obj[p.key] == null) return;
         // Values are 0 when the part is closed and non-zero when open.
         // Use loose inequality to handle any non-zero value as "open".
-        var open = Number(vehicle[p.key]) !== 0;
+        var open = Number(obj[p.key]) !== 0;
         var $el = $('#' + p.id);
         $el.attr('class', open ? 'part-open' : 'part-closed');
         if (p.id.startsWith('window-')) {
