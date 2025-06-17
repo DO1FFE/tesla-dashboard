@@ -218,6 +218,9 @@ function handleData(data) {
         superchargerData = data.superchargers;
     }
     updateSuperchargerList();
+    if (!superchargerData.length) {
+        fetchSuperchargers();
+    }
 }
 
 
@@ -818,6 +821,8 @@ function startStream() {
     superchargerMarkers.forEach(function(m) { map.removeLayer(m); });
     superchargerMarkers = [];
     updateSuperchargerList();
+    lastSuperchargerFetch = 0;
+    fetchSuperchargers();
     eventSource = new EventSource('/stream/' + currentVehicle);
     eventSource.onmessage = function(e) {
         var data = JSON.parse(e.data);
