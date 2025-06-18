@@ -620,6 +620,10 @@ def compute_statistics():
     stats = _compute_state_stats(_load_state_entries())
     for fname in _get_trip_files():
         date_str = fname.split("_")[-1].split(".")[0]
+        try:
+            date_str = datetime.strptime(date_str, "%Y%m%d").date().isoformat()
+        except Exception:
+            pass
         path = os.path.join(TRIP_DIR, fname)
         km = _trip_distance(path)
         stats.setdefault(date_str, {"online": 0.0, "offline": 0.0, "asleep": 0.0})
