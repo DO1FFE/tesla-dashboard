@@ -344,10 +344,10 @@ function updateCabinProtection(value) {
 
 function updateDesiredTemp(temp) {
     if (temp == null || isNaN(temp)) {
-        $('#desired-temp').text('🌡️ -- °C').attr('title', 'Wunschtemperatur');
+        $('#desired-temp').text('Wunsch: -- \u00B0C').attr('title', 'Wunschtemperatur');
         return;
     }
-    $('#desired-temp').text('\uD83C\uDF21\uFE0F ' + temp.toFixed(1) + ' \u00B0C')
+    $('#desired-temp').text('Wunsch: ' + temp.toFixed(1) + ' \u00B0C')
         .attr('title', 'Wunschtemperatur');
 }
 
