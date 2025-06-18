@@ -26,51 +26,53 @@ CURRENT_YEAR = datetime.now().year
 # current working directory.  This allows running the application
 # from any location while still finding the trip files and caches.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, 'data')
+DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
-CONFIG_FILE = os.path.join(DATA_DIR, 'config.json')
-api_logger = logging.getLogger('api_logger')
+CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
+api_logger = logging.getLogger("api_logger")
 if not api_logger.handlers:
     handler = RotatingFileHandler(
-        os.path.join(DATA_DIR, 'api.log'), maxBytes=1_000_000, backupCount=1)
-    formatter = logging.Formatter('%(asctime)s %(message)s')
+        os.path.join(DATA_DIR, "api.log"), maxBytes=1_000_000, backupCount=1
+    )
+    formatter = logging.Formatter("%(asctime)s %(message)s")
     handler.setFormatter(formatter)
     api_logger.addHandler(handler)
     api_logger.setLevel(logging.INFO)
     # Forward detailed library logs to the same file
-    for name in ('teslapy', 'urllib3'):
+    for name in ("teslapy", "urllib3"):
         lib_logger = logging.getLogger(name)
         lib_logger.addHandler(handler)
         lib_logger.setLevel(logging.DEBUG)
     try:
         import http.client as http_client
+
         http_client.HTTPConnection.debuglevel = 1
     except Exception:
         pass
 
-state_logger = logging.getLogger('state_logger')
+state_logger = logging.getLogger("state_logger")
 if not state_logger.handlers:
     handler = RotatingFileHandler(
-        os.path.join(DATA_DIR, 'state.log'), maxBytes=100_000, backupCount=1)
-    formatter = logging.Formatter('%(asctime)s %(message)s')
+        os.path.join(DATA_DIR, "state.log"), maxBytes=100_000, backupCount=1
+    )
+    formatter = logging.Formatter("%(asctime)s %(message)s")
     handler.setFormatter(formatter)
     state_logger.addHandler(handler)
     state_logger.setLevel(logging.INFO)
 
 
-
-def _load_last_state(filename=os.path.join(DATA_DIR, 'state.log')):
+def _load_last_state(filename=os.path.join(DATA_DIR, "state.log")):
     """Load the last logged state for each vehicle from ``state.log``."""
     result = {}
     try:
-        with open(filename, 'r', encoding='utf-8') as f:
+        with open(filename, "r", encoding="utf-8") as f:
             for line in f:
-                idx = line.find('{')
+                idx = line.find("{")
                 if idx != -1:
                     try:
                         entry = json.loads(line[idx:])
-                        vid = entry.get('vehicle_id')
-                        state = entry.get('state')
+                        vid = entry.get("vehicle_id")
+                        state = entry.get("state")
                         if vid is not None and state is not None:
                             result[vid] = state
                     except Exception:
@@ -82,7 +84,8 @@ def _load_last_state(filename=os.path.join(DATA_DIR, 'state.log')):
 
 # Tools to build an aggregated list of API keys ------------------------------
 
-def _collect_keys(data, prefix='', keys=None):
+
+def _collect_keys(data, prefix="", keys=None):
     """Recursively gather dotted key names from the given data."""
     if keys is None:
         keys = set()
@@ -97,7 +100,7 @@ def _collect_keys(data, prefix='', keys=None):
     return keys
 
 
-def _collect_key_values(data, prefix='', result=None):
+def _collect_key_values(data, prefix="", result=None):
     """Recursively gather key/value pairs in the order provided by the API."""
     if result is None:
         result = []
@@ -133,12 +136,12 @@ def _merge_data(existing, new):
     return new
 
 
-def _update_api_json(data, filename=os.path.join(DATA_DIR, 'api-liste.json')):
+def _update_api_json(data, filename=os.path.join(DATA_DIR, "api-liste.json")):
     """Update ``api-liste.json`` while preserving existing keys."""
     try:
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         if os.path.exists(filename):
-            with open(filename, 'r', encoding='utf-8') as f:
+            with open(filename, "r", encoding="utf-8") as f:
                 try:
                     current = json.load(f)
                 except Exception:
@@ -149,34 +152,34 @@ def _update_api_json(data, filename=os.path.join(DATA_DIR, 'api-liste.json')):
         # drop the dynamic drive path to keep the file small
         filtered = data.copy() if isinstance(data, dict) else data
         if isinstance(filtered, dict):
-            filtered.pop('path', None)
+            filtered.pop("path", None)
         merged = _merge_data(current, filtered)
 
-        with open(filename, 'w', encoding='utf-8') as f:
+        with open(filename, "w", encoding="utf-8") as f:
             json.dump(merged, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
 
 
-def update_api_list(data, filename=os.path.join(DATA_DIR, 'api-liste.txt')):
+def update_api_list(data, filename=os.path.join(DATA_DIR, "api-liste.txt")):
     """Update ``api-liste.txt`` with key/value pairs in API order."""
     try:
         os.makedirs(os.path.dirname(filename), exist_ok=True)
 
         existing_lines = []
         if os.path.exists(filename):
-            with open(filename, 'r', encoding='utf-8') as f:
+            with open(filename, "r", encoding="utf-8") as f:
                 for line in f:
-                    line = line.rstrip('\n')
-                    if ': ' in line:
-                        k, v = line.split(': ', 1)
+                    line = line.rstrip("\n")
+                    if ": " in line:
+                        k, v = line.split(": ", 1)
                     else:
-                        k, v = line, ''
+                        k, v = line, ""
                     existing_lines.append((k, v))
 
         existing_map = {k: i for i, (k, _v) in enumerate(existing_lines)}
         kv = _collect_key_values(data)
-        kv = [(k, v) for k, v in kv if not k.startswith('path[') and k != 'path']
+        kv = [(k, v) for k, v in kv if not k.startswith("path[") and k != "path"]
 
         lines = existing_lines[:]
         for idx, (k, v) in enumerate(kv):
@@ -195,22 +198,22 @@ def update_api_list(data, filename=os.path.join(DATA_DIR, 'api-liste.txt')):
                 if insert_pos is None:
                     # fallback: before the next known key
                     insert_pos = len(lines)
-                    for next_k, _ in kv[idx + 1:]:
+                    for next_k, _ in kv[idx + 1 :]:
                         if next_k in existing_map:
                             insert_pos = existing_map[next_k]
                             break
                 lines.insert(insert_pos, (k, value))
                 existing_map = {key: i for i, (key, _v) in enumerate(lines)}
 
-        content = '\n'.join(f"{k}: {v}" for k, v in lines) + '\n'
+        content = "\n".join(f"{k}: {v}" for k, v in lines) + "\n"
 
-        current = ''
+        current = ""
         if os.path.exists(filename):
-            with open(filename, 'r', encoding='utf-8') as f:
+            with open(filename, "r", encoding="utf-8") as f:
                 current = f.read()
 
         if content != current:
-            with open(filename, 'w', encoding='utf-8') as f:
+            with open(filename, "w", encoding="utf-8") as f:
                 f.write(content)
         _update_api_json(data)
     except Exception:
@@ -225,37 +228,37 @@ def update_api_list(data, filename=os.path.join(DATA_DIR, 'api-liste.txt')):
 def log_api_data(endpoint, data):
     """Write API communication to the rotating log file."""
     try:
-        api_logger.info(json.dumps({'endpoint': endpoint, 'data': data}))
+        api_logger.info(json.dumps({"endpoint": endpoint, "data": data}))
         update_api_list(data)
     except Exception:
         pass
 
 
-TRIP_DIR = os.path.join(DATA_DIR, 'trips')
+TRIP_DIR = os.path.join(DATA_DIR, "trips")
 
 # Elements on the dashboard that can be toggled via the config page
 CONFIG_ITEMS = [
-    {'id': 'map', 'desc': 'Karte'},
-    {'id': 'lock-status', 'desc': 'Verriegelungsstatus'},
-    {'id': 'user-presence', 'desc': 'Anwesenheit Fahrer'},
-    {'id': 'gear-shift', 'desc': 'Ganghebel'},
-    {'id': 'battery-indicator', 'desc': 'Batteriestand'},
-    {'id': 'speedometer', 'desc': 'Tacho'},
-    {'id': 'thermometers', 'desc': 'Temperaturen'},
-    {'id': 'climate-indicator', 'desc': 'Klimaanlage'},
-    {'id': 'tpms-indicator', 'desc': 'Reifendruck'},
-    {'id': 'openings-indicator', 'desc': 'Türen/Fenster'},
-    {'id': 'blue-openings', 'desc': 'Türen/Fenster blau einfärben', 'default': False},
-    {'id': 'charging-info', 'desc': 'Ladeinformationen'},
-    {'id': 'v2l-infos', 'desc': 'V2L-Hinweis'},
-    {'id': 'nav-bar', 'desc': 'Navigationsleiste'},
-    {'id': 'media-player', 'desc': 'Medienwiedergabe'},
+    {"id": "map", "desc": "Karte"},
+    {"id": "lock-status", "desc": "Verriegelungsstatus"},
+    {"id": "user-presence", "desc": "Anwesenheit Fahrer"},
+    {"id": "gear-shift", "desc": "Ganghebel"},
+    {"id": "battery-indicator", "desc": "Batteriestand"},
+    {"id": "speedometer", "desc": "Tacho"},
+    {"id": "thermometers", "desc": "Temperaturen"},
+    {"id": "climate-indicator", "desc": "Klimaanlage"},
+    {"id": "tpms-indicator", "desc": "Reifendruck"},
+    {"id": "openings-indicator", "desc": "Türen/Fenster"},
+    {"id": "blue-openings", "desc": "Türen/Fenster blau einfärben", "default": False},
+    {"id": "charging-info", "desc": "Ladeinformationen"},
+    {"id": "v2l-infos", "desc": "V2L-Hinweis"},
+    {"id": "nav-bar", "desc": "Navigationsleiste"},
+    {"id": "media-player", "desc": "Medienwiedergabe"},
 ]
 
 
 def load_config():
     try:
-        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             cfg = json.load(f)
             if isinstance(cfg, dict):
                 return cfg
@@ -266,21 +269,24 @@ def load_config():
 
 def save_config(cfg):
     try:
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
 
 
 def check_auth(username, password):
-    user = os.getenv('TESLA_EMAIL')
-    pw = os.getenv('TESLA_PASSWORD')
+    user = os.getenv("TESLA_EMAIL")
+    pw = os.getenv("TESLA_PASSWORD")
     return username == user and password == pw
 
 
 def authenticate():
-    return Response('Authentication required', 401,
-                    {'WWW-Authenticate': 'Basic realm="Login Required"'})
+    return Response(
+        "Authentication required",
+        401,
+        {"WWW-Authenticate": 'Basic realm="Login Required"'},
+    )
 
 
 def requires_auth(f):
@@ -290,7 +296,9 @@ def requires_auth(f):
         if not auth or not check_auth(auth.username, auth.password):
             return authenticate()
         return f(*args, **kwargs)
+
     return decorated
+
 
 park_start_ms = None
 last_shift_state = None
@@ -316,13 +324,15 @@ occupant_present = False
 def track_park_time(vehicle_data):
     """Track when the vehicle was first seen parked."""
     global park_start_ms, last_shift_state
-    drive = vehicle_data.get('drive_state', {}) if isinstance(vehicle_data, dict) else {}
-    shift = drive.get('shift_state')
-    ts = drive.get('timestamp') or drive.get('gps_as_of')
+    drive = (
+        vehicle_data.get("drive_state", {}) if isinstance(vehicle_data, dict) else {}
+    )
+    shift = drive.get("shift_state")
+    ts = drive.get("timestamp") or drive.get("gps_as_of")
     if ts and ts < 1e12:
         ts = int(ts * 1000)
-    if shift in (None, 'P'):
-        if park_start_ms is None or last_shift_state not in (None, 'P'):
+    if shift in (None, "P"):
+        if park_start_ms is None or last_shift_state not in (None, "P"):
             park_start_ms = int(ts) if ts is not None else None
     else:
         park_start_ms = None
@@ -340,20 +350,24 @@ def park_duration_string(start_ms):
     if hours > 0:
         parts.append(f"{hours} {'Stunde' if hours == 1 else 'Stunden'}")
     parts.append(f"{minutes} {'Minute' if minutes == 1 else 'Minuten'}")
-    return ' '.join(parts)
+    return " ".join(parts)
 
 
 def _log_trip_point(ts, lat, lon, speed=None, power=None, filename=None):
     """Append a GPS point to a trip history CSV."""
     if filename is None:
-        filename = os.path.join(DATA_DIR, 'trip_history.csv')
+        filename = os.path.join(DATA_DIR, "trip_history.csv")
     try:
         os.makedirs(os.path.dirname(filename), exist_ok=True)
-        with open(filename, 'a', encoding='utf-8') as f:
-            row = [ts, lat, lon,
-                   '' if speed is None else speed,
-                   '' if power is None else power]
-            f.write(','.join(str(v) for v in row) + '\n')
+        with open(filename, "a", encoding="utf-8") as f:
+            row = [
+                ts,
+                lat,
+                lon,
+                "" if speed is None else speed,
+                "" if power is None else power,
+            ]
+            f.write(",".join(str(v) for v in row) + "\n")
     except Exception:
         pass
 
@@ -361,16 +375,18 @@ def _log_trip_point(ts, lat, lon, speed=None, power=None, filename=None):
 def track_drive_path(vehicle_data):
     """Maintain the current trip path and log points when driving."""
     global trip_path, current_trip_file, current_trip_date, drive_pause_ms
-    drive = vehicle_data.get('drive_state', {}) if isinstance(vehicle_data, dict) else {}
-    shift = drive.get('shift_state')
-    lat = drive.get('latitude')
-    lon = drive.get('longitude')
-    ts = drive.get('timestamp') or drive.get('gps_as_of')
-    speed = drive.get('speed')
-    power = drive.get('power')
+    drive = (
+        vehicle_data.get("drive_state", {}) if isinstance(vehicle_data, dict) else {}
+    )
+    shift = drive.get("shift_state")
+    lat = drive.get("latitude")
+    lon = drive.get("longitude")
+    ts = drive.get("timestamp") or drive.get("gps_as_of")
+    speed = drive.get("speed")
+    power = drive.get("power")
     if ts and ts < 1e12:
         ts = int(ts * 1000)
-    if shift in (None, 'P'):
+    if shift in (None, "P"):
         if drive_pause_ms is None:
             drive_pause_ms = ts if ts is not None else int(time.time() * 1000)
         else:
@@ -392,9 +408,9 @@ def track_drive_path(vehicle_data):
     if lat is not None and lon is not None:
         if ts is None:
             ts = int(time.time() * 1000)
-        date_str = time.strftime('%Y%m%d', time.localtime(ts / 1000))
+        date_str = time.strftime("%Y%m%d", time.localtime(ts / 1000))
         if current_trip_file is None or current_trip_date != date_str:
-            current_trip_file = os.path.join(TRIP_DIR, f'trip_{date_str}.csv')
+            current_trip_file = os.path.join(TRIP_DIR, f"trip_{date_str}.csv")
             current_trip_date = date_str
         point = [lat, lon]
         if not trip_path or trip_path[-1] != point:
@@ -408,7 +424,7 @@ def _log_api_error(exc):
     ts = time.time()
     msg = str(exc)
     with api_errors_lock:
-        api_errors.append({'timestamp': ts, 'message': msg})
+        api_errors.append({"timestamp": ts, "message": msg})
         if len(api_errors) > 50:
             api_errors.pop(0)
 
@@ -419,22 +435,23 @@ def log_vehicle_state(vehicle_id, state):
         with state_lock:
             if last_vehicle_state.get(vehicle_id) != state:
                 last_vehicle_state[vehicle_id] = state
-                state_logger.info(json.dumps({'vehicle_id': vehicle_id,
-                                             'state': state}))
+                state_logger.info(
+                    json.dumps({"vehicle_id": vehicle_id, "state": state})
+                )
     except Exception:
         pass
 
 
 def _cache_file(vehicle_id):
     """Return filename for cached data of a vehicle."""
-    name = vehicle_id if vehicle_id is not None else 'default'
-    return os.path.join(DATA_DIR, f'cache_{name}.json')
+    name = vehicle_id if vehicle_id is not None else "default"
+    return os.path.join(DATA_DIR, f"cache_{name}.json")
 
 
 def _load_cached(vehicle_id):
     """Load cached vehicle data from disk."""
     try:
-        with open(_cache_file(vehicle_id), 'r', encoding='utf-8') as f:
+        with open(_cache_file(vehicle_id), "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return None
@@ -443,7 +460,7 @@ def _load_cached(vehicle_id):
 def _save_cached(vehicle_id, data):
     """Write vehicle data cache to disk."""
     try:
-        with open(_cache_file(vehicle_id), 'w', encoding='utf-8') as f:
+        with open(_cache_file(vehicle_id), "w", encoding="utf-8") as f:
             json.dump(data, f)
     except Exception:
         pass
@@ -453,7 +470,7 @@ def _get_trip_files(directory=TRIP_DIR):
     """Return a list of available trip CSV files sorted chronologically."""
     try:
         os.makedirs(directory, exist_ok=True)
-        files = [f for f in os.listdir(directory) if f.endswith('.csv')]
+        files = [f for f in os.listdir(directory) if f.endswith(".csv")]
         files.sort()
         return files
     except Exception:
@@ -464,9 +481,9 @@ def _load_trip(filename):
     """Load all coordinates with optional speed and power from a trip CSV."""
     points = []
     try:
-        with open(filename, 'r', encoding='utf-8') as f:
+        with open(filename, "r", encoding="utf-8") as f:
             for line in f:
-                parts = line.strip().split(',')
+                parts = line.strip().split(",")
                 if len(parts) < 3:
                     continue
                 ts, lat, lon = parts[:3]
@@ -489,6 +506,7 @@ def _load_trip(filename):
 def _bearing(p1, p2):
     """Compute heading in degrees from p1 to p2."""
     from math import atan2, cos, sin, radians, degrees
+
     lat1, lon1 = radians(p1[0]), radians(p1[1])
     lat2, lon2 = radians(p2[0]), radians(p2[1])
     dlon = lon2 - lon1
@@ -515,10 +533,13 @@ def get_tesla():
     tesla = teslapy.Tesla(email, app_user_agent="Tesla-Dashboard")
     try:
         if tokens_provided:
-            tesla.sso_token = {"access_token": access_token, "refresh_token": refresh_token}
+            tesla.sso_token = {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+            }
             tesla.refresh_token()
         elif access_token:
-            tesla.refresh_token({'access_token': access_token})
+            tesla.refresh_token({"access_token": access_token})
         else:
             tesla.fetch_token(password=password)
     except Exception as exc:
@@ -549,7 +570,9 @@ def _cached_vehicle_list(tesla, ttl=300):
             try:
                 _vehicle_list_cache = tesla.vehicle_list()
                 _vehicle_list_cache_ts = now
-                log_api_data('vehicle_list', sanitize([v.copy() for v in _vehicle_list_cache]))
+                log_api_data(
+                    "vehicle_list", sanitize([v.copy() for v in _vehicle_list_cache])
+                )
             except Exception as exc:
                 _log_api_error(exc)
                 return []
@@ -568,21 +591,21 @@ def get_vehicle_state(vehicle_id=None):
 
     vehicle = None
     if vehicle_id is not None:
-        vehicle = next((v for v in vehicles if str(v['id_s']) == str(vehicle_id)), None)
+        vehicle = next((v for v in vehicles if str(v["id_s"]) == str(vehicle_id)), None)
     if vehicle is None:
         vehicle = vehicles[0]
 
     try:
         vehicle.get_vehicle_summary()
-        state = vehicle.get('state') or vehicle['state']
-        log_vehicle_state(vehicle['id_s'], state)
-        log_api_data('get_vehicle_summary', {'state': state})
+        state = vehicle.get("state") or vehicle["state"]
+        log_vehicle_state(vehicle["id_s"], state)
+        log_api_data("get_vehicle_summary", {"state": state})
     except Exception as exc:
         _log_api_error(exc)
-        log_vehicle_state(vehicle['id_s'], 'offline')
+        log_vehicle_state(vehicle["id_s"], "offline")
         return {"error": "Vehicle unavailable", "state": "offline"}
 
-    return {'state': state}
+    return {"state": state}
 
 
 def get_vehicle_data(vehicle_id=None, state=None):
@@ -597,35 +620,35 @@ def get_vehicle_data(vehicle_id=None, state=None):
 
     vehicle = None
     if vehicle_id is not None:
-        vehicle = next((v for v in vehicles if str(v['id_s']) == str(vehicle_id)), None)
+        vehicle = next((v for v in vehicles if str(v["id_s"]) == str(vehicle_id)), None)
     if vehicle is None:
         vehicle = vehicles[0]
 
     if state is None:
         try:
             vehicle.get_vehicle_summary()
-            state = vehicle.get('state') or vehicle['state']
-            log_vehicle_state(vehicle['id_s'], state)
-            log_api_data('get_vehicle_summary', {'state': state})
+            state = vehicle.get("state") or vehicle["state"]
+            log_vehicle_state(vehicle["id_s"], state)
+            log_api_data("get_vehicle_summary", {"state": state})
         except Exception as exc:
             _log_api_error(exc)
-            log_vehicle_state(vehicle['id_s'], 'offline')
+            log_vehicle_state(vehicle["id_s"], "offline")
             return {"error": "Vehicle unavailable", "state": "offline"}
 
-    if state != 'online':
-        if occupant_present and state in ('asleep', 'offline'):
+    if state != "online":
+        if occupant_present and state in ("asleep", "offline"):
             try:
                 vehicle.sync_wake_up()
-                state = vehicle.get('state') or vehicle['state']
-                log_vehicle_state(vehicle['id_s'], state)
-                log_api_data('wake_up', {'state': state})
+                state = vehicle.get("state") or vehicle["state"]
+                log_vehicle_state(vehicle["id_s"], state)
+                log_api_data("wake_up", {"state": state})
             except Exception as exc:
                 _log_api_error(exc)
-                return {'error': str(exc), 'state': state}
-            if state != 'online':
-                return {'state': state}
+                return {"error": str(exc), "state": state}
+            if state != "online":
+                return {"state": state}
         else:
-            return {'state': state}
+            return {"state": state}
 
     try:
         vehicle_data = vehicle.get_vehicle_data()
@@ -635,29 +658,29 @@ def get_vehicle_data(vehicle_id=None, state=None):
     track_park_time(vehicle_data)
     track_drive_path(vehicle_data)
     sanitized = sanitize(vehicle_data)
-    sanitized['state'] = state
+    sanitized["state"] = state
     try:
-        v_state = sanitized.get('vehicle_state', {})
-        v_config = sanitized.get('vehicle_config', {})
-        name = v_state.get('vehicle_name')
-        car_type = v_config.get('car_type')
-        trim = v_config.get('trim_badging')
+        v_state = sanitized.get("vehicle_state", {})
+        v_config = sanitized.get("vehicle_config", {})
+        name = v_state.get("vehicle_name")
+        car_type = v_config.get("car_type")
+        trim = v_config.get("trim_badging")
         if name and car_type and trim:
             car_map = {
-                'models': 'Model S',
-                'modelx': 'Model X',
-                'model3': 'Model 3',
-                'modely': 'Model Y',
-                'roadster': 'Roadster',
-                'cybertruck': 'Cybertruck'
+                "models": "Model S",
+                "modelx": "Model X",
+                "model3": "Model 3",
+                "modely": "Model Y",
+                "roadster": "Roadster",
+                "cybertruck": "Cybertruck",
             }
             car_desc = car_map.get(str(car_type).lower(), car_type)
-            v_state['vehicle_name'] = f"{name} ({car_desc} {trim.upper()})"
+            v_state["vehicle_name"] = f"{name} ({car_desc} {trim.upper()})"
     except Exception:
         pass
-    log_api_data('get_vehicle_data', sanitized)
-    sanitized['park_start'] = park_start_ms
-    sanitized['path'] = trip_path
+    log_api_data("get_vehicle_data", sanitized)
+    sanitized["park_start"] = park_start_ms
+    sanitized["path"] = trip_path
     return sanitized
 
 
@@ -669,10 +692,10 @@ def get_vehicle_list():
     vehicles = _cached_vehicle_list(tesla)
     sanitized = []
     for idx, v in enumerate(vehicles, start=1):
-        name = v.get('display_name')
+        name = v.get("display_name")
         if not name:
             name = f"Fahrzeug {idx}"
-        sanitized.append({"id": v['id_s'], "display_name": name})
+        sanitized.append({"id": v["id_s"], "display_name": name})
     return sanitized
 
 
@@ -688,39 +711,38 @@ def get_superchargers(vehicle_id=None, ttl=60):
 
     vehicle = None
     if vehicle_id is not None:
-        vehicle = next((v for v in vehicles if str(v['id_s']) == str(vehicle_id)), None)
+        vehicle = next((v for v in vehicles if str(v["id_s"]) == str(vehicle_id)), None)
     if vehicle is None:
         vehicle = vehicles[0]
 
-    vid = vehicle['id_s']
+    vid = vehicle["id_s"]
     now = time.time()
     if vid in _supercharger_cache and now - _supercharger_cache_ts.get(vid, 0) < ttl:
         return _supercharger_cache[vid]
 
     state_info = get_vehicle_state(vid)
-    state = state_info.get('state') if isinstance(state_info, dict) else None
-    if state != 'online':
+    state = state_info.get("state") if isinstance(state_info, dict) else None
+    if state != "online":
         return _supercharger_cache.get(vid, [])
 
     try:
         sites = vehicle.get_nearby_charging_sites()
-        log_api_data('get_nearby_charging_sites', sanitize(sites))
+        log_api_data("get_nearby_charging_sites", sanitize(sites))
         chargers = []
-        for s in sites.get('superchargers', []):
-            dist = s.get('distance_miles')
+        for s in sites.get("superchargers", []):
+            dist = s.get("distance_miles")
             if dist is not None:
                 dist = round(dist * 1.60934, 1)
-            loc = s.get('location') or {}
-            chargers.append({
-                'name': s.get('name'),
-                'distance_km': dist,
-                'available_stalls': s.get('available_stalls'),
-                'total_stalls': s.get('total_stalls'),
-                'location': {
-                    'lat': loc.get('lat'),
-                    'long': loc.get('long')
+            loc = s.get("location") or {}
+            chargers.append(
+                {
+                    "name": s.get("name"),
+                    "distance_km": dist,
+                    "available_stalls": s.get("available_stalls"),
+                    "total_stalls": s.get("total_stalls"),
+                    "location": {"lat": loc.get("lat"), "long": loc.get("long")},
                 }
-            })
+            )
         _supercharger_cache[vid] = chargers
         _supercharger_cache_ts[vid] = now
         return chargers
@@ -734,8 +756,10 @@ def reverse_geocode(lat, lon):
     tesla = get_tesla()
     if tesla is not None:
         try:
-            resp = tesla.api('REVERSE_GEOCODING', params={'latitude': lat, 'longitude': lon})
-            log_api_data('REVERSE_GEOCODING', sanitize(resp))
+            resp = tesla.api(
+                "REVERSE_GEOCODING", params={"latitude": lat, "longitude": lon}
+            )
+            log_api_data("REVERSE_GEOCODING", sanitize(resp))
             if resp:
                 return resp
         except Exception as exc:
@@ -743,53 +767,57 @@ def reverse_geocode(lat, lon):
 
     # Fallback to OpenStreetMap if Tesla API fails or returns nothing
     try:
-        url = 'https://nominatim.openstreetmap.org/reverse'
-        params = {'lat': lat, 'lon': lon, 'format': 'jsonv2'}
-        headers = {'User-Agent': 'TeslaDashboard/1.0'}
+        url = "https://nominatim.openstreetmap.org/reverse"
+        params = {"lat": lat, "lon": lon, "format": "jsonv2"}
+        headers = {"User-Agent": "TeslaDashboard/1.0"}
         r = requests.get(url, params=params, headers=headers, timeout=5)
         r.raise_for_status()
         data = r.json()
-        return {'address': data.get('display_name'), 'raw': data}
+        return {"address": data.get("display_name"), "raw": data}
     except Exception as exc:
         _log_api_error(exc)
         return {}
 
 
-def _fetch_data_once(vehicle_id='default'):
+def _fetch_data_once(vehicle_id="default"):
     """Return current data or cached values based on vehicle state."""
-    vid = None if vehicle_id in (None, 'default') else vehicle_id
-    cache_id = 'default' if vehicle_id in (None, 'default') else vehicle_id
+    vid = None if vehicle_id in (None, "default") else vehicle_id
+    cache_id = "default" if vehicle_id in (None, "default") else vehicle_id
 
     state = last_vehicle_state.get(cache_id)
-    if state in (None, 'online') or occupant_present:
+    if state in (None, "online") or occupant_present:
         state_info = get_vehicle_state(vid)
-        state = state_info.get('state') if isinstance(state_info, dict) else state
+        state = state_info.get("state") if isinstance(state_info, dict) else state
 
     data = None
-    if state == 'online' or occupant_present:
+    if state == "online" or occupant_present:
         data = get_vehicle_data(vid, state=state)
-        if isinstance(data, dict) and not data.get('error') and data.get('state') == 'online':
+        if (
+            isinstance(data, dict)
+            and not data.get("error")
+            and data.get("state") == "online"
+        ):
             pass
         else:
             cached = _load_cached(cache_id)
             if cached is not None:
                 data = cached
                 if isinstance(data, dict):
-                    data['state'] = state
+                    data["state"] = state
             else:
-                data = {'state': state}
+                data = {"state": state}
     else:
         cached = _load_cached(cache_id)
         if cached is not None:
             data = cached
             if isinstance(data, dict):
-                data['state'] = state
+                data["state"] = state
         else:
-            data = {'state': state}
+            data = {"state": state}
 
     if isinstance(data, dict):
         try:
-            data['superchargers'] = get_superchargers(vid)
+            data["superchargers"] = get_superchargers(vid)
         except Exception:
             pass
 
@@ -820,52 +848,53 @@ def _start_thread(vehicle_id):
     t.start()
 
 
-@app.route('/')
+@app.route("/")
 def index():
-    return render_template('index.html', version=__version__, year=CURRENT_YEAR)
+    return render_template("index.html", version=__version__, year=CURRENT_YEAR)
 
 
-@app.route('/map')
+@app.route("/map")
 def map_only():
     """Display only the map without additional modules."""
-    return render_template('map.html', version=__version__)
+    return render_template("map.html", version=__version__)
 
 
-@app.route('/history')
+@app.route("/history")
 def trip_history():
     """Show recorded trips and allow selecting a trip to display."""
     files = _get_trip_files()
-    selected = request.args.get('file')
+    selected = request.args.get("file")
     if selected not in files and files:
         selected = files[-1]
     path = _load_trip(os.path.join(TRIP_DIR, selected)) if selected else []
     heading = 0.0
     if len(path) >= 2:
         heading = _bearing(path[-2][:2], path[-1][:2])
-    return render_template('history.html', path=path, heading=heading,
-                           files=files, selected=selected)
+    return render_template(
+        "history.html", path=path, heading=heading, files=files, selected=selected
+    )
 
 
-@app.route('/daten')
+@app.route("/daten")
 def data_only():
     """Display live or cached vehicle data without extra UI."""
-    _start_thread('default')
-    data = latest_data.get('default')
+    _start_thread("default")
+    data = latest_data.get("default")
     if data is None:
-        data = _fetch_data_once('default')
-    return render_template('data.html', data=data)
+        data = _fetch_data_once("default")
+    return render_template("data.html", data=data)
 
 
-@app.route('/api/data')
+@app.route("/api/data")
 def api_data():
-    _start_thread('default')
-    data = latest_data.get('default')
+    _start_thread("default")
+    data = latest_data.get("default")
     if data is None:
-        data = _fetch_data_once('default')
+        data = _fetch_data_once("default")
     return jsonify(data)
 
 
-@app.route('/api/data/<vehicle_id>')
+@app.route("/api/data/<vehicle_id>")
 def api_data_vehicle(vehicle_id):
     _start_thread(vehicle_id)
     data = latest_data.get(vehicle_id)
@@ -874,9 +903,9 @@ def api_data_vehicle(vehicle_id):
     return jsonify(data)
 
 
-@app.route('/stream')
-@app.route('/stream/<vehicle_id>')
-def stream_vehicle(vehicle_id='default'):
+@app.route("/stream")
+@app.route("/stream/<vehicle_id>")
+def stream_vehicle(vehicle_id="default"):
     """Stream vehicle data to the client using Server-Sent Events."""
     _start_thread(vehicle_id)
 
@@ -893,149 +922,155 @@ def stream_vehicle(vehicle_id='default'):
         finally:
             subscribers.get(vehicle_id, []).remove(q)
 
-    return Response(gen(), mimetype='text/event-stream')
+    return Response(gen(), mimetype="text/event-stream")
 
 
-@app.route('/api/vehicles')
+@app.route("/api/vehicles")
 def api_vehicles():
     vehicles = get_vehicle_list()
     return jsonify(vehicles)
 
 
-@app.route('/api/state')
-@app.route('/api/state/<vehicle_id>')
+@app.route("/api/state")
+@app.route("/api/state/<vehicle_id>")
 def api_state(vehicle_id=None):
     """Return the last known state of the vehicle."""
     state_info = get_vehicle_state(vehicle_id)
     return jsonify(state_info)
 
 
-@app.route('/api/version')
+@app.route("/api/version")
 def api_version():
     """Return the current application version."""
-    return jsonify({'version': __version__})
+    return jsonify({"version": __version__})
 
 
-@app.route('/api/clients')
+@app.route("/api/clients")
 def api_clients():
     """Return the current number of connected streaming clients."""
     count = sum(len(v) for v in subscribers.values())
-    return jsonify({'clients': count})
+    return jsonify({"clients": count})
 
 
-@app.route('/api/superchargers')
-@app.route('/api/superchargers/<vehicle_id>')
+@app.route("/api/superchargers")
+@app.route("/api/superchargers/<vehicle_id>")
 def api_superchargers(vehicle_id=None):
     """Return nearby Superchargers as JSON."""
     chargers = get_superchargers(vehicle_id)
     return jsonify(chargers)
 
 
-@app.route('/api/reverse_geocode')
+@app.route("/api/reverse_geocode")
 def api_reverse_geocode():
     """Return address for given coordinates using Tesla API."""
     try:
-        lat = float(request.args.get('lat'))
-        lon = float(request.args.get('lon'))
+        lat = float(request.args.get("lat"))
+        lon = float(request.args.get("lon"))
     except (TypeError, ValueError):
-        return jsonify({'error': 'Missing coordinates'}), 400
+        return jsonify({"error": "Missing coordinates"}), 400
     result = reverse_geocode(lat, lon)
     return jsonify(result)
 
 
-@app.route('/api/config')
+@app.route("/api/config")
 def api_config():
     """Return visibility configuration as JSON."""
     return jsonify(load_config())
 
 
-@app.route('/api/occupant', methods=['GET', 'POST'])
+@app.route("/api/occupant", methods=["GET", "POST"])
 def api_occupant():
     """Return or update occupant presence status."""
     global occupant_present
-    if request.method == 'POST':
+    if request.method == "POST":
         data = request.get_json(silent=True) or {}
-        occupant_present = bool(data.get('present'))
-    return jsonify({'present': occupant_present})
+        occupant_present = bool(data.get("present"))
+    return jsonify({"present": occupant_present})
 
 
-@app.route('/config', methods=['GET', 'POST'])
+@app.route("/config", methods=["GET", "POST"])
 @requires_auth
 def config_page():
     cfg = load_config()
-    if request.method == 'POST':
+    if request.method == "POST":
         for item in CONFIG_ITEMS:
-            cfg[item['id']] = item['id'] in request.form
+            cfg[item["id"]] = item["id"] in request.form
         save_config(cfg)
-    return render_template('config.html', items=CONFIG_ITEMS, config=cfg)
+    return render_template("config.html", items=CONFIG_ITEMS, config=cfg)
 
 
-
-@app.route('/error')
+@app.route("/error")
 def error_page():
     """Display collected API errors."""
     with api_errors_lock:
         errors = list(api_errors)
     for e in errors:
         try:
-            e['time_str'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(e['timestamp']))
+            e["time_str"] = time.strftime(
+                "%Y-%m-%d %H:%M:%S", time.localtime(e["timestamp"])
+            )
         except Exception:
-            e['time_str'] = str(e['timestamp'])
-    return render_template('errors.html', errors=errors)
+            e["time_str"] = str(e["timestamp"])
+    return render_template("errors.html", errors=errors)
 
 
-@app.route('/api/errors')
+@app.route("/api/errors")
 def api_errors_route():
     """Return collected API errors as JSON."""
     with api_errors_lock:
         return jsonify(list(api_errors))
 
 
-@app.route('/apiliste')
+@app.route("/apiliste")
 def api_list_file():
     """Return the aggregated API key list as plain text."""
     try:
-        with open(os.path.join(DATA_DIR, 'api-liste.txt'), 'r', encoding='utf-8') as f:
-            lines = [line for line in f if not line.startswith('path[') and not line.startswith('path:')]
-            content = ''.join(lines)
+        with open(os.path.join(DATA_DIR, "api-liste.txt"), "r", encoding="utf-8") as f:
+            lines = [
+                line
+                for line in f
+                if not line.startswith("path[") and not line.startswith("path:")
+            ]
+            content = "".join(lines)
     except Exception:
-        content = ''
-    return Response(content, mimetype='text/plain')
+        content = ""
+    return Response(content, mimetype="text/plain")
 
 
-@app.route('/state')
+@app.route("/state")
 def state_log_page():
     """Display the vehicle state log."""
     log_lines = []
     try:
-        with open(os.path.join(DATA_DIR, 'state.log'), 'r', encoding='utf-8') as f:
+        with open(os.path.join(DATA_DIR, "state.log"), "r", encoding="utf-8") as f:
             log_lines = f.readlines()
     except Exception:
         pass
-    return render_template('state.html', log_lines=log_lines)
+    return render_template("state.html", log_lines=log_lines)
 
 
-@app.route('/debug')
+@app.route("/debug")
 def debug_info():
     """Display diagnostic information about the server."""
     env_info = {
-        'teslapy_available': teslapy is not None,
-        'has_email': bool(os.getenv('TESLA_EMAIL')),
-        'has_password': bool(os.getenv('TESLA_PASSWORD')),
-        'has_access_token': bool(os.getenv('TESLA_ACCESS_TOKEN')),
-        'has_refresh_token': bool(os.getenv('TESLA_REFRESH_TOKEN')),
+        "teslapy_available": teslapy is not None,
+        "has_email": bool(os.getenv("TESLA_EMAIL")),
+        "has_password": bool(os.getenv("TESLA_PASSWORD")),
+        "has_access_token": bool(os.getenv("TESLA_ACCESS_TOKEN")),
+        "has_refresh_token": bool(os.getenv("TESLA_REFRESH_TOKEN")),
     }
 
     log_lines = []
     try:
-        with open(os.path.join(DATA_DIR, 'api.log'), 'r', encoding='utf-8') as f:
+        with open(os.path.join(DATA_DIR, "api.log"), "r", encoding="utf-8") as f:
             log_lines = f.readlines()[-50:]
     except Exception:
         pass
 
-    return render_template('debug.html', env_info=env_info, log_lines=log_lines,
-                          latest=latest_data)
+    return render_template(
+        "debug.html", env_info=env_info, log_lines=log_lines, latest=latest_data
+    )
 
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8013, debug=True)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8013, debug=True)
