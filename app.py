@@ -17,6 +17,11 @@ try:
 except ImportError:
     teslapy = None
 
+try:
+    import aprslib
+except ImportError:
+    aprslib = None
+
 load_dotenv()
 app = Flask(__name__)
 __version__ = get_version()
@@ -29,6 +34,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
+APRS_HOST = "euro.aprs2.net"
+APRS_PORT = 14580
 api_logger = logging.getLogger("api_logger")
 if not api_logger.handlers:
     handler = RotatingFileHandler(
@@ -492,6 +499,52 @@ def _save_last_energy(vehicle_id, value):
         pass
 
 
+def send_aprs(vehicle_data):
+    """Transmit a position packet via APRS-IS using aprslib."""
+    if aprslib is None:
+        return
+    cfg = load_config()
+    callsign = cfg.get("aprs_callsign")
+    passcode = cfg.get("aprs_passcode")
+    comment_cfg = cfg.get("aprs_comment", "")
+    if not callsign or not passcode:
+        return
+    drive = vehicle_data.get("drive_state", {}) if isinstance(vehicle_data, dict) else {}
+    climate = vehicle_data.get("climate_state", {}) if isinstance(vehicle_data, dict) else {}
+    lat = drive.get("latitude")
+    lon = drive.get("longitude")
+    if lat is None or lon is None:
+        return
+    heading = drive.get("heading")
+    speed = drive.get("speed")
+    temp = climate.get("outside_temp")
+    comment_parts = []
+    if comment_cfg:
+        comment_parts.append(comment_cfg)
+    if temp is not None:
+        comment_parts.append(f"T:{temp}C")
+    if heading is not None:
+        comment_parts.append(f"H:{heading}")
+    if speed is not None:
+        comment_parts.append(f"S:{speed}km/h")
+    comment = " ".join(comment_parts)
+    try:
+        aprs = aprslib.IS(callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
+        aprs.connect()
+        packet = aprslib.packets.PositionReport()
+        packet.fromcall = callsign
+        packet.tocall = "APRS"
+        packet.latitude = lat
+        packet.longitude = lon
+        packet.symbol_table = "/"
+        packet.symbol = "_"
+        packet.comment = comment
+        aprs.sendall(packet)
+        aprs.close()
+    except Exception as exc:
+        _log_api_error(exc)
+
+
 def _get_trip_files(directory=TRIP_DIR):
     """Return a list of available trip CSV files sorted chronologically."""
     try:
@@ -809,6 +862,7 @@ def get_vehicle_data(vehicle_id=None, state=None):
     log_api_data("get_vehicle_data", sanitized)
     sanitized["park_start"] = park_start_ms
     sanitized["path"] = trip_path
+    sanitized["_live"] = True
     return sanitized
 
 
@@ -915,6 +969,7 @@ def _fetch_data_once(vehicle_id="default"):
     state = state_info.get("state") if isinstance(state_info, dict) else state
 
     data = None
+    live = False
     if state == "online" or occupant_present:
         data = get_vehicle_data(vid, state=state)
         if (
@@ -922,7 +977,7 @@ def _fetch_data_once(vehicle_id="default"):
             and not data.get("error")
             and data.get("state") == "online"
         ):
-            pass
+            live = True
         else:
             cached = _load_cached(cache_id)
             if cached is not None:
@@ -960,10 +1015,14 @@ def _fetch_data_once(vehicle_id="default"):
         except Exception:
             pass
 
+    if isinstance(data, dict):
+        data["_live"] = live
     latest_data[cache_id] = data
     if isinstance(data, dict):
         try:
-            _save_cached(cache_id, data)
+            cached_copy = dict(data)
+            cached_copy.pop("_live", None)
+            _save_cached(cache_id, cached_copy)
         except Exception:
             pass
     return data
@@ -973,6 +1032,11 @@ def _fetch_loop(vehicle_id, interval=3):
     """Continuously fetch data for a vehicle and notify subscribers."""
     while True:
         data = _fetch_data_once(vehicle_id)
+        if isinstance(data, dict) and data.get("_live"):
+            try:
+                send_aprs(data)
+            except Exception:
+                pass
         for q in subscribers.get(vehicle_id, []):
             q.put(data)
         time.sleep(interval)
@@ -1139,6 +1203,21 @@ def config_page():
     if request.method == "POST":
         for item in CONFIG_ITEMS:
             cfg[item["id"]] = item["id"] in request.form
+        callsign = request.form.get("aprs_callsign", "").strip()
+        passcode = request.form.get("aprs_passcode", "").strip()
+        aprs_comment = request.form.get("aprs_comment", "").strip()
+        if callsign:
+            cfg["aprs_callsign"] = callsign
+        elif "aprs_callsign" in cfg:
+            cfg.pop("aprs_callsign")
+        if passcode:
+            cfg["aprs_passcode"] = passcode
+        elif "aprs_passcode" in cfg:
+            cfg.pop("aprs_passcode")
+        if aprs_comment:
+            cfg["aprs_comment"] = aprs_comment
+        elif "aprs_comment" in cfg:
+            cfg.pop("aprs_comment")
         save_config(cfg)
     return render_template("config.html", items=CONFIG_ITEMS, config=cfg)
 
