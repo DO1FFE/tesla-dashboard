@@ -910,9 +910,9 @@ def _fetch_data_once(vehicle_id="default"):
     cached = _load_cached(cache_id)
 
     state = last_vehicle_state.get(vid or cache_id)
-    if state in (None, "online") or occupant_present:
-        state_info = get_vehicle_state(vid)
-        state = state_info.get("state") if isinstance(state_info, dict) else state
+    # Always query the vehicle state so transitions from "offline" are detected
+    state_info = get_vehicle_state(vid)
+    state = state_info.get("state") if isinstance(state_info, dict) else state
 
     data = None
     if state == "online" or occupant_present:
