@@ -171,7 +171,9 @@ function handleData(data) {
     var lng = drive.longitude;
     if (lat && lng) {
         marker.setLatLng([lat, lng]);
-        map.setView([lat, lng], map.getZoom());
+        var speedKmh = typeof drive.speed === 'number' ? drive.speed * MILES_TO_KM : 0;
+        var zoom = computeZoomForSpeed(speedKmh);
+        map.setView([lat, lng], zoom);
         if (typeof drive.heading === 'number') {
             marker.setRotationAngle(drive.heading);
         }
@@ -427,6 +429,17 @@ function updateOpenings(vehicle, charge) {
 var MAX_SPEED = 250;
 var MIN_TEMP = -20;
 var MAX_TEMP = 50;
+
+function computeZoomForSpeed(speedKmh) {
+    var minZoom = 14;
+    var zoom = DEFAULT_ZOOM;
+    if (speedKmh != null && !isNaN(speedKmh)) {
+        zoom = DEFAULT_ZOOM - speedKmh / 50;
+        if (zoom < minZoom) zoom = minZoom;
+        if (zoom > DEFAULT_ZOOM) zoom = DEFAULT_ZOOM;
+    }
+    return zoom;
+}
 
 function updateSpeedometer(speed, power) {
     if (speed == null) speed = 0;
