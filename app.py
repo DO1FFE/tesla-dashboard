@@ -784,6 +784,8 @@ def _fetch_data_once(vehicle_id="default"):
     vid = None if vehicle_id in (None, "default") else vehicle_id
     cache_id = "default" if vehicle_id in (None, "default") else vehicle_id
 
+    cached = _load_cached(cache_id)
+
     state = last_vehicle_state.get(cache_id)
     if state in (None, "online") or occupant_present:
         state_info = get_vehicle_state(vid)
@@ -816,6 +818,17 @@ def _fetch_data_once(vehicle_id="default"):
             data = {"state": state}
 
     if isinstance(data, dict):
+        last_val = None
+        if isinstance(cached, dict):
+            last_val = cached.get("last_charge_energy_added")
+        charge = data.get("charge_state", {})
+        if (
+            charge.get("charging_state") == "Charging"
+            and charge.get("charge_energy_added") is not None
+        ):
+            last_val = charge.get("charge_energy_added")
+        if last_val is not None:
+            data["last_charge_energy_added"] = last_val
         try:
             data["superchargers"] = get_superchargers(vid)
         except Exception:
