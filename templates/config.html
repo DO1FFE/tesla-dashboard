@@ -17,6 +17,24 @@
             </label>
         </div>
         {% endfor %}
+        <div>
+            <label>
+                APRS Rufzeichen
+                <input type="text" name="aprs_callsign" value="{{ config.get('aprs_callsign','') }}">
+            </label>
+        </div>
+        <div>
+            <label>
+                APRS Passcode
+                <input type="text" name="aprs_passcode" value="{{ config.get('aprs_passcode','') }}">
+            </label>
+        </div>
+        <div>
+            <label>
+                APRS Kommentar
+                <input type="text" name="aprs_comment" value="{{ config.get('aprs_comment','') }}">
+            </label>
+        </div>
         <button type="submit">Speichern</button>
     </form>
 </body>
