@@ -434,12 +434,22 @@ var MIN_TEMP = -20;
 var MAX_TEMP = 50;
 
 function computeZoomForSpeed(speedKmh) {
-    var minZoom = 14;
     var zoom = DEFAULT_ZOOM;
     if (speedKmh != null && !isNaN(speedKmh)) {
-        zoom = DEFAULT_ZOOM - speedKmh / 50;
-        if (zoom < minZoom) zoom = minZoom;
-        if (zoom > DEFAULT_ZOOM) zoom = DEFAULT_ZOOM;
+        var kmh = Math.round(Number(speedKmh));
+        if (kmh <= 20) {
+            zoom = 19;
+        } else if (kmh <= 30) {
+            zoom = 18;
+        } else if (kmh <= 50) {
+            zoom = 17;
+        } else if (kmh <= 70) {
+            zoom = 16;
+        } else if (kmh <= 100) {
+            zoom = 15;
+        } else {
+            zoom = 14;
+        }
     }
     return zoom;
 }
