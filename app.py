@@ -1013,7 +1013,11 @@ def api_occupant():
     global occupant_present
     if request.method == "POST":
         data = request.get_json(silent=True) or {}
-        occupant_present = bool(data.get("present"))
+        val = data.get("present")
+        if isinstance(val, str):
+            occupant_present = val.lower() in ("1", "true", "yes")
+        else:
+            occupant_present = bool(val)
     return jsonify({"present": occupant_present})
 
 
