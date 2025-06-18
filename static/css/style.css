@@ -373,7 +373,8 @@ select {
 }
 
 #inside-temp-value,
-#desired-temp {
+#desired-temp,
+#outside-temp-value {
   width: 9em;
   text-align: right;
 }
@@ -449,7 +450,7 @@ select {
 #thermometers svg {
   display: block;
   height: 70px;
-  width: auto;
+  width: 40px;
 }
 
 #thermometers .label {
