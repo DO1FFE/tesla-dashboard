@@ -419,6 +419,9 @@ function updateOpenings(vehicle, charge) {
         $('#sunroof').attr('class', open ? 'part-open' : 'part-closed');
         $('#sunroof-percent').text(open && !isNaN(pct) ? Math.round(pct) + '%' : '');
     }
+
+    var charging = charge && charge.charging_state === 'Charging';
+    $('#charge-cable').toggleClass('charging', charging);
 }
 
 var MAX_SPEED = 250;
