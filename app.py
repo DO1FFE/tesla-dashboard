@@ -466,6 +466,30 @@ def _save_cached(vehicle_id, data):
         pass
 
 
+def _last_energy_file(vehicle_id):
+    """Return filename for the last added energy of a vehicle."""
+    name = vehicle_id if vehicle_id is not None else "default"
+    return os.path.join(DATA_DIR, f"last_energy_{name}.txt")
+
+
+def _load_last_energy(vehicle_id):
+    """Load the last added energy value from disk."""
+    try:
+        with open(_last_energy_file(vehicle_id), "r", encoding="utf-8") as f:
+            return float(f.read().strip())
+    except Exception:
+        return None
+
+
+def _save_last_energy(vehicle_id, value):
+    """Persist the last added energy value for a vehicle."""
+    try:
+        with open(_last_energy_file(vehicle_id), "w", encoding="utf-8") as f:
+            f.write(str(value))
+    except Exception:
+        pass
+
+
 def _get_trip_files(directory=TRIP_DIR):
     """Return a list of available trip CSV files sorted chronologically."""
     try:
@@ -827,6 +851,9 @@ def _fetch_data_once(vehicle_id="default"):
             and charge.get("charge_energy_added") is not None
         ):
             last_val = charge.get("charge_energy_added")
+            _save_last_energy(cache_id, last_val)
+        elif last_val is None:
+            last_val = _load_last_energy(cache_id)
         if last_val is not None:
             data["last_charge_energy_added"] = last_val
         try:
