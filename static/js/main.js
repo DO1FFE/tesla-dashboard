@@ -545,9 +545,6 @@ function updateChargingInfo(charge) {
         lastChargeStop = null;
         if (charge.charge_energy_added != null && !isNaN(charge.charge_energy_added)) {
             lastEnergyAdded = Number(charge.charge_energy_added);
-            try {
-                localStorage.setItem('lastEnergyAdded', String(lastEnergyAdded));
-            } catch (e) {}
         }
     } else {
         if (lastChargeInfo && !lastChargeStop) {
@@ -555,14 +552,8 @@ function updateChargingInfo(charge) {
         }
         if (charge.charge_energy_added != null && !isNaN(charge.charge_energy_added)) {
             lastEnergyAdded = Number(charge.charge_energy_added);
-        } else if (lastEnergyAdded == null) {
-            var cached = null;
-            try {
-                cached = localStorage.getItem('lastEnergyAdded');
-            } catch (e) {}
-            if (cached != null && !isNaN(cached)) {
-                lastEnergyAdded = Number(cached);
-            }
+        } else if (lastEnergyAdded == null && charge.last_charge_energy_added != null && !isNaN(charge.last_charge_energy_added)) {
+            lastEnergyAdded = Number(charge.last_charge_energy_added);
         }
     }
 
