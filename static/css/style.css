@@ -647,6 +647,25 @@ select {
   stroke-width: 0.5px;
 }
 
+/* charging cable animation */
+#charge-cable {
+  display: none;
+  stroke: #4caf50;
+  stroke-width: 2px;
+  fill: none;
+  stroke-dasharray: 5 3;
+  animation: cable-flow 1s linear infinite;
+}
+
+#charge-cable.charging {
+  display: inline;
+}
+
+@keyframes cable-flow {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: 16; }
+}
+
 .app-version {
   text-align: center;
   font-size: 0.8em;
