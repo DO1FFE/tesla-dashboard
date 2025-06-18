@@ -450,7 +450,7 @@ select {
 #thermometers svg {
   display: block;
   height: 70px;
-  width: 40px;
+  width: auto;
 }
 
 #thermometers .label {
