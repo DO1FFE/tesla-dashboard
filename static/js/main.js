@@ -921,6 +921,7 @@ function startStream() {
     eventSource.onerror = function() {
         if (eventSource) {
             eventSource.close();
+            eventSource = null;
         }
         var url = '/api/data';
         if (currentVehicle) {
@@ -933,6 +934,10 @@ function startStream() {
         });
         // Ensure the map shows Essen if no cached data was found
         map.setView(DEFAULT_POS, DEFAULT_ZOOM);
+        // Attempt to reconnect after a short delay in case the
+        // browser has suspended the connection while running in the
+        // background.
+        setTimeout(startStream, 5000);
     };
 }
 
