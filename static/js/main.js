@@ -498,6 +498,7 @@ function batteryBar(level) {
 
 var lastChargeInfo = null;
 var lastChargeStop = null;
+var lastEnergyAdded = null;
 
 function updateV2LInfos(charge, drive) {
     var $info = $('#v2l-infos');
@@ -532,15 +533,36 @@ function updateChargingInfo(charge) {
         return;
     }
 
+    if (charge.last_charge_energy_added != null && !isNaN(charge.last_charge_energy_added)) {
+        lastEnergyAdded = Number(charge.last_charge_energy_added);
+    }
+
     var state = charge.charging_state;
     var now = Date.now();
 
     if (state === 'Charging') {
         lastChargeInfo = JSON.parse(JSON.stringify(charge));
         lastChargeStop = null;
+        if (charge.charge_energy_added != null && !isNaN(charge.charge_energy_added)) {
+            lastEnergyAdded = Number(charge.charge_energy_added);
+            try {
+                localStorage.setItem('lastEnergyAdded', String(lastEnergyAdded));
+            } catch (e) {}
+        }
     } else {
         if (lastChargeInfo && !lastChargeStop) {
             lastChargeStop = now;
+        }
+        if (charge.charge_energy_added != null && !isNaN(charge.charge_energy_added)) {
+            lastEnergyAdded = Number(charge.charge_energy_added);
+        } else if (lastEnergyAdded == null) {
+            var cached = null;
+            try {
+                cached = localStorage.getItem('lastEnergyAdded');
+            } catch (e) {}
+            if (cached != null && !isNaN(cached)) {
+                lastEnergyAdded = Number(cached);
+            }
         }
     }
 
@@ -581,11 +603,11 @@ function updateChargingInfo(charge) {
         if (charge.minutes_to_full_charge != null) {
             rows.push('<tr><th>Minuten bis voll:</th><td>' + Math.round(charge.minutes_to_full_charge) + ' min</td></tr>');
         }
-        if (state !== 'Charging' && lastChargeInfo && lastChargeInfo.charge_energy_added != null) {
-            rows.push('<tr><th>Beim letzten Stopp hinzugefügte Energie:</th><td>' + Number(lastChargeInfo.charge_energy_added).toFixed(2) + ' kWh</td></tr>');
+        if (state !== 'Charging' && lastEnergyAdded != null) {
+            rows.push('<tr><th>Zuletzt hinzugefügte Energie:</th><td>' + lastEnergyAdded.toFixed(2) + ' kWh</td></tr>');
         }
-    } else if (lastChargeInfo && lastChargeInfo.charge_energy_added != null) {
-        rows.push('<tr><th>Beim letzten Stopp hinzugefügte Energie:</th><td>' + Number(lastChargeInfo.charge_energy_added).toFixed(2) + ' kWh</td></tr>');
+    } else if (lastEnergyAdded != null) {
+        rows.push('<tr><th>Zuletzt hinzugefügte Energie:</th><td>' + lastEnergyAdded.toFixed(2) + ' kWh</td></tr>');
     }
 
     if (rows.length) {
