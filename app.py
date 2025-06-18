@@ -746,7 +746,7 @@ def get_superchargers(vehicle_id=None, ttl=60):
 
     state_info = get_vehicle_state(vid)
     state = state_info.get("state") if isinstance(state_info, dict) else None
-    if state != "online":
+    if state != "online" and not occupant_present:
         return _supercharger_cache.get(vid, [])
 
     try:
@@ -775,21 +775,9 @@ def get_superchargers(vehicle_id=None, ttl=60):
         return _supercharger_cache.get(vid, [])
 
 
-def reverse_geocode(lat, lon):
-    """Return address information for given coordinates."""
-    tesla = get_tesla()
-    if tesla is not None:
-        try:
-            resp = tesla.api(
-                "REVERSE_GEOCODING", params={"latitude": lat, "longitude": lon}
-            )
-            log_api_data("REVERSE_GEOCODING", sanitize(resp))
-            if resp:
-                return resp
-        except Exception as exc:
-            _log_api_error(exc)
+def reverse_geocode(lat, lon, vehicle_id=None):
+    """Return address information for given coordinates using OpenStreetMap."""
 
-    # Fallback to OpenStreetMap if Tesla API fails or returns nothing
     try:
         url = "https://nominatim.openstreetmap.org/reverse"
         params = {"lat": lat, "lon": lon, "format": "jsonv2"}
@@ -1002,13 +990,14 @@ def api_superchargers(vehicle_id=None):
 
 @app.route("/api/reverse_geocode")
 def api_reverse_geocode():
-    """Return address for given coordinates using Tesla API."""
+    """Return address for given coordinates."""
     try:
         lat = float(request.args.get("lat"))
         lon = float(request.args.get("lon"))
     except (TypeError, ValueError):
         return jsonify({"error": "Missing coordinates"}), 400
-    result = reverse_geocode(lat, lon)
+    vehicle_id = request.args.get("vehicle_id")
+    result = reverse_geocode(lat, lon, vehicle_id)
     return jsonify(result)
 
 
