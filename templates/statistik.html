@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Statistik</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+    <style>
+        table { border-collapse: collapse; }
+        th, td { padding: 4px 8px; border: 1px solid #444; }
+    </style>
+</head>
+<body>
+    <h1>Statistik</h1>
+    <table>
+        <tr><th>Datum</th><th>Online %</th><th>Offline %</th><th>Asleep %</th><th>Gefahrene km</th></tr>
+        {% for row in rows %}
+        <tr>
+            <td>{{ row.date }}</td>
+            <td>{{ row.online }}</td>
+            <td>{{ row.offline }}</td>
+            <td>{{ row.asleep }}</td>
+            <td>{{ row.km }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>

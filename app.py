@@ -10,7 +10,7 @@ import requests
 from functools import wraps
 from dotenv import load_dotenv
 from version import get_version
-from datetime import datetime
+from datetime import datetime, timedelta
 
 try:
     import teslapy
@@ -235,6 +235,7 @@ def log_api_data(endpoint, data):
 
 
 TRIP_DIR = os.path.join(DATA_DIR, "trips")
+STAT_FILE = os.path.join(DATA_DIR, "statistics.json")
 
 # Elements on the dashboard that can be toggled via the config page
 CONFIG_ITEMS = [
@@ -539,6 +540,102 @@ def _bearing(p1, p2):
     x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dlon)
     brng = degrees(atan2(y, x))
     return (brng + 360) % 360
+
+
+def _haversine(lat1, lon1, lat2, lon2):
+    """Compute distance in kilometers between two lat/lon points."""
+    from math import radians, sin, cos, atan2, sqrt
+
+    r = 6371.0
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    return r * c
+
+
+def _trip_distance(filename):
+    """Return total distance in km for a trip CSV file."""
+    points = _load_trip(filename)
+    dist = 0.0
+    for i in range(1, len(points)):
+        lat1, lon1 = points[i - 1][:2]
+        lat2, lon2 = points[i][:2]
+        dist += _haversine(lat1, lon1, lat2, lon2)
+    return dist
+
+
+def _load_state_entries(filename=os.path.join(DATA_DIR, "state.log")):
+    """Parse state log entries as (timestamp, state) tuples."""
+    entries = []
+    try:
+        with open(filename, "r", encoding="utf-8") as f:
+            for line in f:
+                idx = line.find("{")
+                if idx == -1:
+                    continue
+                ts_str = line[:idx].strip()
+                try:
+                    ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S,%f").timestamp()
+                except Exception:
+                    try:
+                        ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").timestamp()
+                    except Exception:
+                        continue
+                try:
+                    data = json.loads(line[idx:])
+                    state = data.get("state")
+                    entries.append((ts, state))
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return entries
+
+
+def _compute_state_stats(entries):
+    """Return per-day seconds spent in each state."""
+    stats = {}
+    if not entries:
+        return stats
+    entries.sort(key=lambda x: x[0])
+    entries.append((time.time(), entries[-1][1]))
+    for (start, state), (end, _next_state) in zip(entries, entries[1:]):
+        t = start
+        while t < end:
+            day = datetime.fromtimestamp(t).date()
+            next_day = datetime.combine(day + timedelta(days=1), datetime.min.time()).timestamp()
+            segment_end = min(end, next_day)
+            dur = segment_end - t
+            d = stats.setdefault(day.isoformat(), {"online": 0.0, "offline": 0.0, "asleep": 0.0})
+            key = state if state in d else "offline"
+            d[key] += dur
+            t = segment_end
+    return stats
+
+
+def compute_statistics():
+    """Compute daily statistics and save them to ``STAT_FILE``."""
+    stats = _compute_state_stats(_load_state_entries())
+    for fname in _get_trip_files():
+        date_str = fname.split("_")[-1].split(".")[0]
+        path = os.path.join(TRIP_DIR, fname)
+        km = _trip_distance(path)
+        stats.setdefault(date_str, {"online": 0.0, "offline": 0.0, "asleep": 0.0})
+        stats[date_str]["km"] = km
+    for day, val in stats.items():
+        total = 24 * 3600
+        for k in ("online", "offline", "asleep"):
+            val[k] = round(val.get(k, 0.0) / total * 100, 2)
+        val.setdefault("km", 0.0)
+    try:
+        os.makedirs(os.path.dirname(STAT_FILE), exist_ok=True)
+        with open(STAT_FILE, "w", encoding="utf-8") as f:
+            json.dump(stats, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+    return stats
 
 
 def get_tesla():
@@ -1055,6 +1152,25 @@ def error_page():
         except Exception:
             e["time_str"] = str(e["timestamp"])
     return render_template("errors.html", errors=errors)
+
+
+@app.route("/statistik")
+def statistics_page():
+    """Display daily statistics of vehicle state and distance."""
+    stats = compute_statistics()
+    rows = []
+    for day in sorted(stats.keys()):
+        entry = stats[day]
+        rows.append(
+            {
+                "date": day,
+                "online": entry.get("online", 0.0),
+                "offline": entry.get("offline", 0.0),
+                "asleep": entry.get("asleep", 0.0),
+                "km": round(entry.get("km", 0.0), 2),
+            }
+        )
+    return render_template("statistik.html", rows=rows)
 
 
 @app.route("/api/errors")
