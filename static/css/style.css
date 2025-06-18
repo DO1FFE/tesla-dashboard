@@ -372,6 +372,12 @@ select {
   margin-top: 2px;
 }
 
+#inside-temp-value,
+#desired-temp {
+  width: 9em;
+  text-align: right;
+}
+
 #gear-shift div {
   text-align: center;
   padding: 2px 0;
