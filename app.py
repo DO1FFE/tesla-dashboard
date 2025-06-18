@@ -319,6 +319,7 @@ api_errors_lock = threading.Lock()
 state_lock = threading.Lock()
 last_vehicle_state = _load_last_state()
 occupant_present = False
+_default_vehicle_id = None
 
 
 def track_park_time(vehicle_data):
@@ -587,7 +588,7 @@ def sanitize(data):
 
 def _cached_vehicle_list(tesla, ttl=300):
     """Return vehicle list with basic time-based caching."""
-    global _vehicle_list_cache, _vehicle_list_cache_ts
+    global _vehicle_list_cache, _vehicle_list_cache_ts, _default_vehicle_id
     now = time.time()
     with _vehicle_list_lock:
         if not _vehicle_list_cache or now - _vehicle_list_cache_ts > ttl:
@@ -597,6 +598,8 @@ def _cached_vehicle_list(tesla, ttl=300):
                 log_api_data(
                     "vehicle_list", sanitize([v.copy() for v in _vehicle_list_cache])
                 )
+                if _vehicle_list_cache and _default_vehicle_id is None:
+                    _default_vehicle_id = str(_vehicle_list_cache[0]["id_s"])
             except Exception as exc:
                 _log_api_error(exc)
                 return []
@@ -744,8 +747,10 @@ def get_superchargers(vehicle_id=None, ttl=60):
     if vid in _supercharger_cache and now - _supercharger_cache_ts.get(vid, 0) < ttl:
         return _supercharger_cache[vid]
 
-    state_info = get_vehicle_state(vid)
-    state = state_info.get("state") if isinstance(state_info, dict) else None
+    state = last_vehicle_state.get(vid)
+    if state in (None, "online") or occupant_present:
+        state_info = get_vehicle_state(vid)
+        state = state_info.get("state") if isinstance(state_info, dict) else state
     if state != "online" and not occupant_present:
         return _supercharger_cache.get(vid, [])
 
@@ -793,12 +798,17 @@ def reverse_geocode(lat, lon, vehicle_id=None):
 
 def _fetch_data_once(vehicle_id="default"):
     """Return current data or cached values based on vehicle state."""
-    vid = None if vehicle_id in (None, "default") else vehicle_id
-    cache_id = "default" if vehicle_id in (None, "default") else vehicle_id
+    global _default_vehicle_id
+    if vehicle_id in (None, "default"):
+        vid = _default_vehicle_id
+        cache_id = "default"
+    else:
+        vid = vehicle_id
+        cache_id = vehicle_id
 
     cached = _load_cached(cache_id)
 
-    state = last_vehicle_state.get(cache_id)
+    state = last_vehicle_state.get(vid or cache_id)
     if state in (None, "online") or occupant_present:
         state_info = get_vehicle_state(vid)
         state = state_info.get("state") if isinstance(state_info, dict) else state
