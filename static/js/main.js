@@ -171,8 +171,10 @@ function handleData(data) {
     var lng = drive.longitude;
     if (lat && lng) {
         marker.setLatLng([lat, lng]);
-        var speedVal = Number(drive.speed);
-        var speedKmh = isNaN(speedVal) ? 0 : speedVal * MILES_TO_KM;
+        var speedVal = parseFloat(drive.speed);
+        var units = data.gui_settings && data.gui_settings.gui_distance_units;
+        var mph = !units || units.indexOf('km') === -1;
+        var speedKmh = isNaN(speedVal) ? 0 : (mph ? speedVal * MILES_TO_KM : speedVal);
         var zoom = computeZoomForSpeed(speedKmh);
         map.setView([lat, lng], zoom);
         if (typeof drive.heading === 'number') {
