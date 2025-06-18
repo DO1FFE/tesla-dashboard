@@ -375,7 +375,7 @@ select {
 #inside-temp-value,
 #desired-temp,
 #outside-temp-value {
-  width: 9em;
+  width: 7em;
   text-align: right;
 }
 
