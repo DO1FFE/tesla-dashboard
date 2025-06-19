@@ -36,6 +36,11 @@ can be started from any location while still accessing existing trips and logs.
 All required JavaScript and CSS libraries are bundled under `static/` so the dashboard works even without Internet access.
 
 The backend continuously polls the Tesla API and pushes new data to clients using Server-Sent Events (SSE).
+The frontend first checks `/api/state` to make sure the car is online before
+opening the streaming connection.  When the vehicle is reported as `offline` or
+`asleep` no further API requests are made, preventing the car from waking up
+unexpectedly.  Only when occupant presence is reported via `/api/occupant` will
+the application wake the vehicle and query live data.
 
 ## Features
 

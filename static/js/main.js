@@ -127,7 +127,7 @@ function fetchVehicles() {
         if (!currentVehicle && vehicles.length > 0) {
             currentVehicle = vehicles[0].id;
             $select.val(currentVehicle);
-            startStream();
+            startStreamIfOnline();
         }
     });
 }
@@ -927,7 +927,7 @@ function updateUI(data) {
 
 $('#vehicle-select').on('change', function() {
     currentVehicle = $(this).val();
-    startStream();
+    startStreamIfOnline();
 });
 
 
@@ -956,22 +956,43 @@ function startStream() {
             eventSource.close();
             eventSource = null;
         }
-        var url = '/api/data';
-        if (currentVehicle) {
-            url += '/' + currentVehicle;
-        }
-        $.getJSON(url, function(data) {
-            if (data && !data.error) {
-                handleData(data);
+        if (!currentVehicle) return;
+        $.getJSON('/api/state/' + currentVehicle, function(resp) {
+            var st = resp.state;
+            updateVehicleState(st);
+            updateOfflineInfo(st);
+            if (st === 'online') {
+                $.getJSON('/api/data/' + currentVehicle, function(data) {
+                    if (data && !data.error) {
+                        handleData(data);
+                    }
+                });
+            } else {
+                hideForSleep();
             }
         });
         // Ensure the map shows Essen if no cached data was found
         map.setView(DEFAULT_POS, DEFAULT_ZOOM);
-        // Attempt to reconnect after a short delay in case the
-        // browser has suspended the connection while running in the
-        // background.
-        setTimeout(startStream, 5000);
+        // Attempt to reconnect after a short delay in case the browser has
+        // suspended the connection while running in the background.
+        setTimeout(startStreamIfOnline, 5000);
     };
+}
+
+function startStreamIfOnline() {
+    if (!currentVehicle) {
+        return;
+    }
+    $.getJSON('/api/state/' + currentVehicle, function(resp) {
+        var st = resp.state;
+        updateVehicleState(st);
+        updateOfflineInfo(st);
+        if (st === 'online') {
+            startStream();
+        } else {
+            hideForSleep();
+        }
+    });
 }
 
 $.getJSON('/api/config', function(cfg) {
