@@ -330,6 +330,7 @@ occupant_present = False
 _default_vehicle_id = None
 _last_aprs_info = {}
 _aprs_seq = {}
+_aprs_configured = set()
 
 
 def track_park_time(vehicle_data):
@@ -553,6 +554,10 @@ def send_aprs(vehicle_data):
     try:
         aprs = aprslib.IS(callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
         aprs.connect()
+        if vid not in _aprs_configured:
+            aprs.sendall(f"{callsign}>APRS:PARM.Temp")
+            aprs.sendall(f"{callsign}>APRS:UNIT.C")
+            _aprs_configured.add(vid)
         from aprslib.util import latitude_to_ddm, longitude_to_ddm
 
         lat_ddm = latitude_to_ddm(lat)
