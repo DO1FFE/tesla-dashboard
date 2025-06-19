@@ -19,6 +19,11 @@ var map = L.map('map').setView(DEFAULT_POS, DEFAULT_ZOOM);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
 }).addTo(map);
+// Track when the user last changed the zoom level
+var lastUserZoom = 0;
+map.on('zoomend', function() {
+    lastUserZoom = Date.now();
+});
 var polyline = null;
 var lastDataTimestamp = null;
 var lastAddressLat = null;
@@ -176,6 +181,9 @@ function handleData(data) {
         var mph = !units || units.indexOf('km') === -1;
         var speedKmh = isNaN(speedVal) ? 0 : (mph ? speedVal * MILES_TO_KM : speedVal);
         var zoom = computeZoomForSpeed(speedKmh);
+        if (Date.now() - lastUserZoom < 60000) {
+            zoom = map.getZoom();
+        }
         map.setView([lat, lng], zoom);
         if (typeof drive.heading === 'number') {
             marker.setRotationAngle(drive.heading);
