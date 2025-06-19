@@ -547,7 +547,7 @@ def send_aprs(vehicle_data):
         comment_parts.append(f"t{temp_f:03d}")
     if comment_cfg:
         comment_parts.append(comment_cfg)
-    comment = join(comment_parts)
+    comment = "".join(comment_parts)
     try:
         aprs = aprslib.IS(callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
         aprs.connect()
