@@ -579,7 +579,12 @@ select {
   #map-container {
     flex-direction: column;
   }
+  /* Ensure map appears above the heater indicator on small screens */
+  #map-container #map {
+    order: 1;
+  }
   #map-container #heater-indicator {
+    order: 2;
     margin-left: 0;
     margin-right: 0;
   }
