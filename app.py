@@ -552,14 +552,16 @@ def send_aprs(vehicle_data):
     try:
         aprs = aprslib.IS(callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
         aprs.connect()
-        packet = aprslib.packets.PositionReport()
-        packet.fromcall = callsign
-        packet.tocall = "APRS"
-        packet.latitude = lat
-        packet.longitude = lon
-        packet.symbol_table = "/"
-        packet.symbol = "_"
-        packet.comment = comment
+        from aprslib.util import latitude_to_ddm, longitude_to_ddm
+
+        lat_ddm = latitude_to_ddm(lat)
+        lon_ddm = longitude_to_ddm(lon)
+        course = int(round(heading or 0)) % 360
+        spd_knots = int(round((speed or 0) / 1.852))
+        body = f"!{lat_ddm}/{lon_ddm}_{course:03d}/{spd_knots:03d}"
+        if comment:
+            body += f" {comment}"
+        packet = f"{callsign}>APRS:{body}"
         aprs.sendall(packet)
         aprs.close()
         _last_aprs_info[vid] = {
