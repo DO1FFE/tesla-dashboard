@@ -542,11 +542,11 @@ def send_aprs(vehicle_data):
     if not changed:
         return
     comment_parts = []
-    if comment_cfg:
-        comment_parts.append(comment_cfg)
     if temp is not None:
         temp_f = int(round(temp * 9 / 5 + 32))
-        comment_parts.append(f"/t{temp_f:03d}")
+        comment_parts.append(f" /t{temp_f:03d} ")
+    if comment_cfg:
+        comment_parts.append(comment_cfg)
     comment = " ".join(comment_parts)
     try:
         aprs = aprslib.IS(callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
