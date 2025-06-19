@@ -329,6 +329,7 @@ last_vehicle_state = _load_last_state()
 occupant_present = False
 _default_vehicle_id = None
 _last_aprs_info = {}
+_aprs_seq = {}
 
 
 def track_park_time(vehicle_data):
@@ -563,6 +564,16 @@ def send_aprs(vehicle_data):
             body += f" {comment}"
         packet = f"{callsign}>APRS:{body}"
         aprs.sendall(packet)
+        if temp is not None:
+            seq = (_aprs_seq.get(vid, -1) + 1) % 1000
+            _aprs_seq[vid] = seq
+            tval = int(round(temp))
+            if tval < 0:
+                tval = 0
+            elif tval > 255:
+                tval = 255
+            telem = f"T#{seq:03d},{tval:03d},000,000,000,000,00000000"
+            aprs.sendall(f"{callsign}>APRS:{telem}")
         aprs.close()
         _last_aprs_info[vid] = {
             "lat": lat,
