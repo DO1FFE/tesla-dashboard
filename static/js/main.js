@@ -12,7 +12,7 @@ var lightningIcon = L.divIcon({
 });
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
-var DEFAULT_ZOOM = 19;
+var DEFAULT_ZOOM = 18;
 // Initialize the map roughly centered on Essen with a high zoom until
 // coordinates from the API are received.
 var map = L.map('map').setView(DEFAULT_POS, DEFAULT_ZOOM);
@@ -520,17 +520,17 @@ function computeZoomForSpeed(speedKmh) {
     if (speedKmh != null && !isNaN(speedKmh)) {
         var kmh = Math.round(Number(speedKmh));
         if (kmh <= 20) {
-            zoom = 19;
-        } else if (kmh <= 30) {
             zoom = 18;
-        } else if (kmh <= 50) {
+        } else if (kmh <= 30) {
             zoom = 17;
-        } else if (kmh <= 70) {
+        } else if (kmh <= 50) {
             zoom = 16;
-        } else if (kmh <= 100) {
+        } else if (kmh <= 70) {
             zoom = 15;
-        } else {
+        } else if (kmh <= 100) {
             zoom = 14;
+        } else {
+            zoom = 13;
         }
     }
     return zoom;
