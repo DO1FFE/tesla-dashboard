@@ -52,6 +52,7 @@ Using the slider you can inspect each recorded point and see the exact timestamp
 When multiple cars are available a drop-down menu lets you switch between vehicles.
 Below the navigation bar a small media player section shows details of the currently playing track if provided by the API.
 The configuration page also offers an option to highlight doors and windows in blue.
+Additional toggles allow hiding the heater indicators and the list of nearby Superchargers on the main page.
 
 Data is streamed to the frontend via `/stream/<vehicle_id>` using Server-Sent Events so the dashboard updates instantly when new information arrives.
 The endpoint `/apiliste` exposes a text file listing all seen API variables and their latest values.
