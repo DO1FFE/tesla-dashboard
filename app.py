@@ -800,8 +800,6 @@ def get_vehicle_state(vehicle_id=None):
     global _default_vehicle_id
     vid = str(vehicle_id or _default_vehicle_id or "default")
     state = last_vehicle_state.get(vid)
-    if state not in (None, "online") and not occupant_present:
-        return {"state": state}
 
     tesla = get_tesla()
     if tesla is None:
@@ -1005,9 +1003,10 @@ def _fetch_data_once(vehicle_id="default"):
     cached = _load_cached(cache_id)
 
     state = last_vehicle_state.get(vid or cache_id)
-    if state in (None, "online") or occupant_present:
-        state_info = get_vehicle_state(vid)
-        state = state_info.get("state") if isinstance(state_info, dict) else state
+    # Always refresh the vehicle state so transitions from offline/asleep
+    # are detected even when no occupant is present.
+    state_info = get_vehicle_state(vid)
+    state = state_info.get("state") if isinstance(state_info, dict) else state
 
     data = None
     live = False
