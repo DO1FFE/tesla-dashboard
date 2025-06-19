@@ -53,7 +53,16 @@ function showConfigured() {
 function hideForSleep() {
     $('#dashboard-content').hide();
     $('#sleep-msg').show();
+    $('#loading-msg').hide();
     ASLEEP = true;
+}
+
+function showLoading() {
+    $('#loading-msg').show();
+}
+
+function hideLoading() {
+    $('#loading-msg').hide();
 }
 
 // Marker and polyline for active navigation destination
@@ -138,6 +147,7 @@ function fetchVehicles() {
 }
 
 function handleData(data) {
+    hideLoading();
     updateHeader(data);
     updateUI(data);
     updateVehicleState(data.state);
@@ -794,10 +804,12 @@ function updateOfflineInfo(state) {
     if (typeof state === 'string') {
         var st = state.toLowerCase();
         if (st === 'offline' || st === 'asleep') {
+            hideLoading();
             $msg.text(OFFLINE_TEXT).show();
             return;
         }
     }
+    hideLoading();
     $msg.hide().text('');
 }
 
@@ -952,6 +964,7 @@ function startStream() {
     updateSuperchargerList();
     lastSuperchargerFetch = 0;
     fetchSuperchargers();
+    showLoading();
     eventSource = new EventSource('/stream/' + currentVehicle);
     eventSource.onmessage = function(e) {
         var data = JSON.parse(e.data);
@@ -991,6 +1004,7 @@ function startStreamIfOnline() {
     if (!currentVehicle) {
         return;
     }
+    showLoading();
     $.getJSON('/api/state/' + currentVehicle, function(resp) {
         var st = resp.state;
         updateVehicleState(st);
