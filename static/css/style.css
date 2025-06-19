@@ -112,9 +112,11 @@ select {
   font-size: 0.9em;
 }
 
-#vehicle-info,
-#vehicle-status {
+#header-right {
   float: right;
+}
+
+#header-right span {
   margin-left: 10px;
 }
 
@@ -566,12 +568,14 @@ select {
 
 /* Responsive adjustments */
 @media (max-width: 600px) {
-  #vehicle-info,
-  #vehicle-status {
+  #header-right {
     float: none;
     display: block;
-    margin-left: 0;
     text-align: right;
+  }
+  #header-right span {
+    display: block;
+    margin-left: 0;
   }
   #status-bar {
     flex-wrap: wrap;
