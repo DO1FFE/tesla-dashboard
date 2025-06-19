@@ -543,6 +543,8 @@ def send_aprs(vehicle_data):
             changed = True
         if now - last.get("time", 0) >= 600:
             changed = True
+        if now - last.get("time", 0) < 10:
+            return
     if not changed:
         return
     comment_parts = []
