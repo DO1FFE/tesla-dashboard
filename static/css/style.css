@@ -576,15 +576,15 @@ select {
     flex-wrap: wrap;
     gap: 10px;
   }
+  /* Break layout and stack map and heater indicator */
   #map-container {
-    flex-direction: column;
+    display: block;
   }
-  /* Ensure map appears above the heater indicator on small screens */
-  #map-container #map {
-    order: 1;
+  #map-container #map,
+  #map-container #heater-indicator {
+    width: 100%;
   }
   #map-container #heater-indicator {
-    order: 2;
     margin-left: 0;
     margin-right: 0;
   }
