@@ -74,8 +74,10 @@
         </div>
         <div id="climate-indicator">
             <div id="climate-status" title="Klimaanlage aus">🚫</div>
-            <div id="climate-mode" title=""></div>
-            <div id="cabin-protection" title=""></div>
+            <div id="climate-row">
+                <div id="climate-mode" title=""></div>
+                <div id="cabin-protection" title=""></div>
+            </div>
             <div id="fan-status" title="Lüfterstufe">🌀 0</div>
         </div>
         <div id="openings-indicator">
@@ -142,7 +144,7 @@
                 <rect id="charge-port" class="part-closed" x="15" y="150" width="8" height="8" rx="1" ry="1">
                     <title>Ladeanschluss</title>
                 </rect>
-                <path id="charge-cable" d="M15 154 h -12 v -20" />
+                <path id="charge-cable" d="M15 154 q -5 5 -10 10 q 5 5 10 10 q -5 5 -10 10 q 5 5 10 10" />
             </svg>
         </div>
         <div id="supercharger-list"></div>
