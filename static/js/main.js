@@ -638,7 +638,7 @@ function updateChargingInfo(charge) {
         if (state !== 'Charging' && lastEnergyAdded != null) {
             rows.push('<tr><th>Zuletzt hinzugefügte Energie:</th><td>' + lastEnergyAdded.toFixed(2) + ' kWh</td></tr>');
         }
-    } else if (lastEnergyAdded != null) {
+    } else if (state !== 'Charging' && lastEnergyAdded != null) {
         rows.push('<tr><th>Zuletzt hinzugefügte Energie:</th><td>' + lastEnergyAdded.toFixed(2) + ' kWh</td></tr>');
     }
 
