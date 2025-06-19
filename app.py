@@ -547,7 +547,7 @@ def send_aprs(vehicle_data):
         comment_parts.append(f"t{temp_f:03d}")
     if comment_cfg:
         comment_parts.append(comment_cfg)
-    comment = " ".join(comment_parts)
+    comment = join(comment_parts)
     try:
         aprs = aprslib.IS(callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
         aprs.connect()
@@ -559,7 +559,7 @@ def send_aprs(vehicle_data):
         spd_knots = int(round((speed or 0) / 1.852))
         body = f"!{lat_ddm}/{lon_ddm}_{course:03d}/{spd_knots:03d}"
         if comment:
-            body += f" {comment}"
+            body += f"{comment}"
         packet = f"{callsign}>APRS:{body}"
         aprs.sendall(packet)
         
