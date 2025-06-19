@@ -506,6 +506,12 @@ def send_aprs(vehicle_data):
     """Transmit a position packet via APRS-IS using aprslib."""
     if aprslib is None:
         return
+    if (
+        isinstance(vehicle_data, dict)
+        and vehicle_data.get("state") == "offline"
+        and not occupant_present
+    ):
+        return
     cfg = load_config()
     callsign = cfg.get("aprs_callsign")
     passcode = cfg.get("aprs_passcode")
