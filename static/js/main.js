@@ -387,7 +387,8 @@ function updateHeaterIndicator(front, rear, steering, wiper,
                                seatL, seatR, seatRL, seatRC, seatRR) {
     function set(id, val, name) {
         if (val == null) {
-            $('#' + id).text('\uD83D\uDEAB').attr('title', name + ' unbekannt');
+            $('#' + id).html(name + ': \uD83D\uDEAB')
+                .attr('title', name + ' unbekannt');
             return;
         }
         var active = false;
@@ -397,19 +398,21 @@ function updateHeaterIndicator(front, rear, steering, wiper,
         } else {
             active = !!val;
         }
-        $('#' + id).text(active ? '\uD83D\uDD25' : '\uD83D\uDEAB')
+        $('#' + id).html(name + ': ' + (active ? '\uD83D\uDD25' : '\uD83D\uDEAB'))
             .attr('title', name + (active ? ' an' : ' aus'));
     }
     function setLevel(id, val, name) {
         if (val == null || isNaN(val)) {
-            $('#' + id).text('\uD83D\uDEAB').attr('title', name + ' unbekannt');
+            $('#' + id).html(name + ': \uD83D\uDEAB')
+                .attr('title', name + ' unbekannt');
             return;
         }
         var level = Number(val);
         if (level <= 0) {
-            $('#' + id).text('\uD83D\uDEAB').attr('title', name + ' aus');
+            $('#' + id).html(name + ': \uD83D\uDEAB')
+                .attr('title', name + ' aus');
         } else {
-            $('#' + id).text('\uD83D\uDD25' + level)
+            $('#' + id).html(name + ': \uD83D\uDD25' + level)
                 .attr('title', name + ' Stufe ' + level);
         }
     }
