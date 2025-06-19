@@ -105,11 +105,8 @@ select {
   font-size: 1.1em;
   pointer-events: none;
   z-index: 900;
-}
-
-#location-address #road-type {
-  display: block;
-  font-size: 0.9em;
+  display: inline-block;
+  white-space: nowrap;
 }
 
 #header-right {

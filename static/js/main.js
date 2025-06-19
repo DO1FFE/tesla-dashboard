@@ -222,7 +222,6 @@ function handleData(data) {
         // Fall back to Essen if no coordinates are available
         map.setView(DEFAULT_POS, DEFAULT_ZOOM);
         $('#address-text').text('');
-        $('#road-type').text('');
     }
 
     // Show destination flag and route line if navigation is active
@@ -943,7 +942,6 @@ function fetchAddress(lat, lon) {
     lastAddressLng = lon;
     $.getJSON('/api/reverse_geocode', {lat: lat, lon: lon}, function(resp) {
         var addr = null;
-        var roadType = null;
         if (resp.raw && resp.raw.address) {
             var a = resp.raw.address;
             var line1 = '';
@@ -954,42 +952,24 @@ function fetchAddress(lat, lon) {
                 }
             }
             var city = a.city || a.town || a.village;
-            var line2 = '';
+            var district = a.suburb || a.city_district || a.neighbourhood;
+            var line2Parts = [];
             if (a.postcode) {
-                line2 += a.postcode;
+                line2Parts.push(a.postcode);
             }
             if (city) {
-                line2 += (line2 ? ' ' : '') + city;
+                var cityText = city;
+                if (district && district !== city) {
+                    cityText += '-' + district;
+                }
+                line2Parts.push(cityText);
             }
+            var line2 = line2Parts.join(' ');
             if (line1 || line2) {
                 addr = line1;
                 if (line2) {
                     addr += (addr ? ', ' : '') + line2;
                 }
-            }
-            if (resp.raw.category === 'highway' && resp.raw.type) {
-                var t = resp.raw.type;
-                var map = {
-                    motorway: 'Autobahn',
-                    motorway_link: 'Autobahnauffahrt',
-                    trunk: 'Schnellstraße',
-                    trunk_link: 'Schnellstraßenauffahrt',
-                    primary: 'Hauptstraße',
-                    primary_link: 'Zubringer',
-                    secondary: 'Nebenstraße',
-                    secondary_link: 'Zubringer',
-                    tertiary: 'Nebenstraße',
-                    residential: 'Wohnstraße',
-                    service: 'Zufahrtsstraße',
-                    living_street: 'Spielstraße',
-                    pedestrian: 'Fußgängerzone',
-                    track: 'Feldweg',
-                    road: 'Straße',
-                    footway: 'Gehweg',
-                    cycleway: 'Radweg',
-                    path: 'Pfad'
-                };
-                roadType = map[t] || t;
             }
         }
         if (!addr) {
@@ -999,7 +979,6 @@ function fetchAddress(lat, lon) {
             }
         }
         $('#address-text').text(addr || '');
-        $('#road-type').text(roadType ? '(' + roadType + ')' : '');
     });
 }
 
