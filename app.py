@@ -555,8 +555,8 @@ def send_aprs(vehicle_data):
         aprs = aprslib.IS(callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
         aprs.connect()
         if vid not in _aprs_configured:
-            aprs.sendall(f"{callsign}>APRS:PARM.Temp")
-            aprs.sendall(f"{callsign}>APRS:UNIT.C")
+            aprs.sendall(f"{callsign}>APRS:PARM.Temp,,,,")
+            aprs.sendall(f"{callsign}>APRS:UNIT.C,,,,")
             _aprs_configured.add(vid)
         from aprslib.util import latitude_to_ddm, longitude_to_ddm
 
