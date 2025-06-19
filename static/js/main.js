@@ -42,7 +42,6 @@ var lastAddressLat = null;
 var lastAddressLng = null;
 var CONFIG = {};
 var HIGHLIGHT_BLUE = false;
-var ASLEEP = false;
 var OFFLINE_TEXT = 'Das Fahrzeug ist offline und schläft - Bitte nicht wecken! - Die Daten sind die zuletzt bekannten und somit nicht aktuell!';
 
 function applyConfig(cfg) {
@@ -60,15 +59,6 @@ function showConfigured() {
     $('#dashboard-content').show();
     // Recalculate map dimensions when the content becomes visible.
     map.invalidateSize();
-    $('#sleep-msg').hide();
-    ASLEEP = false;
-}
-
-function hideForSleep() {
-    $('#dashboard-content').hide();
-    $('#sleep-msg').show();
-    $('#loading-msg').hide();
-    ASLEEP = true;
 }
 
 function showLoading() {
@@ -1036,15 +1026,11 @@ function startStream() {
             var st = resp.state;
             updateVehicleState(st);
             updateOfflineInfo(st);
-            if (st === 'online') {
-                $.getJSON('/api/data/' + currentVehicle, function(data) {
-                    if (data && !data.error) {
-                        handleData(data);
-                    }
-                });
-            } else {
-                hideForSleep();
-            }
+            $.getJSON('/api/data/' + currentVehicle, function(data) {
+                if (data && !data.error) {
+                    handleData(data);
+                }
+            });
         });
         // Ensure the map shows Essen if no cached data was found
         map.setView(DEFAULT_POS, DEFAULT_ZOOM);
@@ -1065,9 +1051,12 @@ function startStreamIfOnline() {
         updateOfflineInfo(st);
         if (st === 'online') {
             startStream();
-        } else {
-            hideForSleep();
         }
+        $.getJSON('/api/data/' + currentVehicle, function(data) {
+            if (data && !data.error) {
+                handleData(data);
+            }
+        });
     });
 }
 

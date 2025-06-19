@@ -42,13 +42,6 @@ select {
   padding: 0 1rem;
 }
 
-#sleep-msg {
-  display: none;
-  text-align: center;
-  font-size: 1.2em;
-  margin: 20px;
-  color: var(--accent-color);
-}
 
 #offline-msg {
   display: none;
