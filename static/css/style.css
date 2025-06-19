@@ -367,6 +367,12 @@ select {
   font-size: 34px;
 }
 
+#climate-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 #fan-status,
 #desired-temp {
   display: block;
@@ -674,7 +680,7 @@ select {
 #charge-cable {
   display: none;
   stroke: #4caf50;
-  stroke-width: 2px;
+  stroke-width: 3px;
   fill: none;
   stroke-dasharray: 5 3;
   animation: cable-flow 1s linear infinite;
