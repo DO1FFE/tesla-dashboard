@@ -576,6 +576,13 @@ select {
     flex-wrap: wrap;
     gap: 10px;
   }
+  #map-container {
+    flex-direction: column;
+  }
+  #map-container #heater-indicator {
+    margin-left: 0;
+    margin-right: 0;
+  }
   #heater-indicator {
     flex-direction: column;
   }
