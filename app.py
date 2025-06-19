@@ -582,8 +582,8 @@ def send_aprs(vehicle_data):
             # APRS telemetry expects five comma-separated parameter names and
             # units.  We only send the outside temperature, so fill the
             # remaining entries with empty values to satisfy the protocol.
-            aprs.sendall(f"{callsign}>APRS::{callsign}:PARM.Temp")
-            aprs.sendall(f"{callsign}>APRS::{callsign}:UNIT.C")
+            aprs.sendall(f"{callsign}>APRS::{callsign}:PARM.Temp,,,,,,,,,,,,")
+            aprs.sendall(f"{callsign}>APRS::{callsign}:UNIT.C,,,,,,,,,,,,")
             _aprs_configured.add(vid)
         from aprslib.util import latitude_to_ddm, longitude_to_ddm
 
