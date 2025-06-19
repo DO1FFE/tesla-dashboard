@@ -329,9 +329,6 @@ last_vehicle_state = _load_last_state()
 occupant_present = False
 _default_vehicle_id = None
 _last_aprs_info = {}
-_aprs_seq = {}
-_aprs_configured = set()
-
 
 def track_park_time(vehicle_data):
     """Track when the vehicle was first seen parked."""
@@ -502,28 +499,7 @@ def _save_last_energy(vehicle_id, value):
         pass
 
 
-def _aprs_seq_file(vehicle_id):
-    """Return filename for the APRS telemetry sequence."""
-    name = vehicle_id if vehicle_id is not None else "default"
-    return os.path.join(DATA_DIR, f"aprs_seq_{name}.txt")
 
-
-def _load_aprs_seq(vehicle_id):
-    """Load the last used APRS telemetry sequence number from disk."""
-    try:
-        with open(_aprs_seq_file(vehicle_id), "r", encoding="utf-8") as f:
-            return int(f.read().strip())
-    except Exception:
-        return -1
-
-
-def _save_aprs_seq(vehicle_id, seq):
-    """Persist the last used APRS telemetry sequence number."""
-    try:
-        with open(_aprs_seq_file(vehicle_id), "w", encoding="utf-8") as f:
-            f.write(str(seq))
-    except Exception:
-        pass
 
 
 def send_aprs(vehicle_data):
@@ -569,22 +545,12 @@ def send_aprs(vehicle_data):
     if comment_cfg:
         comment_parts.append(comment_cfg)
     if temp is not None:
-        comment_parts.append(f"T:{temp}C")
-    if heading is not None:
-        comment_parts.append(f"H:{heading}")
-    if speed is not None:
-        comment_parts.append(f"S:{speed}km/h")
+        temp_f = int(round(temp * 9 / 5 + 32))
+        comment_parts.append(f"/t{temp_f:03d}")
     comment = " ".join(comment_parts)
     try:
         aprs = aprslib.IS(callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
         aprs.connect()
-        if vid not in _aprs_configured:
-            # APRS telemetry expects five comma-separated parameter names and
-            # units.  We only send the outside temperature, so fill the
-            # remaining entries with empty values to satisfy the protocol.
-            aprs.sendall(f"{callsign}>APRS::{callsign}:PARM.Temp, , , , , , , , , , , , ")
-            aprs.sendall(f"{callsign}>APRS::{callsign}:UNIT.C, , , , , , , , , , , , ")
-            _aprs_configured.add(vid)
         from aprslib.util import latitude_to_ddm, longitude_to_ddm
 
         lat_ddm = latitude_to_ddm(lat)
@@ -596,19 +562,7 @@ def send_aprs(vehicle_data):
             body += f" {comment}"
         packet = f"{callsign}>APRS:{body}"
         aprs.sendall(packet)
-        if temp is not None:
-            if vid not in _aprs_seq:
-                _aprs_seq[vid] = _load_aprs_seq(vid)
-            seq = (_aprs_seq.get(vid, -1) + 1) % 1000
-            _aprs_seq[vid] = seq
-            _save_aprs_seq(vid, seq)
-            tval = int(round(temp))
-            if tval < 0:
-                tval = 0
-            elif tval > 255:
-                tval = 255
-            telem = f"T#{seq:03d},{tval:03d},000,000,000,000,00000000"
-            aprs.sendall(f"{callsign}>APRS:{telem}")
+        
         aprs.close()
         _last_aprs_info[vid] = {
             "lat": lat,
