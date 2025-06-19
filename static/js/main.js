@@ -25,8 +25,16 @@ $(window).on('resize', function() {
 });
 // Track when the user last changed the zoom level
 var lastUserZoom = 0;
+var $zoomLevel = $('#zoom-level');
+function updateZoomDisplay() {
+    if ($zoomLevel.length) {
+        $zoomLevel.text('Zoom: ' + map.getZoom());
+    }
+}
+updateZoomDisplay();
 map.on('zoomend', function() {
     lastUserZoom = Date.now();
+    updateZoomDisplay();
 });
 var polyline = null;
 var lastDataTimestamp = null;
