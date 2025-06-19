@@ -202,16 +202,17 @@ function handleData(data) {
     var lat = drive.latitude;
     var lng = drive.longitude;
     if (lat && lng) {
-        marker.setLatLng([lat, lng]);
+        if (typeof marker.slideTo === 'function') {
+            marker.slideTo([lat, lng], {duration: 1000});
+        } else {
+            marker.setLatLng([lat, lng]);
+        }
         var speedVal = parseFloat(drive.speed);
         var units = data.gui_settings && data.gui_settings.gui_distance_units;
         var mph = !units || units.indexOf('km') === -1;
         var speedKmh = isNaN(speedVal) ? 0 : (mph ? speedVal * MILES_TO_KM : speedVal);
         var zoom = computeZoomForSpeed(speedKmh);
-        if (map.getZoom() !== zoom) {
-            map.setZoom(zoom);
-        }
-        map.panTo([lat, lng]);
+        map.flyTo([lat, lng], zoom);
         if (typeof drive.heading === 'number') {
             marker.setRotationAngle(drive.heading);
         }
