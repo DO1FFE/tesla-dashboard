@@ -502,6 +502,30 @@ def _save_last_energy(vehicle_id, value):
         pass
 
 
+def _aprs_seq_file(vehicle_id):
+    """Return filename for the APRS telemetry sequence."""
+    name = vehicle_id if vehicle_id is not None else "default"
+    return os.path.join(DATA_DIR, f"aprs_seq_{name}.txt")
+
+
+def _load_aprs_seq(vehicle_id):
+    """Load the last used APRS telemetry sequence number from disk."""
+    try:
+        with open(_aprs_seq_file(vehicle_id), "r", encoding="utf-8") as f:
+            return int(f.read().strip())
+    except Exception:
+        return -1
+
+
+def _save_aprs_seq(vehicle_id, seq):
+    """Persist the last used APRS telemetry sequence number."""
+    try:
+        with open(_aprs_seq_file(vehicle_id), "w", encoding="utf-8") as f:
+            f.write(str(seq))
+    except Exception:
+        pass
+
+
 def send_aprs(vehicle_data):
     """Transmit a position packet via APRS-IS using aprslib."""
     if aprslib is None:
@@ -555,8 +579,8 @@ def send_aprs(vehicle_data):
         aprs = aprslib.IS(callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
         aprs.connect()
         if vid not in _aprs_configured:
-            aprs.sendall(f"{callsign}>APRS:PARM.Temp,,,,")
-            aprs.sendall(f"{callsign}>APRS:UNIT.C,,,,")
+            aprs.sendall(f"{callsign}>APRS:PARM.Temp")
+            aprs.sendall(f"{callsign}>APRS:UNIT.C")
             _aprs_configured.add(vid)
         from aprslib.util import latitude_to_ddm, longitude_to_ddm
 
@@ -570,8 +594,11 @@ def send_aprs(vehicle_data):
         packet = f"{callsign}>APRS:{body}"
         aprs.sendall(packet)
         if temp is not None:
+            if vid not in _aprs_seq:
+                _aprs_seq[vid] = _load_aprs_seq(vid)
             seq = (_aprs_seq.get(vid, -1) + 1) % 1000
             _aprs_seq[vid] = seq
+            _save_aprs_seq(vid, seq)
             tval = int(round(temp))
             if tval < 0:
                 tval = 0
