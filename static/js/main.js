@@ -19,6 +19,10 @@ var map = L.map('map').setView(DEFAULT_POS, DEFAULT_ZOOM);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
 }).addTo(map);
+// Adjust map when the viewport size changes (e.g., on mobile rotation)
+$(window).on('resize', function() {
+    map.invalidateSize();
+});
 // Track when the user last changed the zoom level
 var lastUserZoom = 0;
 map.on('zoomend', function() {
@@ -46,6 +50,8 @@ function showConfigured() {
         $('#' + id).toggle(!!CONFIG[id]);
     });
     $('#dashboard-content').show();
+    // Recalculate map dimensions when the content becomes visible.
+    map.invalidateSize();
     $('#sleep-msg').hide();
     ASLEEP = false;
 }
