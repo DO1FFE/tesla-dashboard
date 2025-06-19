@@ -1049,9 +1049,7 @@ function startStreamIfOnline() {
         var st = resp.state;
         updateVehicleState(st);
         updateOfflineInfo(st);
-        if (st === 'online') {
-            startStream();
-        }
+        startStream();
         $.getJSON('/api/data/' + currentVehicle, function(data) {
             if (data && !data.error) {
                 handleData(data);
