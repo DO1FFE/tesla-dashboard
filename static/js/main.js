@@ -176,6 +176,19 @@ function handleData(data) {
     updateCabinProtection(climate.cabin_overheat_protection);
     updateFanStatus(climate.fan_status);
     updateDesiredTemp(climate.driver_temp_setting);
+    updateHeaterIndicator(
+        climate.is_front_defroster_on,
+        climate.is_rear_defroster_on,
+        climate.steering_wheel_heater,
+        climate.wiper_blade_heater,
+        climate.side_mirror_heaters,
+        charge.battery_heater_on,
+        climate.seat_heater_left,
+        climate.seat_heater_right,
+        climate.seat_heater_rear_left,
+        climate.seat_heater_rear_center,
+        climate.seat_heater_rear_right
+    );
     updateTPMS(vehicle.tpms_pressure_fl,
                vehicle.tpms_pressure_fr,
                vehicle.tpms_pressure_rl,
@@ -367,6 +380,51 @@ function updateDesiredTemp(temp) {
     }
     $('#desired-temp').text('Wunsch: ' + temp.toFixed(1) + ' \u00B0C')
         .attr('title', 'Wunschtemperatur');
+}
+
+function updateHeaterIndicator(front, rear, steering, wiper,
+                               mirror, battery,
+                               seatL, seatR, seatRL, seatRC, seatRR) {
+    function set(id, val, name) {
+        if (val == null) {
+            $('#' + id).text('\uD83D\uDEAB').attr('title', name + ' unbekannt');
+            return;
+        }
+        var active = false;
+        if (typeof val === 'string') {
+            var norm = val.toLowerCase();
+            active = norm === 'true' || norm === '1';
+        } else {
+            active = !!val;
+        }
+        $('#' + id).text(active ? '\uD83D\uDD25' : '\uD83D\uDEAB')
+            .attr('title', name + (active ? ' an' : ' aus'));
+    }
+    function setLevel(id, val, name) {
+        if (val == null || isNaN(val)) {
+            $('#' + id).text('\uD83D\uDEAB').attr('title', name + ' unbekannt');
+            return;
+        }
+        var level = Number(val);
+        if (level <= 0) {
+            $('#' + id).text('\uD83D\uDEAB').attr('title', name + ' aus');
+        } else {
+            $('#' + id).text('\uD83D\uDD25' + level)
+                .attr('title', name + ' Stufe ' + level);
+        }
+    }
+
+    set('front-defrost', front, 'Frontscheibenheizung');
+    set('rear-defrost', rear, 'Heckscheibenheizung');
+    set('steering-heater', steering, 'Lenkradheizung');
+    set('wiper-heater', wiper, 'Scheibenwischerheizung');
+    set('mirror-heater', mirror, 'Seitenspiegelheizung');
+    set('battery-heater', battery, 'Batterieheizung');
+    setLevel('seat-left', seatL, 'Sitzheizung Fahrer');
+    setLevel('seat-right', seatR, 'Sitzheizung Beifahrer');
+    setLevel('seat-rear-left', seatRL, 'Sitzheizung hinten links');
+    setLevel('seat-rear-center', seatRC, 'Sitzheizung hinten Mitte');
+    setLevel('seat-rear-right', seatRR, 'Sitzheizung hinten rechts');
 }
 
 function updateTPMS(fl, fr, rl, rr) {
