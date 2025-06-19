@@ -571,6 +571,7 @@ select {
     float: none;
     display: block;
     margin-left: 0;
+    text-align: right;
   }
   #status-bar {
     flex-wrap: wrap;
