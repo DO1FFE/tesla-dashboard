@@ -208,10 +208,10 @@ function handleData(data) {
         var mph = !units || units.indexOf('km') === -1;
         var speedKmh = isNaN(speedVal) ? 0 : (mph ? speedVal * MILES_TO_KM : speedVal);
         var zoom = computeZoomForSpeed(speedKmh);
-        if (Date.now() - lastUserZoom < 60000) {
-            zoom = map.getZoom();
+        if (map.getZoom() !== zoom) {
+            map.setZoom(zoom);
         }
-        map.setView([lat, lng], zoom);
+        map.panTo([lat, lng]);
         if (typeof drive.heading === 'number') {
             marker.setRotationAngle(drive.heading);
         }
