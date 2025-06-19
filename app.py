@@ -328,6 +328,7 @@ state_lock = threading.Lock()
 last_vehicle_state = _load_last_state()
 occupant_present = False
 _default_vehicle_id = None
+_last_aprs_info = {}
 
 
 def track_park_time(vehicle_data):
@@ -509,8 +510,12 @@ def send_aprs(vehicle_data):
     comment_cfg = cfg.get("aprs_comment", "")
     if not callsign or not passcode:
         return
-    drive = vehicle_data.get("drive_state", {}) if isinstance(vehicle_data, dict) else {}
-    climate = vehicle_data.get("climate_state", {}) if isinstance(vehicle_data, dict) else {}
+    drive = (
+        vehicle_data.get("drive_state", {}) if isinstance(vehicle_data, dict) else {}
+    )
+    climate = (
+        vehicle_data.get("climate_state", {}) if isinstance(vehicle_data, dict) else {}
+    )
     lat = drive.get("latitude")
     lon = drive.get("longitude")
     if lat is None or lon is None:
@@ -518,6 +523,22 @@ def send_aprs(vehicle_data):
     heading = drive.get("heading")
     speed = drive.get("speed")
     temp = climate.get("outside_temp")
+
+    vid = str(vehicle_data.get("id_s") or vehicle_data.get("vehicle_id") or "default")
+    now = time.time()
+    last = _last_aprs_info.get(vid)
+    changed = last is None
+    if last is not None:
+        if abs(lat - last.get("lat", 0)) > 1e-5 or abs(lon - last.get("lon", 0)) > 1e-5:
+            changed = True
+        if heading != last.get("heading"):
+            changed = True
+        if temp != last.get("temp"):
+            changed = True
+        if now - last.get("time", 0) >= 600:
+            changed = True
+    if not changed:
+        return
     comment_parts = []
     if comment_cfg:
         comment_parts.append(comment_cfg)
@@ -541,6 +562,13 @@ def send_aprs(vehicle_data):
         packet.comment = comment
         aprs.sendall(packet)
         aprs.close()
+        _last_aprs_info[vid] = {
+            "lat": lat,
+            "lon": lon,
+            "heading": heading,
+            "temp": temp,
+            "time": now,
+        }
     except Exception as exc:
         _log_api_error(exc)
 
