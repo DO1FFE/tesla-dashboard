@@ -69,10 +69,26 @@ select {
 #map {
   position: relative;
   height: 400px;
-  margin-top: 10px;
+  margin-top: 0;
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+#map-container {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  margin-top: 10px;
+}
+
+#map-container #map {
+  flex: 3;
+}
+
+#map-container #heater-indicator {
+  flex: 1;
 }
 
 #location-address {
@@ -388,11 +404,11 @@ select {
 
 #heater-indicator {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
   gap: 2px 4px;
-  margin-top: 4px;
+  margin-top: 0;
 }
 #heater-indicator div {
   font-size: 20px;
