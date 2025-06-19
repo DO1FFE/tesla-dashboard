@@ -11,6 +11,7 @@ from functools import wraps
 from dotenv import load_dotenv
 from version import get_version
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 try:
     import teslapy
@@ -36,6 +37,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 APRS_HOST = "euro.aprs2.net"
 APRS_PORT = 14580
+LOCAL_TZ = ZoneInfo("Europe/Berlin")
 api_logger = logging.getLogger("api_logger")
 if not api_logger.handlers:
     handler = RotatingFileHandler(
@@ -63,7 +65,7 @@ if not state_logger.handlers:
         os.path.join(DATA_DIR, "state.log"), maxBytes=100_000, backupCount=1
     )
     formatter = logging.Formatter("%(asctime)s %(message)s")
-    formatter.converter = time.localtime  # store timestamps in local time
+    formatter.converter = lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
     handler.setFormatter(formatter)
     state_logger.addHandler(handler)
     state_logger.setLevel(logging.INFO)
@@ -665,10 +667,10 @@ def _load_state_entries(filename=os.path.join(DATA_DIR, "state.log")):
                     continue
                 ts_str = line[:idx].strip()
                 try:
-                    ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S,%f").timestamp()
+                    ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S,%f").replace(tzinfo=LOCAL_TZ).timestamp()
                 except Exception:
                     try:
-                        ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").timestamp()
+                        ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=LOCAL_TZ).timestamp()
                     except Exception:
                         continue
                 try:
@@ -692,8 +694,8 @@ def _compute_state_stats(entries):
     for (start, state), (end, _next_state) in zip(entries, entries[1:]):
         t = start
         while t < end:
-            day = datetime.fromtimestamp(t).date()
-            next_day = datetime.combine(day + timedelta(days=1), datetime.min.time()).timestamp()
+            day = datetime.fromtimestamp(t, LOCAL_TZ).date()
+            next_day = datetime.combine(day + timedelta(days=1), datetime.min.time(), LOCAL_TZ).timestamp()
             segment_end = min(end, next_day)
             dur = segment_end - t
             d = stats.setdefault(day.isoformat(), {"online": 0.0, "offline": 0.0, "asleep": 0.0})
