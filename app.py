@@ -528,8 +528,6 @@ def send_aprs(vehicle_data):
     lon = drive.get("longitude")
     if lat is None or lon is None:
         return
-    heading = drive.get("heading")
-    speed = drive.get("speed")
     temp = climate.get("outside_temp")
 
     vid = str(vehicle_data.get("id_s") or vehicle_data.get("vehicle_id") or "default")
@@ -538,8 +536,6 @@ def send_aprs(vehicle_data):
     changed = last is None
     if last is not None:
         if abs(lat - last.get("lat", 0)) > 1e-5 or abs(lon - last.get("lon", 0)) > 1e-5:
-            changed = True
-        if heading != last.get("heading"):
             changed = True
         if temp != last.get("temp"):
             changed = True
@@ -561,9 +557,7 @@ def send_aprs(vehicle_data):
 
         lat_ddm = latitude_to_ddm(lat)
         lon_ddm = longitude_to_ddm(lon)
-        course = int(round(heading or 0)) % 360
-        spd_knots = int(round((speed or 0) / 1.852))
-        body = f"!{lat_ddm}/{lon_ddm}_{course:03d}/{spd_knots:03d}"
+        body = f"!{lat_ddm}/{lon_ddm}_"
         if comment:
             body += f"{comment}"
         packet = f"{callsign}>APRS:{body}"
@@ -573,7 +567,6 @@ def send_aprs(vehicle_data):
         _last_aprs_info[vid] = {
             "lat": lat,
             "lon": lon,
-            "heading": heading,
             "temp": temp,
             "time": now,
         }
