@@ -396,6 +396,10 @@ select {
 }
 #heater-indicator div {
   font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 #climate-status,
@@ -546,6 +550,9 @@ select {
   #status-bar {
     flex-wrap: wrap;
     gap: 10px;
+  }
+  #heater-indicator {
+    flex-direction: column;
   }
   #map {
     height: 50vh !important;
