@@ -63,6 +63,7 @@ if not state_logger.handlers:
         os.path.join(DATA_DIR, "state.log"), maxBytes=100_000, backupCount=1
     )
     formatter = logging.Formatter("%(asctime)s %(message)s")
+    formatter.converter = time.localtime  # store timestamps in local time
     handler.setFormatter(formatter)
     state_logger.addHandler(handler)
     state_logger.setLevel(logging.INFO)
