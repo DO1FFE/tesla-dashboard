@@ -794,6 +794,12 @@ def _cached_vehicle_list(tesla, ttl=300):
 
 def get_vehicle_state(vehicle_id=None):
     """Return the current vehicle state without waking the car."""
+    global _default_vehicle_id
+    vid = str(vehicle_id or _default_vehicle_id or "default")
+    state = last_vehicle_state.get(vid)
+    if state not in (None, "online") and not occupant_present:
+        return {"state": state}
+
     tesla = get_tesla()
     if tesla is None:
         return {"error": "Missing Tesla credentials or teslapy not installed"}
@@ -996,9 +1002,9 @@ def _fetch_data_once(vehicle_id="default"):
     cached = _load_cached(cache_id)
 
     state = last_vehicle_state.get(vid or cache_id)
-    # Always query the vehicle state so transitions from "offline" are detected
-    state_info = get_vehicle_state(vid)
-    state = state_info.get("state") if isinstance(state_info, dict) else state
+    if state in (None, "online") or occupant_present:
+        state_info = get_vehicle_state(vid)
+        state = state_info.get("state") if isinstance(state_info, dict) else state
 
     data = None
     live = False
