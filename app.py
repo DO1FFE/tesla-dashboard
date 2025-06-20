@@ -35,8 +35,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
-_HOST = "euro.2.net"
-_PORT = 14580
+APRS_HOST = "euro.aprs2.net"
+APRS_PORT = 14580
 LOCAL_TZ = ZoneInfo("Europe/Berlin")
 api_logger = logging.getLogger("api_logger")
 if not api_logger.handlers:
@@ -333,7 +333,7 @@ state_lock = threading.Lock()
 last_vehicle_state = _load_last_state()
 occupant_present = False
 _default_vehicle_id = None
-_last__info = {}
+_last_aprs_info = {}
 
 def track_park_time(vehicle_data):
     """Track when the vehicle was first seen parked."""
@@ -507,7 +507,7 @@ def _save_last_energy(vehicle_id, value):
 
 
 
-def send_(vehicle_data):
+def send_aprs(vehicle_data):
     """Transmit a position packet via APRS-IS using aprslib."""
     if aprslib is None:
         return
@@ -553,8 +553,8 @@ def send_(vehicle_data):
     comment_parts = []
     if temp is not None:
         temp_f = int(round(temp * 9 / 5 + 32))
-        comment_parts.append(f" /t{temp_f:03d}")
-        comment_parts.append(f" Temp: {temp}C - ")
+        comment_parts.append(f"/t{temp_f:03d}")
+        comment_parts.append(f"Temp: {temp}C - ")
     if comment_cfg:
         comment_parts.append(comment_cfg)
     comment = "".join(comment_parts)
