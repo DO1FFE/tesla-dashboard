@@ -558,7 +558,7 @@ def send_aprs(vehicle_data):
         comment_parts.append(f"Temp out: {temp_out}C")
     if temp_in is not None:
         comment_parts.append(f"Temp in: {temp_in}C")
-    comment = " ".join(comment_parts)
+    comment = " - ".join(comment_parts)
     try:
         aprs = aprslib.IS(callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
         aprs.connect()
@@ -576,7 +576,8 @@ def send_aprs(vehicle_data):
         _last_aprs_info[vid] = {
             "lat": lat,
             "lon": lon,
-            "temp": temp,
+            "temp_out": temp_out,
+            "temp_in": temp_in,
             "time": now,
         }
     except Exception as exc:
