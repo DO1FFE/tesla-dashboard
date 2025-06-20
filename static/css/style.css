@@ -16,12 +16,12 @@ body {
   padding: 0;
 }
 
-h1 {
+h2 {
   background: var(--surface-color);
   margin: 0;
   padding: 1rem;
   font-weight: 300;
-  text-align: center;
+  text-align: left;
   border-bottom: 1px solid #333;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
