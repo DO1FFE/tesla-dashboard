@@ -564,7 +564,7 @@ def send_aprs(vehicle_data):
 
         lat_ddm = latitude_to_ddm(lat)
         lon_ddm = longitude_to_ddm(lon)
-        body = f"!{lat_ddm}/{lon_ddm}_"
+        body = f"!{lat_ddm}/{lon_ddm}>"
         if comment:
             body += f"{comment}"
         packet = f"{callsign}>APRS:{body}"
