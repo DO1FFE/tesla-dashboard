@@ -37,6 +37,7 @@ map.on('zoomend', function() {
     updateZoomDisplay();
 });
 var polyline = null;
+var pendingPath = null;
 var lastDataTimestamp = null;
 var lastAddressLat = null;
 var lastAddressLng = null;
@@ -102,6 +103,16 @@ var marker = L.marker([0, 0], {
     rotationAngle: 0,
     rotationOrigin: 'center center'
 }).addTo(map);
+marker.on('moveend', function() {
+    if (Array.isArray(pendingPath)) {
+        if (polyline) {
+            polyline.setLatLngs(pendingPath);
+        } else {
+            polyline = L.polyline(pendingPath, { color: 'blue' }).addTo(map);
+        }
+        pendingPath = null;
+    }
+});
 var eventSource = null;
 
 function updateHeader(data) {
@@ -201,9 +212,11 @@ function handleData(data) {
     updateMediaPlayer(vehicle.media_info);
     var lat = drive.latitude;
     var lng = drive.longitude;
+    var slide = false;
     if (lat && lng) {
         if (typeof marker.slideTo === 'function') {
             marker.slideTo([lat, lng], {duration: 1000});
+            slide = true;
         } else {
             marker.setLatLng([lat, lng]);
         }
@@ -250,10 +263,12 @@ function handleData(data) {
         }
     }
     if (data.path && data.path.length > 1) {
-        if (polyline) {
-            polyline.setLatLngs(data.path);
-        } else {
+        if (!polyline) {
             polyline = L.polyline(data.path, { color: 'blue' }).addTo(map);
+        } else if (slide) {
+            pendingPath = data.path;
+        } else {
+            polyline.setLatLngs(data.path);
         }
     } else if (polyline) {
         map.removeLayer(polyline);
