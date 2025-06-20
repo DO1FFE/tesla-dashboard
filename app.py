@@ -533,7 +533,8 @@ def send_aprs(vehicle_data):
     lon = drive.get("longitude")
     if lat is None or lon is None:
         return
-    temp = climate.get("outside_temp")
+    temp_in = climate.get("inside_temp")
+    temp_out = climate.get("outside_temp")
 
     vid = str(vehicle_data.get("id_s") or vehicle_data.get("vehicle_id") or "default")
     now = time.time()
@@ -551,13 +552,13 @@ def send_aprs(vehicle_data):
     if not changed:
         return
     comment_parts = []
-    if temp is not None:
-        temp_f = int(round(temp * 9 / 5 + 32))
-        comment_parts.append(f"t{temp_f:03d} ")
-        comment_parts.append(f"Temp: {temp}C ")
     if comment_cfg:
         comment_parts.append(comment_cfg)
-    comment = "".join(comment_parts)
+    if temp_out is not None:
+        comment_parts.append(f"Temp out: {temp_out}C")
+    if temp_in is not None:
+        comment_parts.append(f"Temp in: {temp_in}C")
+    comment = " ".join(comment_parts)
     try:
         aprs = aprslib.IS(callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
         aprs.connect()
