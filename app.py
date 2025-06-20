@@ -553,7 +553,8 @@ def send_aprs(vehicle_data):
     comment_parts = []
     if temp is not None:
         temp_f = int(round(temp * 9 / 5 + 32))
-        comment_parts.append(f"/t{temp_f:03d} ")
+        comment_parts.append(f"t{temp_f:03d} ")
+        comment_parts.append(f"Temp: {temp}C ")
     if comment_cfg:
         comment_parts.append(comment_cfg)
     comment = "".join(comment_parts)
