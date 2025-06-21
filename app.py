@@ -517,12 +517,16 @@ def send_aprs(vehicle_data):
         and not occupant_present
     ):
         return
+
     cfg = load_config()
     callsign = cfg.get("aprs_callsign")
     passcode = cfg.get("aprs_passcode")
+    wx_callsign = cfg.get("aprs_wx_callsign")
+    wx_enabled = cfg.get("aprs_wx_enabled", True)
     comment_cfg = cfg.get("aprs_comment", "")
     if not callsign or not passcode:
         return
+
     drive = (
         vehicle_data.get("drive_state", {}) if isinstance(vehicle_data, dict) else {}
     )
@@ -533,9 +537,9 @@ def send_aprs(vehicle_data):
     lon = drive.get("longitude")
     if lat is None or lon is None:
         return
+
     temp_in = climate.get("inside_temp")
     temp_out = climate.get("outside_temp")
-
     vid = str(vehicle_data.get("id_s") or vehicle_data.get("vehicle_id") or "default")
     now = time.time()
     last = _last_aprs_info.get(vid)
@@ -543,7 +547,7 @@ def send_aprs(vehicle_data):
     if last is not None:
         if abs(lat - last.get("lat", 0)) > 1e-5 or abs(lon - last.get("lon", 0)) > 1e-5:
             changed = True
-        if temp != last.get("temp"):
+        if temp_out != last.get("temp_out") or temp_in != last.get("temp_in"):
             changed = True
         if now - last.get("time", 0) >= 600:
             changed = True
@@ -551,28 +555,40 @@ def send_aprs(vehicle_data):
             return
     if not changed:
         return
+
     comment_parts = []
     if comment_cfg:
         comment_parts.append(comment_cfg)
     if temp_out is not None:
-        comment_parts.append(f"Temp out: {temp_out}C")
+        comment_parts.append(f"Temp out: {temp_out:.1f}C")
     if temp_in is not None:
-        comment_parts.append(f"Temp in: {temp_in}C")
+        comment_parts.append(f"Temp in: {temp_in:.1f}C")
     comment = " - ".join(comment_parts)
+
     try:
         aprs = aprslib.IS(callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
         aprs.connect()
-        from aprslib.util import latitude_to_ddm, longitude_to_ddm
 
+        from aprslib.util import latitude_to_ddm, longitude_to_ddm
         lat_ddm = latitude_to_ddm(lat)
         lon_ddm = longitude_to_ddm(lon)
-        body = f"!{lat_ddm}/{lon_ddm}>"
-        if comment:
-            body += f"{comment}"
+
+        # Standard-Positionspaket mit Kommentar
+        body = f"!{lat_ddm}/{lon_ddm}>{comment}"
         packet = f"{callsign}>APRS:{body}"
         aprs.sendall(packet)
-        
         aprs.close()
+
+        # Zusätzliches WX-Paket senden (nur Temperatur, extra Rufzeichen)
+        if wx_enabled and wx_callsign and temp_out is not None:
+            aprs_wx = aprslib.IS(wx_callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
+            aprs_wx.connect()
+            temp_f = int(round(temp_out * 9 / 5 + 32))
+            wx_body = f"!{lat_ddm}/{lon_ddm}_g000t{temp_f:03d}"
+            wx_packet = f"{wx_callsign}>APRS:{wx_body}"
+            aprs_wx.sendall(wx_packet)
+            aprs_wx.close()
+
         _last_aprs_info[vid] = {
             "lat": lat,
             "lon": lon,
@@ -580,6 +596,7 @@ def send_aprs(vehicle_data):
             "temp_in": temp_in,
             "time": now,
         }
+
     except Exception as exc:
         _log_api_error(exc)
 
@@ -1249,6 +1266,8 @@ def config_page():
             cfg[item["id"]] = item["id"] in request.form
         callsign = request.form.get("aprs_callsign", "").strip()
         passcode = request.form.get("aprs_passcode", "").strip()
+        wx_callsign = request.form.get("aprs_wx_callsign", "").strip()
+        wx_enabled = "aprs_wx_enabled" in request.form
         aprs_comment = request.form.get("aprs_comment", "").strip()
         if callsign:
             cfg["aprs_callsign"] = callsign
@@ -1258,6 +1277,11 @@ def config_page():
             cfg["aprs_passcode"] = passcode
         elif "aprs_passcode" in cfg:
             cfg.pop("aprs_passcode")
+        if wx_callsign:
+            cfg["aprs_wx_callsign"] = wx_callsign
+        elif "aprs_wx_callsign" in cfg:
+            cfg.pop("aprs_wx_callsign")
+        cfg["aprs_wx_enabled"] = wx_enabled
         if aprs_comment:
             cfg["aprs_comment"] = aprs_comment
         elif "aprs_comment" in cfg:
