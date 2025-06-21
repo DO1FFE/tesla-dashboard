@@ -236,8 +236,8 @@ select {
 #announcement-box {
   align-self: flex-end;
   display: inline-block;
-  max-width: 25ch;
-  margin: 10px 0 0;
+  max-width: 35ch;
+  margin: 10px 0 10px;
   text-align: right;
   font-size: 0.9em;
   color: yellow;
