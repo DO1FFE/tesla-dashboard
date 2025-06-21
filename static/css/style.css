@@ -233,12 +233,15 @@ select {
 }
 
 #announcement-box {
-  width: auto;
+  align-self: flex-end;
+  max-width: 100%;
   margin: 10px 0 0;
-  text-align: left;
+  text-align: right;
   font-size: 0.9em;
   color: yellow;
   font-weight: bold;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 #v2l-infos,

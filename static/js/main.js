@@ -905,10 +905,24 @@ function updateClientCount() {
     });
 }
 
+function escapeHtml(text) {
+    return $('<div>').text(text).html();
+}
+
+function formatAnnouncement(text) {
+    var html = text;
+    if (!/<[a-z][\s\S]*>/i.test(text)) {
+        html = escapeHtml(text);
+    }
+    return html.replace(/(https?:\/\/[^\s]+)/g, function(url) {
+        return '<a href="' + url + '" target="_blank">' + url + '</a>';
+    });
+}
+
 function updateAnnouncement() {
     var $box = $('#announcement-box');
     if (announcementText) {
-        $box.text(announcementText);
+        $box.html(formatAnnouncement(announcementText));
     } else {
         $box.empty();
     }
