@@ -73,6 +73,7 @@ The same information is also stored as hierarchical JSON in `data/api-liste.json
 * `/api/version` – return the current dashboard version as JSON
 * `/api/clients` – number of connected clients as JSON
 * `/api/occupant` – get or set occupant presence flag
+* `/api/announcement` – return the current announcement text as JSON
     * Use `POST` with a JSON body like `{ "present": true }` or `{ "present": false }`
       to keep the vehicle awake only when someone is inside.
 * `/stream/<vehicle_id>` – Server-Sent Events endpoint used by the frontend

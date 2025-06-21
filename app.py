@@ -1191,6 +1191,13 @@ def api_config():
     return jsonify(load_config())
 
 
+@app.route("/api/announcement")
+def api_announcement():
+    """Return the current announcement text."""
+    cfg = load_config()
+    return jsonify({"announcement": cfg.get("announcement", "")})
+
+
 @app.route("/api/occupant", methods=["GET", "POST"])
 def api_occupant():
     """Return or update occupant presence status."""
