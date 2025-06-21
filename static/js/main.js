@@ -215,7 +215,7 @@ function handleData(data) {
     var slide = false;
     if (lat && lng) {
         if (typeof marker.slideTo === 'function') {
-            marker.slideTo([lat, lng], {duration: 1000});
+            marker.slideTo([lat, lng], {duration: 1000, keepAtCenter: true});
             slide = true;
         } else {
             marker.setLatLng([lat, lng]);
