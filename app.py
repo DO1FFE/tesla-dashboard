@@ -334,6 +334,7 @@ last_vehicle_state = _load_last_state()
 occupant_present = False
 _default_vehicle_id = None
 _last_aprs_info = {}
+_last_wx_info = {}
 
 def track_park_time(vehicle_data):
     """Track when the vehicle was first seen parked."""
@@ -579,15 +580,29 @@ def send_aprs(vehicle_data):
         aprs.sendall(packet)
         aprs.close()
 
-        # Zusätzliches WX-Paket senden (nur Temperatur, extra Rufzeichen)
+        # Zusätzliches WX-Paket senden (nur Außentemperatur, extra Rufzeichen)
         if wx_enabled and wx_callsign and temp_out is not None:
-            aprs_wx = aprslib.IS(wx_callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
-            aprs_wx.connect()
-            temp_f = int(round(temp_out * 9 / 5 + 32))
-            wx_body = f"!{lat_ddm}/{lon_ddm}_g000t{temp_f:03d}"
-            wx_packet = f"{wx_callsign}>APRS:{wx_body}{comment_cfg}"
-            aprs_wx.sendall(wx_packet)
-            aprs_wx.close()
+            last_wx = _last_wx_info.get(vid)
+            wx_changed = last_wx is None
+            if last_wx is not None:
+                if temp_out != last_wx.get("temp_out"):
+                    wx_changed = True
+                if now - last_wx.get("time", 0) >= 600:
+                    wx_changed = True
+                if now - last_wx.get("time", 0) < 30:
+                    wx_changed = False
+            if wx_changed:
+                aprs_wx = aprslib.IS(wx_callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
+                aprs_wx.connect()
+                temp_f = int(round(temp_out * 9 / 5 + 32))
+                wx_body = f"!{lat_ddm}/{lon_ddm}_g000t{temp_f:03d}"
+                wx_packet = f"{wx_callsign}>APRS:{wx_body}{comment_cfg}"
+                aprs_wx.sendall(wx_packet)
+                aprs_wx.close()
+                _last_wx_info[vid] = {
+                    "temp_out": temp_out,
+                    "time": now,
+                }
 
         _last_aprs_info[vid] = {
             "lat": lat,

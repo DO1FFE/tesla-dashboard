@@ -20,7 +20,7 @@ This is a simple Flask application that displays real-time data from a Tesla veh
     ```
 
 4. Open `http://localhost:8013` in your browser (the server listens on `0.0.0.0:8013`).
-5. On the configuration page (`/config`) you can set your APRS call sign, passcode and an optional comment to transmit position packets via an EU APRS-IS server. You may also enable an additional WX packet using a separate call sign. Temperatures are included in Celsius within the comment. Positions are sent at most every 30 seconds while driving and at least every 10 minutes even without changes.
+5. On the configuration page (`/config`) you can set your APRS call sign, passcode and an optional comment to transmit position packets via an EU APRS-IS server. You may also enable an additional WX packet using a separate call sign. Temperatures are included in Celsius within the comment. Positions are sent at most every 30 seconds while driving and at least every 10 minutes even without changes. WX packets obey the same limits and are only transmitted when the outside temperature changes or after ten minutes without an update.
 
 API responses are logged to `data/api.log`. The log file uses rotation and will grow to at most 1&nbsp;MB.
 Vehicle state changes are written to `data/state.log`.
