@@ -242,6 +242,7 @@ select {
   font-size: 0.9em;
   color: yellow;
   font-weight: bold;
+  animation: announcement-colors 5s linear infinite;
   overflow-wrap: break-word;
   word-break: break-word;
   white-space: normal;
@@ -768,6 +769,14 @@ select {
 @keyframes cable-flow {
   from { stroke-dashoffset: 0; }
   to { stroke-dashoffset: 16; }
+}
+
+@keyframes announcement-colors {
+  0% { color: #ff6666; }
+  25% { color: #ffff66; }
+  50% { color: #66ff66; }
+  75% { color: #66ffff; }
+  100% { color: #ff66ff; }
 }
 
 .app-version {
