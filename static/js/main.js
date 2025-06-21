@@ -619,8 +619,9 @@ function updateBatteryIndicator(level, rangeMiles, chargingState, heaterOn) {
     var range = rangeMiles != null ? Math.round(rangeMiles * MILES_TO_KM) : '?';
     var charging = chargingState === 'Charging';
     var heating = !!heaterOn;
+    var clip = 'clip-path: inset(' + (100 - pct) + '% 0 0 0)';
     var html = '<div class="battery">';
-    html += '<div class="level" style="height:' + pct + '%;"></div>';
+    html += '<div class="level" style="' + clip + '"></div>';
     if (charging) {
         html += '<div class="bolt">\u26A1</div>';
     }
@@ -635,7 +636,8 @@ function updateBatteryIndicator(level, rangeMiles, chargingState, heaterOn) {
 
 function batteryBar(level) {
     var pct = level != null ? level : 0;
-    return '<div class="battery-block"><div class="battery"><div class="level" style="height:' + pct + '%;"></div></div><div class="battery-value">' + pct + '%</div></div>';
+    var clip = 'clip-path: inset(' + (100 - pct) + '% 0 0 0)';
+    return '<div class="battery-block"><div class="battery"><div class="level" style="' + clip + '"></div></div><div class="battery-value">' + pct + '%</div></div>';
 }
 
 var lastChargeInfo = null;
