@@ -67,8 +67,10 @@ function startAnnouncementCycle() {
         clearInterval(announcementTimer);
         announcementTimer = null;
     }
+    // Always reset the index when the announcement list changes to avoid
+    // referencing an out-of-range entry when the number of lines decreases.
+    announcementIndex = 0;
     if (announcementList.length > 1) {
-        announcementIndex = 0;
         announcementTimer = setInterval(function() {
             announcementIndex = (announcementIndex + 1) % announcementList.length;
             updateAnnouncement();
