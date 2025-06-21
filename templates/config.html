@@ -53,7 +53,7 @@
         <div>
             <label>
                 Hinweistext
-                <input type="text" name="announcement" value="{{ config.get('announcement','') }}">
+                <textarea name="announcement" rows="3">{{ config.get('announcement','') }}</textarea>
             </label>
         </div>
         <button type="submit">Speichern</button>

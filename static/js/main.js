@@ -914,6 +914,7 @@ function formatAnnouncement(text) {
     if (!/<[a-z][\s\S]*>/i.test(text)) {
         html = escapeHtml(text);
     }
+    html = html.replace(/\n/g, '<br>');
     return html.replace(/(https?:\/\/[^\s]+)/g, function(url) {
         return '<a href="' + url + '" target="_blank">' + url + '</a>';
     });
