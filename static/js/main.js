@@ -23,6 +23,17 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 $(window).on('resize', function() {
     map.invalidateSize();
 });
+// Keep marker centered if the map container size changes (e.g., side panels)
+var mapEl = document.getElementById('map');
+if (window.ResizeObserver && mapEl) {
+    var mapResizeObserver = new ResizeObserver(function() {
+        map.invalidateSize();
+        if (typeof marker !== 'undefined' && marker.getLatLng) {
+            map.setView(marker.getLatLng(), map.getZoom(), {animate: false});
+        }
+    });
+    mapResizeObserver.observe(mapEl);
+}
 // Track when the user last changed the zoom level
 var lastUserZoom = 0;
 var $zoomLevel = $('#zoom-level');
@@ -215,7 +226,7 @@ function handleData(data) {
     var slide = false;
     if (lat && lng) {
         if (typeof marker.slideTo === 'function') {
-            marker.slideTo([lat, lng], {duration: 1000, keepAtCenter: true});
+            marker.slideTo([lat, lng], {duration: 1000});
             slide = true;
         } else {
             marker.setLatLng([lat, lng]);
