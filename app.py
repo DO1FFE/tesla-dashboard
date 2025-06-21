@@ -977,11 +977,12 @@ def get_superchargers(vehicle_id=None, ttl=60):
     if vid in _supercharger_cache and now - _supercharger_cache_ts.get(vid, 0) < ttl:
         return _supercharger_cache[vid]
 
-    state = last_vehicle_state.get(vid)
-    if state in (None, "online") or occupant_present:
-        state_info = get_vehicle_state(vid)
-        state = state_info.get("state") if isinstance(state_info, dict) else state
-    if state != "online" and not occupant_present:
+    # Always check the current state via ``get_vehicle_state`` so callers
+    # behave the same as the ``/api/state`` endpoint.  Only when the vehicle
+    # is reported as ``online`` do we request fresh Supercharger data.
+    state_info = get_vehicle_state(vid)
+    state = state_info.get("state") if isinstance(state_info, dict) else None
+    if state != "online":
         return _supercharger_cache.get(vid, [])
 
     try:
