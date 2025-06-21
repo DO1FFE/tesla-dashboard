@@ -262,7 +262,6 @@ CONFIG_ITEMS = [
     {"id": "blue-openings", "desc": "Türen/Fenster blau einfärben", "default": False},
     {"id": "heater-indicator", "desc": "Heizungsstatus"},
     {"id": "charging-info", "desc": "Ladeinformationen"},
-    {"id": "supercharger-list", "desc": "Supercharger-Liste"},
     {"id": "v2l-infos", "desc": "V2L-Hinweis"},
     {"id": "nav-bar", "desc": "Navigationsleiste"},
     {"id": "media-player", "desc": "Medienwiedergabe"},
@@ -325,8 +324,6 @@ threads = {}
 _vehicle_list_cache = []
 _vehicle_list_cache_ts = 0.0
 _vehicle_list_lock = threading.Lock()
-_supercharger_cache = {}
-_supercharger_cache_ts = {}
 api_errors = []
 api_errors_lock = threading.Lock()
 state_lock = threading.Lock()
@@ -956,61 +953,6 @@ def get_vehicle_list():
     return sanitized
 
 
-def get_superchargers(vehicle_id=None, ttl=60):
-    """Return nearby Superchargers for the given vehicle."""
-    tesla = get_tesla()
-    if tesla is None:
-        return []
-
-    vehicles = _cached_vehicle_list(tesla)
-    if not vehicles:
-        return []
-
-    vehicle = None
-    if vehicle_id is not None:
-        vehicle = next((v for v in vehicles if str(v["id_s"]) == str(vehicle_id)), None)
-    if vehicle is None:
-        vehicle = vehicles[0]
-
-    vid = vehicle["id_s"]
-    now = time.time()
-    if vid in _supercharger_cache and now - _supercharger_cache_ts.get(vid, 0) < ttl:
-        return _supercharger_cache[vid]
-
-    # Always check the current state via ``get_vehicle_state`` so callers
-    # behave the same as the ``/api/state`` endpoint.  Only when the vehicle
-    # is reported as ``online`` do we request fresh Supercharger data.
-    state_info = get_vehicle_state(vid)
-    state = state_info.get("state") if isinstance(state_info, dict) else None
-    if state != "online":
-        return _supercharger_cache.get(vid, [])
-
-    try:
-        sites = vehicle.get_nearby_charging_sites()
-        log_api_data("get_nearby_charging_sites", sanitize(sites))
-        chargers = []
-        for s in sites.get("superchargers", []):
-            dist = s.get("distance_miles")
-            if dist is not None:
-                dist = round(dist * 1.60934, 1)
-            loc = s.get("location") or {}
-            chargers.append(
-                {
-                    "name": s.get("name"),
-                    "distance_km": dist,
-                    "available_stalls": s.get("available_stalls"),
-                    "total_stalls": s.get("total_stalls"),
-                    "location": {"lat": loc.get("lat"), "long": loc.get("long")},
-                }
-            )
-        _supercharger_cache[vid] = chargers
-        _supercharger_cache_ts[vid] = now
-        return chargers
-    except Exception as exc:
-        _log_api_error(exc)
-        return _supercharger_cache.get(vid, [])
-
-
 def reverse_geocode(lat, lon, vehicle_id=None):
     """Return address information for given coordinates using OpenStreetMap."""
 
@@ -1087,10 +1029,7 @@ def _fetch_data_once(vehicle_id="default"):
             last_val = _load_last_energy(cache_id)
         if last_val is not None:
             data["last_charge_energy_added"] = last_val
-        try:
-            data["superchargers"] = get_superchargers(vid)
-        except Exception:
-            pass
+
 
     if isinstance(data, dict):
         data["_live"] = live
@@ -1232,13 +1171,6 @@ def api_clients():
     return jsonify({"clients": count})
 
 
-@app.route("/api/superchargers")
-@app.route("/api/superchargers/<vehicle_id>")
-def api_superchargers(vehicle_id=None):
-    """Return nearby Superchargers as JSON."""
-    chargers = get_superchargers(vehicle_id)
-    return jsonify(chargers)
-
 
 @app.route("/api/reverse_geocode")
 def api_reverse_geocode():
@@ -1285,6 +1217,7 @@ def config_page():
         wx_callsign = request.form.get("aprs_wx_callsign", "").strip()
         wx_enabled = "aprs_wx_enabled" in request.form
         aprs_comment = request.form.get("aprs_comment", "").strip()
+        announcement = request.form.get("announcement", "").strip()
         if callsign:
             cfg["aprs_callsign"] = callsign
         elif "aprs_callsign" in cfg:
@@ -1302,6 +1235,10 @@ def config_page():
             cfg["aprs_comment"] = aprs_comment
         elif "aprs_comment" in cfg:
             cfg.pop("aprs_comment")
+        if announcement:
+            cfg["announcement"] = announcement
+        elif "announcement" in cfg:
+            cfg.pop("announcement")
         save_config(cfg)
     return render_template("config.html", items=CONFIG_ITEMS, config=cfg)
 

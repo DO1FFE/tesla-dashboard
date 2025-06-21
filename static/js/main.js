@@ -1,15 +1,7 @@
 var currentVehicle = null;
 var APP_VERSION = window.APP_VERSION || null;
 var MILES_TO_KM = 1.60934;
-var lastSuperchargerFetch = 0;
-var superchargerData = [];
-var superchargerMarkers = [];
-var lightningIcon = L.divIcon({
-    html: '&#9889;',
-    className: 'sc-icon',
-    iconSize: [20, 20],
-    iconAnchor: [10, 10]
-});
+var announcementText = '';
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 18;
@@ -60,6 +52,12 @@ function applyConfig(cfg) {
     if (!cfg) return;
     CONFIG = cfg;
     HIGHLIGHT_BLUE = !!CONFIG['blue-openings'];
+    if (CONFIG.announcement) {
+        announcementText = CONFIG.announcement;
+    } else {
+        announcementText = '';
+    }
+    updateAnnouncement();
     showConfigured();
 }
 
@@ -284,13 +282,6 @@ function handleData(data) {
     } else if (polyline) {
         map.removeLayer(polyline);
         polyline = null;
-    }
-    if (Array.isArray(data.superchargers)) {
-        superchargerData = data.superchargers;
-    }
-    updateSuperchargerList();
-    if (!superchargerData.length) {
-        fetchSuperchargers();
     }
 }
 
@@ -914,52 +905,13 @@ function updateClientCount() {
     });
 }
 
-function updateSuperchargerList() {
-    var $list = $('#supercharger-list');
-    if (!superchargerData.length) {
-        $list.empty();
-        updateSuperchargerMarkers();
-        return;
+function updateAnnouncement() {
+    var $box = $('#announcement-box');
+    if (announcementText) {
+        $box.text(announcementText);
+    } else {
+        $box.empty();
     }
-    var rows = superchargerData.slice(0, 10).map(function(sc) {
-        var dist = sc.distance_km != null ? sc.distance_km.toFixed(1) : '?';
-        var stalls = (sc.available_stalls != null && sc.total_stalls != null) ?
-            ' (' + sc.available_stalls + '/' + sc.total_stalls + ')' : '';
-        return '<tr><td>' + sc.name + stalls + '</td><td class="sc-distance">' + dist + ' km</td></tr>';
-    });
-    $list.html('<h3>Nächstgelegene Supercharger:</h3><table><tbody>' + rows.join('') + '</tbody></table>');
-    updateSuperchargerMarkers();
-}
-
-function updateSuperchargerMarkers() {
-    superchargerMarkers.forEach(function(m) { map.removeLayer(m); });
-    superchargerMarkers = [];
-    superchargerData.forEach(function(sc) {
-        if (sc.location && sc.location.lat && sc.location.long) {
-            var m = L.marker([sc.location.lat, sc.location.long], { icon: lightningIcon }).addTo(map);
-            if (sc.name) {
-                var popup = sc.name;
-                if (sc.available_stalls != null && sc.total_stalls != null) {
-                    popup += ' (' + sc.available_stalls + '/' + sc.total_stalls + ')';
-                }
-                m.bindPopup(popup);
-            }
-            superchargerMarkers.push(m);
-        }
-    });
-}
-
-function fetchSuperchargers() {
-    if (!currentVehicle) return;
-    var now = Date.now();
-    if (now - lastSuperchargerFetch < 60000) return;
-    lastSuperchargerFetch = now;
-    $.getJSON('/api/superchargers/' + currentVehicle, function(resp) {
-        if (Array.isArray(resp)) {
-            superchargerData = resp;
-            updateSuperchargerList();
-        }
-    });
 }
 
 function fetchAddress(lat, lon) {
@@ -1031,12 +983,6 @@ function startStream() {
     if (eventSource) {
         eventSource.close();
     }
-    superchargerData = [];
-    superchargerMarkers.forEach(function(m) { map.removeLayer(m); });
-    superchargerMarkers = [];
-    updateSuperchargerList();
-    lastSuperchargerFetch = 0;
-    fetchSuperchargers();
     showLoading();
     eventSource = new EventSource('/stream/' + currentVehicle);
     eventSource.onmessage = function(e) {

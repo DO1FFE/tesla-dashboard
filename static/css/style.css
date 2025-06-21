@@ -232,24 +232,13 @@ select {
   margin: 0;
 }
 
-#supercharger-list {
+#announcement-box {
   width: auto;
   margin: 10px 0 0;
   text-align: left;
   font-size: 0.9em;
-}
-#supercharger-list h3 {
-  margin: 0 0 4px;
-}
-#supercharger-list table {
-  border-collapse: collapse;
-}
-#supercharger-list td {
-  padding: 2px 4px;
-}
-#supercharger-list td.sc-distance {
-  text-align: right;
-  white-space: nowrap;
+  color: yellow;
+  font-weight: bold;
 }
 
 #v2l-infos,
