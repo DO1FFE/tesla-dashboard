@@ -78,7 +78,8 @@ select {
 }
 
 #map-container #map {
-  flex: 3;
+  flex: 0 0 66.666%;
+  max-width: 66.666%;
 }
 
 #map-container #sidebar-right {
