@@ -1,7 +1,10 @@
 var currentVehicle = null;
 var APP_VERSION = window.APP_VERSION || null;
 var MILES_TO_KM = 1.60934;
-var announcementText = '';
+var announcementRaw = '';
+var announcementList = [];
+var announcementIndex = 0;
+var announcementTimer = null;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 18;
@@ -48,15 +51,42 @@ var CONFIG = {};
 var HIGHLIGHT_BLUE = false;
 var OFFLINE_TEXT = 'Das Fahrzeug ist offline und schläft - Bitte nicht wecken! - Die Daten sind die zuletzt bekannten und somit nicht aktuell!';
 
+function parseAnnouncements(text) {
+    var arr = [];
+    if (text) {
+        text.split(/\n/).forEach(function(line) {
+            line = line.trim();
+            if (line) arr.push(line);
+        });
+    }
+    return arr.slice(0, 3);
+}
+
+function startAnnouncementCycle() {
+    if (announcementTimer) {
+        clearInterval(announcementTimer);
+        announcementTimer = null;
+    }
+    if (announcementList.length > 1) {
+        announcementIndex = 0;
+        announcementTimer = setInterval(function() {
+            announcementIndex = (announcementIndex + 1) % announcementList.length;
+            updateAnnouncement();
+        }, 5000);
+    }
+}
+
 function applyConfig(cfg) {
     if (!cfg) return;
     CONFIG = cfg;
     HIGHLIGHT_BLUE = !!CONFIG['blue-openings'];
     if (CONFIG.announcement) {
-        announcementText = CONFIG.announcement;
+        announcementRaw = CONFIG.announcement;
     } else {
-        announcementText = '';
+        announcementRaw = '';
     }
+    announcementList = parseAnnouncements(announcementRaw);
+    startAnnouncementCycle();
     updateAnnouncement();
     showConfigured();
 }
@@ -922,8 +952,14 @@ function formatAnnouncement(text) {
 
 function updateAnnouncement() {
     var $box = $('#announcement-box');
-    if (announcementText) {
-        $box.html(formatAnnouncement(announcementText));
+    var text = '';
+    if (announcementList.length) {
+        text = announcementList[announcementIndex] || '';
+    } else if (announcementRaw) {
+        text = announcementRaw;
+    }
+    if (text) {
+        $box.html(formatAnnouncement(text));
     } else {
         $box.empty();
     }
@@ -932,8 +968,10 @@ function updateAnnouncement() {
 function fetchAnnouncement() {
     $.getJSON('/api/announcement', function(resp) {
         if (typeof resp.announcement !== 'undefined') {
-            if (resp.announcement !== announcementText) {
-                announcementText = resp.announcement;
+            if (resp.announcement !== announcementRaw) {
+                announcementRaw = resp.announcement;
+                announcementList = parseAnnouncements(announcementRaw);
+                startAnnouncementCycle();
                 updateAnnouncement();
             }
         }
