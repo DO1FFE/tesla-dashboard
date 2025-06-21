@@ -34,6 +34,18 @@
         </div>
         <div>
             <label>
+                <input type="checkbox" name="aprs_wx_enabled" value="1" {% if config.get('aprs_wx_enabled', True) %}checked{% endif %}>
+                APRS WX-Paket senden
+            </label>
+        </div>
+        <div>
+            <label>
+                APRS WX Rufzeichen
+                <input type="text" name="aprs_wx_callsign" value="{{ config.get('aprs_wx_callsign','') }}">
+            </label>
+        </div>
+        <div>
+            <label>
                 APRS Kommentar
                 <input type="text" name="aprs_comment" value="{{ config.get('aprs_comment','') }}">
             </label>
