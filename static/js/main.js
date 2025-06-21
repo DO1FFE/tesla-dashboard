@@ -914,6 +914,17 @@ function updateAnnouncement() {
     }
 }
 
+function fetchAnnouncement() {
+    $.getJSON('/api/announcement', function(resp) {
+        if (typeof resp.announcement !== 'undefined') {
+            if (resp.announcement !== announcementText) {
+                announcementText = resp.announcement;
+                updateAnnouncement();
+            }
+        }
+    });
+}
+
 function fetchAddress(lat, lon) {
     if (lat == null || lon == null) return;
     if (lastAddressLat === lat && lastAddressLng === lon) return;
@@ -1049,4 +1060,6 @@ function checkAppVersion() {
 setInterval(checkAppVersion, 60000);
 setInterval(function() { updateDataAge(); }, 1000);
 setInterval(updateClientCount, 5000);
+setInterval(fetchAnnouncement, 15000);
 updateClientCount();
+fetchAnnouncement();
