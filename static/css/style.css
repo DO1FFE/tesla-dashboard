@@ -81,7 +81,9 @@ select {
   flex: 3;
 }
 
-#map-container #heater-indicator {
+#map-container #sidebar-right {
+  display: flex;
+  flex-direction: column;
   flex: 0 0 auto;
   margin-left: auto;
   margin-right: 20px;
@@ -230,7 +232,7 @@ select {
 }
 
 #supercharger-list {
-  width: 100%;
+  width: auto;
   margin: 10px 0 0;
   text-align: left;
   font-size: 0.9em;
@@ -589,15 +591,15 @@ select {
     flex-wrap: wrap;
     gap: 10px;
   }
-  /* Break layout and stack map and heater indicator */
+  /* Break layout and stack map and sidebar */
   #map-container {
     display: block;
   }
   #map-container #map,
-  #map-container #heater-indicator {
+  #map-container #sidebar-right {
     width: 100%;
   }
-  #map-container #heater-indicator {
+  #map-container #sidebar-right {
     margin-left: 0;
     margin-right: 0;
   }
