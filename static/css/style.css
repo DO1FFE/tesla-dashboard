@@ -74,6 +74,7 @@ select {
   gap: 10px;
   width: 100%;
   margin-top: 10px;
+  flex-wrap: wrap;
 }
 
 #map-container #map {
@@ -229,7 +230,8 @@ select {
 }
 
 #supercharger-list {
-  margin-left: auto;
+  width: 100%;
+  margin: 10px 0 0;
   text-align: left;
   font-size: 0.9em;
 }
