@@ -238,7 +238,7 @@ select {
   display: inline-block;
   max-width: 35ch;
   margin: 10px 0 10px;
-  text-align: right;
+  text-align: left;
   font-size: 0.9em;
   color: yellow;
   font-weight: bold;
