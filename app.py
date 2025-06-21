@@ -267,6 +267,25 @@ CONFIG_ITEMS = [
     {"id": "media-player", "desc": "Medienwiedergabe"},
 ]
 
+# Vehicle data sections required by each dashboard element
+CONFIG_SECTIONS = {
+    "map": {"drive_state"},
+    "lock-status": {"vehicle_state"},
+    "user-presence": {"vehicle_state"},
+    "gear-shift": {"drive_state"},
+    "battery-indicator": {"charge_state"},
+    "speedometer": {"drive_state", "vehicle_state", "gui_settings"},
+    "thermometers": {"climate_state"},
+    "climate-indicator": {"climate_state"},
+    "tpms-indicator": {"vehicle_state"},
+    "openings-indicator": {"vehicle_state", "charge_state"},
+    "heater-indicator": {"climate_state", "charge_state"},
+    "charging-info": {"charge_state"},
+    "v2l-infos": {"charge_state", "drive_state"},
+    "nav-bar": {"drive_state"},
+    "media-player": {"vehicle_state"},
+}
+
 
 def load_config():
     try:
@@ -808,6 +827,21 @@ def sanitize(data):
     return data
 
 
+def filter_data_for_config(data, cfg):
+    """Remove vehicle data sections that are not required."""
+    if not isinstance(data, dict):
+        return data
+    required = {"vehicle_state", "vehicle_config"}
+    for item in CONFIG_ITEMS:
+        default_on = item.get("default", True)
+        if cfg.get(item["id"], default_on):
+            required.update(CONFIG_SECTIONS.get(item["id"], set()))
+    for key in list(data.keys()):
+        if key not in required and key not in {"state", "park_start", "path", "_live"}:
+            data.pop(key, None)
+    return data
+
+
 def _cached_vehicle_list(tesla, ttl=300):
     """Return vehicle list with basic time-based caching."""
     global _vehicle_list_cache, _vehicle_list_cache_ts, _default_vehicle_id
@@ -932,6 +966,8 @@ def get_vehicle_data(vehicle_id=None, state=None):
     except Exception:
         pass
     log_api_data("get_vehicle_data", sanitized)
+    cfg = load_config()
+    sanitized = filter_data_for_config(sanitized, cfg)
     sanitized["park_start"] = park_start_ms
     sanitized["path"] = trip_path
     sanitized["_live"] = True
