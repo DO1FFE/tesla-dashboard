@@ -585,7 +585,7 @@ def send_aprs(vehicle_data):
             aprs_wx.connect()
             temp_f = int(round(temp_out * 9 / 5 + 32))
             wx_body = f"!{lat_ddm}/{lon_ddm}_g000t{temp_f:03d}"
-            wx_packet = f"{wx_callsign}>APRS:{wx_body}"
+            wx_packet = f"{wx_callsign}>APRS:{wx_body}{comment_cfg}"
             aprs_wx.sendall(wx_packet)
             aprs_wx.close()
 
