@@ -234,7 +234,7 @@ select {
 }
 
 #announcement-box {
-  align-self: flex-end;
+  align-self: flex-start;
   display: inline-block;
   max-width: 35ch;
   margin: 10px 0 10px;
