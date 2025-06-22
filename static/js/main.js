@@ -851,7 +851,8 @@ function updateMediaPlayer(media) {
         var pct = Math.min(Math.max(elapsed / duration * 100, 0), 100);
         var pos = Math.round(elapsed / 1000);
         var dur = Math.round(duration / 1000);
-        rows.push('<tr><th>Position:</th><td>' + pos + 's / ' + dur + 's (' + Math.round(pct) + '%)</td></tr>');
+        var bar = '<div id="media-progress"><div id="media-progress-bar" style="width:' + pct.toFixed(1) + '%"></div></div>';
+        rows.push('<tr><th>Position:</th><td>' + bar + ' ' + pos + 's / ' + dur + 's</td></tr>');
     }
     $player.html('<table>' + rows.join('') + '</table>');
 }
