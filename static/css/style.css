@@ -358,6 +358,22 @@ select {
   margin-right: 4px;
 }
 
+/* Progress bar for media position */
+#media-progress {
+  width: 100%;
+  background: #444;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+#media-progress-bar {
+  height: 100%;
+  background: var(--accent-color);
+  width: 0;
+}
+
 /* Simple automatic gear shift display */
 #gear-shift {
   display: inline-block;
