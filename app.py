@@ -879,7 +879,7 @@ def sanitize(data):
     return data
 
 
-def _cached_vehicle_list(tesla, ttl=300):
+def _cached_vehicle_list(tesla, ttl=86400):
     """Return vehicle list with basic time-based caching."""
     global _vehicle_list_cache, _vehicle_list_cache_ts, _default_vehicle_id
     now = time.time()
@@ -1333,6 +1333,10 @@ def config_page():
         announcement = request.form.get("announcement", "").strip()
         api_interval = request.form.get("api_interval", "").strip()
         api_interval_idle = request.form.get("api_interval_idle", "").strip()
+        if "refresh_vehicle_list" in request.form:
+            tesla = get_tesla()
+            if tesla is not None:
+                _cached_vehicle_list(tesla, ttl=0)
         if callsign:
             cfg["aprs_callsign"] = callsign
         elif "aprs_callsign" in cfg:
