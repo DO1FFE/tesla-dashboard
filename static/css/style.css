@@ -291,6 +291,20 @@ select {
   width: 75vw;
 }
 
+#slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#slider-row button {
+  padding: 4px 8px;
+  background: var(--surface-color);
+  color: var(--text-color);
+  border: 1px solid #444;
+  border-radius: 4px;
+}
+
 #point-info {
   text-align: center;
   color: var(--text-color);
