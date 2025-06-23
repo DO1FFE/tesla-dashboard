@@ -32,6 +32,24 @@
         <input type="range" id="point-slider" min="0" max="0" value="0" step="1">
         <div id="point-info"></div>
     </div>
+    {% if weekly %}
+    <h2>Wöchentliche Zusammenfassung</h2>
+    <table>
+        <tr><th>Woche</th><th>Gefahrene km</th></tr>
+        {% for wk, km in weekly|dictsort %}
+        <tr><td>{{ wk }}</td><td>{{ '%.2f'|format(km) }}</td></tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+    {% if monthly %}
+    <h2>Monatliche Zusammenfassung</h2>
+    <table>
+        <tr><th>Monat</th><th>Gefahrene km</th></tr>
+        {% for mo, km in monthly|dictsort %}
+        <tr><td>{{ mo }}</td><td>{{ '%.2f'|format(km) }}</td></tr>
+        {% endfor %}
+    </table>
+    {% endif %}
     <script>
         var tripPath = {{ path|tojson }};
         var tripHeading = {{ heading|tojson }};

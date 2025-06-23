@@ -779,6 +779,25 @@ def compute_statistics():
     return stats
 
 
+def compute_trip_summaries():
+    """Return weekly and monthly distance summaries."""
+    weekly = {}
+    monthly = {}
+    for fname in _get_trip_files():
+        date_str = fname.split("_")[-1].split(".")[0]
+        try:
+            day = datetime.strptime(date_str, "%Y%m%d").date()
+        except Exception:
+            continue
+        km = _trip_distance(os.path.join(TRIP_DIR, fname))
+        iso_year, iso_week, _ = day.isocalendar()
+        week_key = f"{iso_year}-W{iso_week:02d}"
+        weekly[week_key] = round(weekly.get(week_key, 0.0) + km, 2)
+        month_key = day.strftime("%Y-%m")
+        monthly[month_key] = round(monthly.get(month_key, 0.0) + km, 2)
+    return weekly, monthly
+
+
 def get_tesla():
     """Authenticate and return a Tesla object or None."""
     if teslapy is None:
@@ -1120,8 +1139,15 @@ def trip_history():
     heading = 0.0
     if len(path) >= 2:
         heading = _bearing(path[-2][:2], path[-1][:2])
+    weekly, monthly = compute_trip_summaries()
     return render_template(
-        "history.html", path=path, heading=heading, files=files, selected=selected
+        "history.html",
+        path=path,
+        heading=heading,
+        files=files,
+        selected=selected,
+        weekly=weekly,
+        monthly=monthly,
     )
 
 
