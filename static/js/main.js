@@ -6,6 +6,8 @@ var announcementList = [];
 var announcementIndex = 0;
 var announcementTimer = null;
 var lastConfigJSON = null;
+var lastApiInterval = null;
+var lastApiIntervalIdle = null;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 18;
@@ -1104,6 +1106,10 @@ function startStreamIfOnline() {
 $.getJSON('/api/config', function(cfg) {
     applyConfig(cfg);
     lastConfigJSON = JSON.stringify(cfg || {});
+    if (cfg) {
+        lastApiInterval = cfg.api_interval;
+        lastApiIntervalIdle = cfg.api_interval_idle;
+    }
     fetchVehicles();
 });
 
@@ -1111,7 +1117,16 @@ function fetchConfig() {
     $.getJSON('/api/config', function(cfg) {
         var json = JSON.stringify(cfg || {});
         if (json !== lastConfigJSON) {
+            if (cfg && (cfg.api_interval !== lastApiInterval ||
+                        cfg.api_interval_idle !== lastApiIntervalIdle)) {
+                location.reload(true);
+                return;
+            }
             lastConfigJSON = json;
+            if (cfg) {
+                lastApiInterval = cfg.api_interval;
+                lastApiIntervalIdle = cfg.api_interval_idle;
+            }
             applyConfig(cfg);
         }
     });
