@@ -20,7 +20,7 @@ This is a simple Flask application that displays real-time data from a Tesla veh
     ```
 
 4. Open `http://localhost:8013` in your browser (the server listens on `0.0.0.0:8013`).
-5. On the configuration page (`/config`) you can set your APRS call sign, passcode and an optional comment to transmit position packets via an EU APRS-IS server. You may also enable an additional WX packet using a separate call sign. Temperatures are included in Celsius within the comment. Positions are sent at most every 30 seconds while driving and at least every 10 minutes even without changes. WX packets obey the same limits and are only transmitted when the outside temperature changes or after ten minutes without an update.
+5. On the configuration page (`/config`) you can set your APRS call sign, passcode and an optional comment to transmit position packets via an EU APRS-IS server. You may also enable an additional WX packet using a separate call sign. Temperatures are included in Celsius within the comment. Positions are sent at most every 30 seconds while driving and at least every 10 minutes even without changes. WX packets obey the same limits and are only transmitted when the outside temperature changes or after ten minutes without an update. The page also lets you adjust the Tesla API polling interval and disable the announcement text.
 
 API responses are logged to `data/api.log`. The log file uses rotation and will grow to at most 1&nbsp;MB.
 Vehicle state changes are written to `data/state.log`.
@@ -53,6 +53,7 @@ When multiple cars are available a drop-down menu lets you switch between vehicl
 Below the navigation bar a small media player section shows details of the currently playing track if provided by the API.
 The configuration page also offers an option to highlight doors and windows in blue.
 Additional toggles allow hiding the heater indicators and the list of nearby Superchargers on the main page.
+You can also enable or disable the announcement text and adjust the API polling interval without restarting the server.
 
 Data is streamed to the frontend via `/stream/<vehicle_id>` using Server-Sent Events so the dashboard updates instantly when new information arrives.
 The endpoint `/apiliste` exposes a text file listing all seen API variables and their latest values.

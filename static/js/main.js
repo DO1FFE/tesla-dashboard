@@ -5,6 +5,7 @@ var announcementRaw = '';
 var announcementList = [];
 var announcementIndex = 0;
 var announcementTimer = null;
+var lastConfigJSON = null;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 18;
@@ -1102,8 +1103,19 @@ function startStreamIfOnline() {
 
 $.getJSON('/api/config', function(cfg) {
     applyConfig(cfg);
+    lastConfigJSON = JSON.stringify(cfg || {});
     fetchVehicles();
 });
+
+function fetchConfig() {
+    $.getJSON('/api/config', function(cfg) {
+        var json = JSON.stringify(cfg || {});
+        if (json !== lastConfigJSON) {
+            lastConfigJSON = json;
+            applyConfig(cfg);
+        }
+    });
+}
 
 function checkAppVersion() {
     $.getJSON('/api/version', function(resp) {
@@ -1117,5 +1129,6 @@ setInterval(checkAppVersion, 60000);
 setInterval(function() { updateDataAge(); }, 1000);
 setInterval(updateClientCount, 5000);
 setInterval(fetchAnnouncement, 15000);
+setInterval(fetchConfig, 15000);
 updateClientCount();
 fetchAnnouncement();
