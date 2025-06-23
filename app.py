@@ -334,6 +334,7 @@ _default_vehicle_id = None
 _last_aprs_info = {}
 _last_wx_info = {}
 
+
 def track_park_time(vehicle_data):
     """Track when the vehicle was first seen parked."""
     global park_start_ms, last_shift_state
@@ -503,9 +504,6 @@ def _save_last_energy(vehicle_id, value):
         pass
 
 
-
-
-
 def send_aprs(vehicle_data):
     """Transmit a position packet via APRS-IS using aprslib."""
     if aprslib is None:
@@ -565,10 +563,13 @@ def send_aprs(vehicle_data):
     comment = " - ".join(comment_parts)
 
     try:
-        aprs = aprslib.IS(callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
+        aprs = aprslib.IS(
+            callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT
+        )
         aprs.connect()
 
         from aprslib.util import latitude_to_ddm, longitude_to_ddm
+
         lat_ddm = latitude_to_ddm(lat)
         lon_ddm = longitude_to_ddm(lon)
 
@@ -590,7 +591,9 @@ def send_aprs(vehicle_data):
                 if now - last_wx.get("time", 0) < 30:
                     wx_changed = False
             if wx_changed:
-                aprs_wx = aprslib.IS(wx_callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT)
+                aprs_wx = aprslib.IS(
+                    wx_callsign, passwd=str(passcode), host=APRS_HOST, port=APRS_PORT
+                )
                 aprs_wx.connect()
                 temp_f = int(round(temp_out * 9 / 5 + 32))
                 wx_body = f"!{lat_ddm}/{lon_ddm}_g000t{temp_f:03d}"
@@ -699,10 +702,18 @@ def _load_state_entries(filename=os.path.join(DATA_DIR, "state.log")):
                     continue
                 ts_str = line[:idx].strip()
                 try:
-                    ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S,%f").replace(tzinfo=LOCAL_TZ).timestamp()
+                    ts = (
+                        datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S,%f")
+                        .replace(tzinfo=LOCAL_TZ)
+                        .timestamp()
+                    )
                 except Exception:
                     try:
-                        ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=LOCAL_TZ).timestamp()
+                        ts = (
+                            datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                            .replace(tzinfo=LOCAL_TZ)
+                            .timestamp()
+                        )
                     except Exception:
                         continue
                 try:
@@ -727,10 +738,14 @@ def _compute_state_stats(entries):
         t = start
         while t < end:
             day = datetime.fromtimestamp(t, LOCAL_TZ).date()
-            next_day = datetime.combine(day + timedelta(days=1), datetime.min.time(), LOCAL_TZ).timestamp()
+            next_day = datetime.combine(
+                day + timedelta(days=1), datetime.min.time(), LOCAL_TZ
+            ).timestamp()
             segment_end = min(end, next_day)
             dur = segment_end - t
-            d = stats.setdefault(day.isoformat(), {"online": 0.0, "offline": 0.0, "asleep": 0.0})
+            d = stats.setdefault(
+                day.isoformat(), {"online": 0.0, "offline": 0.0, "asleep": 0.0}
+            )
             key = state if state in d else "offline"
             d[key] += dur
             t = segment_end
@@ -1031,7 +1046,6 @@ def _fetch_data_once(vehicle_id="default"):
         if last_val is not None:
             data["last_charge_energy_added"] = last_val
 
-
     if isinstance(data, dict):
         data["_live"] = live
     latest_data[cache_id] = data
@@ -1051,11 +1065,11 @@ def _fetch_loop(vehicle_id, interval=3):
     while True:
         cfg = load_config()
         try:
-            interval = float(cfg.get("api_interval", interval))
+            interval = int(cfg.get("api_interval", interval))
         except Exception:
             pass
         try:
-            idle_interval = float(cfg.get("api_interval_idle", idle_interval))
+            idle_interval = int(cfg.get("api_interval_idle", idle_interval))
         except Exception:
             pass
         data = _fetch_data_once(vehicle_id)
@@ -1188,7 +1202,6 @@ def api_clients():
     return jsonify({"clients": count})
 
 
-
 @app.route("/api/reverse_geocode")
 def api_reverse_geocode():
     """Return address for given coordinates."""
@@ -1265,16 +1278,14 @@ def config_page():
             cfg["announcement"] = announcement
         elif "announcement" in cfg:
             cfg.pop("announcement")
-        try:
-            cfg["api_interval"] = max(1, float(api_interval))
-        except Exception:
-            if "api_interval" in cfg:
-                cfg.pop("api_interval")
-        try:
-            cfg["api_interval_idle"] = max(1, float(api_interval_idle))
-        except Exception:
-            if "api_interval_idle" in cfg:
-                cfg.pop("api_interval_idle")
+        if api_interval.isdigit():
+            cfg["api_interval"] = max(1, int(api_interval))
+        elif "api_interval" in cfg:
+            cfg.pop("api_interval")
+        if api_interval_idle.isdigit():
+            cfg["api_interval_idle"] = max(1, int(api_interval_idle))
+        elif "api_interval_idle" in cfg:
+            cfg.pop("api_interval_idle")
         save_config(cfg)
     return render_template("config.html", items=CONFIG_ITEMS, config=cfg)
 

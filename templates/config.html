@@ -53,13 +53,13 @@
         <div>
             <label>
                 API Intervall (Sekunden)
-                <input type="number" name="api_interval" min="1" value="{{ config.get('api_interval', 3) }}">
+                <input type="number" name="api_interval" min="1" step="1" value="{{ config.get('api_interval', 3) }}">
             </label>
         </div>
         <div>
             <label>
                 API Intervall ohne Client (Sekunden)
-                <input type="number" name="api_interval_idle" min="1" value="{{ config.get('api_interval_idle', 30) }}">
+                <input type="number" name="api_interval_idle" min="1" step="1" value="{{ config.get('api_interval_idle', 30) }}">
             </label>
         </div>
         <div>
