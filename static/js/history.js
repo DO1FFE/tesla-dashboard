@@ -52,7 +52,7 @@ if (Array.isArray(tripPath) && tripPath.length) {
         document.getElementById('point-info').textContent = text.join(' | ');
     }
 
-    function updateMarker(idx) {
+    function updateMarker(idx, center) {
         var point = tripPath[idx];
         marker.setLatLng([point[0], point[1]]);
         var angle = 0;
@@ -61,6 +61,9 @@ if (Array.isArray(tripPath) && tripPath.length) {
         }
         marker.setRotationAngle(angle);
         updateInfo(idx);
+        if (center) {
+            map.setView(marker.getLatLng(), map.getZoom());
+        }
     }
 
     var slider = document.getElementById('point-slider');
@@ -72,7 +75,7 @@ if (Array.isArray(tripPath) && tripPath.length) {
 
     slider.addEventListener('input', function() {
         var idx = parseInt(this.value, 10);
-        updateMarker(idx);
+        updateMarker(idx, false);
         var latlng = marker.getLatLng();
 
         if (originalZoom === null) {
@@ -92,8 +95,7 @@ if (Array.isArray(tripPath) && tripPath.length) {
         }, 3000);
     });
 
-    updateMarker(0);
-    map.setView(marker.getLatLng(), map.getZoom());
+    updateMarker(0, true);
 
     var playBtn = document.getElementById('play-btn');
     var stopBtn = document.getElementById('stop-btn');
@@ -114,7 +116,7 @@ if (Array.isArray(tripPath) && tripPath.length) {
             return;
         }
         slider.value = idx;
-        updateMarker(idx);
+        updateMarker(idx, true);
         if (idx < tripPath.length - 1) {
             var cur = tripPath[idx][4];
             var nxt = tripPath[idx + 1][4];
