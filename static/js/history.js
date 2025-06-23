@@ -94,4 +94,47 @@ if (Array.isArray(tripPath) && tripPath.length) {
 
     updateMarker(tripPath.length - 1);
     map.setView(marker.getLatLng(), map.getZoom());
+
+    var playBtn = document.getElementById('play-btn');
+    var stopBtn = document.getElementById('stop-btn');
+    var speedSel = document.getElementById('speed-select');
+    var playTimeout = null;
+    var speed = 1;
+
+    function stopPlayback() {
+        if (playTimeout) {
+            clearTimeout(playTimeout);
+            playTimeout = null;
+        }
+    }
+
+    function stepPlayback(idx) {
+        if (idx >= tripPath.length) {
+            stopPlayback();
+            return;
+        }
+        slider.value = idx;
+        updateMarker(idx);
+        if (idx < tripPath.length - 1) {
+            var cur = tripPath[idx][4];
+            var nxt = tripPath[idx + 1][4];
+            var diff = nxt - cur;
+            if (!diff || diff < 0) {
+                diff = 1000;
+            }
+            diff = diff / speed;
+            playTimeout = setTimeout(function() { stepPlayback(idx + 1); }, diff);
+        }
+    }
+
+    playBtn.addEventListener('click', function() {
+        speed = parseFloat(speedSel.value) || 1;
+        if (!playTimeout) {
+            stepPlayback(parseInt(slider.value, 10));
+        }
+    });
+
+    stopBtn.addEventListener('click', function() {
+        stopPlayback();
+    });
 }
