@@ -48,6 +48,7 @@ The dashboard shows a short overview depending on whether the vehicle is parked,
 
 While driving, a blue path is drawn on the map using the reported GPS positions. All trips of a day are logged to a single CSV file under `data/trips` for later analysis.
 The `/history` page lists these files so previous trips can be selected and displayed on an interactive map.
+Entire weeks or months can also be chosen to display longer time spans at once.
 Using the slider you can inspect each recorded point and see the exact timestamp along with speed and power information.
 When multiple cars are available a drop-down menu lets you switch between vehicles.
 Below the navigation bar a small media player section shows details of the currently playing track if provided by the API.

@@ -22,9 +22,25 @@
     <form id="trip-form" method="get" action="/history">
         <label for="file">Fahrt auswählen:</label>
         <select id="file" name="file" onchange="document.getElementById('trip-form').submit();">
+            <optgroup label="Tage">
             {% for f in files %}
             <option value="{{ f }}" {% if f == selected %}selected{% endif %}>{{ f }}</option>
             {% endfor %}
+            </optgroup>
+            {% if weeks %}
+            <optgroup label="Wochen">
+            {% for w in weeks %}
+            <option value="week:{{ w }}" {% if ('week:' ~ w) == selected %}selected{% endif %}>{{ w }}</option>
+            {% endfor %}
+            </optgroup>
+            {% endif %}
+            {% if months %}
+            <optgroup label="Monate">
+            {% for m in months %}
+            <option value="month:{{ m }}" {% if ('month:' ~ m) == selected %}selected{% endif %}>{{ m }}</option>
+            {% endfor %}
+            </optgroup>
+            {% endif %}
         </select>
     </form>
     <div id="map"></div>
