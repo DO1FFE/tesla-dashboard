@@ -29,7 +29,7 @@ if (Array.isArray(tripPath) && tripPath.length) {
         iconAnchor: [15, 15]
     });
 
-    var marker = L.marker(coords[coords.length - 1], {
+    var marker = L.marker(coords[0], {
         icon: arrowIcon,
         rotationAngle: tripHeading,
         rotationOrigin: 'center center'
@@ -65,7 +65,7 @@ if (Array.isArray(tripPath) && tripPath.length) {
 
     var slider = document.getElementById('point-slider');
     slider.max = tripPath.length - 1;
-    slider.value = tripPath.length - 1;
+    slider.value = 0;
 
     var originalZoom = null;
     var zoomTimeout = null;
@@ -92,7 +92,7 @@ if (Array.isArray(tripPath) && tripPath.length) {
         }, 3000);
     });
 
-    updateMarker(tripPath.length - 1);
+    updateMarker(0);
     map.setView(marker.getLatLng(), map.getZoom());
 
     var playBtn = document.getElementById('play-btn');
