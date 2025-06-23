@@ -263,6 +263,7 @@ CONFIG_ITEMS = [
     {"id": "heater-indicator", "desc": "Heizungsstatus"},
     {"id": "charging-info", "desc": "Ladeinformationen"},
     {"id": "v2l-infos", "desc": "V2L-Hinweis"},
+    {"id": "announcement-box", "desc": "Hinweistext"},
     {"id": "nav-bar", "desc": "Navigationsleiste"},
     {"id": "media-player", "desc": "Medienwiedergabe"},
 ]
@@ -1046,7 +1047,17 @@ def _fetch_data_once(vehicle_id="default"):
 
 def _fetch_loop(vehicle_id, interval=3):
     """Continuously fetch data for a vehicle and notify subscribers."""
+    idle_interval = 30
     while True:
+        cfg = load_config()
+        try:
+            interval = float(cfg.get("api_interval", interval))
+        except Exception:
+            pass
+        try:
+            idle_interval = float(cfg.get("api_interval_idle", idle_interval))
+        except Exception:
+            pass
         data = _fetch_data_once(vehicle_id)
         if isinstance(data, dict) and data.get("_live"):
             try:
@@ -1061,7 +1072,7 @@ def _fetch_loop(vehicle_id, interval=3):
         if subscribers.get(vehicle_id):
             time.sleep(interval)
         else:
-            time.sleep(30)
+            time.sleep(idle_interval)
 
 
 def _start_thread(vehicle_id):
@@ -1231,6 +1242,8 @@ def config_page():
         wx_enabled = "aprs_wx_enabled" in request.form
         aprs_comment = request.form.get("aprs_comment", "").strip()
         announcement = request.form.get("announcement", "").strip()
+        api_interval = request.form.get("api_interval", "").strip()
+        api_interval_idle = request.form.get("api_interval_idle", "").strip()
         if callsign:
             cfg["aprs_callsign"] = callsign
         elif "aprs_callsign" in cfg:
@@ -1252,6 +1265,16 @@ def config_page():
             cfg["announcement"] = announcement
         elif "announcement" in cfg:
             cfg.pop("announcement")
+        try:
+            cfg["api_interval"] = max(1, float(api_interval))
+        except Exception:
+            if "api_interval" in cfg:
+                cfg.pop("api_interval")
+        try:
+            cfg["api_interval_idle"] = max(1, float(api_interval_idle))
+        except Exception:
+            if "api_interval_idle" in cfg:
+                cfg.pop("api_interval_idle")
         save_config(cfg)
     return render_template("config.html", items=CONFIG_ITEMS, config=cfg)
 
