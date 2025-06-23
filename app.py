@@ -1435,6 +1435,18 @@ def state_log_page():
     return render_template("state.html", log_lines=log_lines)
 
 
+@app.route("/apilog")
+def api_log_page():
+    """Display the API log."""
+    log_lines = []
+    try:
+        with open(os.path.join(DATA_DIR, "api.log"), "r", encoding="utf-8") as f:
+            log_lines = f.readlines()
+    except Exception:
+        pass
+    return render_template("apilog.html", log_lines=log_lines)
+
+
 @app.route("/debug")
 def debug_info():
     """Display diagnostic information about the server."""

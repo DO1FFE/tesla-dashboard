@@ -71,6 +71,7 @@ The same information is also stored as hierarchical JSON in `data/api-liste.json
 * `/error` – show recent API errors (JSON via `/api/errors`)
 * `/state` – display the vehicle state log
 * `/debug` – display environment info and recent log lines
+* `/apilog` – show the raw API log
 * `/api/vehicles` – list available vehicles as JSON
 * `/api/state` – return the current vehicle state as JSON
 * `/api/version` – return the current dashboard version as JSON
