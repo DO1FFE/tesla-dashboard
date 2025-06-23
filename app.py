@@ -628,6 +628,42 @@ def _get_trip_files(directory=TRIP_DIR):
         return []
 
 
+def _get_trip_periods():
+    """Return sorted lists of available weeks and months."""
+    weeks = set()
+    months = set()
+    for fname in _get_trip_files():
+        date_str = fname.split("_")[-1].split(".")[0]
+        try:
+            day = datetime.strptime(date_str, "%Y%m%d").date()
+        except Exception:
+            continue
+        iso_year, iso_week, _ = day.isocalendar()
+        weeks.add(f"{iso_year}-W{iso_week:02d}")
+        months.add(day.strftime("%Y-%m"))
+    return sorted(weeks), sorted(months)
+
+
+def _load_trip_period(prefix, key):
+    """Load all trip points for the given week or month key."""
+    points = []
+    for fname in _get_trip_files():
+        date_str = fname.split("_")[-1].split(".")[0]
+        try:
+            day = datetime.strptime(date_str, "%Y%m%d").date()
+        except Exception:
+            continue
+        iso_year, iso_week, _ = day.isocalendar()
+        week_key = f"{iso_year}-W{iso_week:02d}"
+        month_key = day.strftime("%Y-%m")
+        if prefix == "week" and week_key != key:
+            continue
+        if prefix == "month" and month_key != key:
+            continue
+        points.extend(_load_trip(os.path.join(TRIP_DIR, fname)))
+    return points
+
+
 def _load_trip(filename):
     """Load all coordinates with optional speed and power from a trip CSV."""
     points = []
@@ -1132,10 +1168,21 @@ def map_only():
 def trip_history():
     """Show recorded trips and allow selecting a trip to display."""
     files = _get_trip_files()
+    weeks, months = _get_trip_periods()
     selected = request.args.get("file")
-    if selected not in files and files:
+    path = []
+    if selected:
+        if selected.startswith("week:"):
+            path = _load_trip_period("week", selected.split("week:", 1)[1])
+        elif selected.startswith("month:"):
+            path = _load_trip_period("month", selected.split("month:", 1)[1])
+        else:
+            if selected not in files and files:
+                selected = files[-1]
+            path = _load_trip(os.path.join(TRIP_DIR, selected)) if selected else []
+    elif files:
         selected = files[-1]
-    path = _load_trip(os.path.join(TRIP_DIR, selected)) if selected else []
+        path = _load_trip(os.path.join(TRIP_DIR, selected))
     heading = 0.0
     if len(path) >= 2:
         heading = _bearing(path[-2][:2], path[-1][:2])
@@ -1145,6 +1192,8 @@ def trip_history():
         path=path,
         heading=heading,
         files=files,
+        weeks=weeks,
+        months=months,
         selected=selected,
         weekly=weekly,
         monthly=monthly,
