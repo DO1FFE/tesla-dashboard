@@ -5,6 +5,52 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 var MILES_TO_KM = 1.60934;
 
+// Elements for playback controls
+var playBtn = document.getElementById('play-btn');
+var stopBtn = document.getElementById('stop-btn');
+var speedSel = document.getElementById('speed-select');
+var slider = document.getElementById('point-slider');
+var playTimeout = null;
+var speed = 1;
+var marker = null;
+
+function updateInfo(idx) {
+    if (!Array.isArray(tripPath) || !tripPath.length) {
+        return;
+    }
+    var point = tripPath[idx];
+    var text = [];
+    if (point[4]) {
+        var date = new Date(point[4]);
+        text.push(date.toLocaleString());
+    }
+    if (point[2] !== null && point[2] !== undefined && point[2] !== '') {
+        var kmh = Math.round(point[2] * MILES_TO_KM);
+        text.push('Geschwindigkeit: ' + kmh + ' km/h');
+    }
+    if (point[3] !== null && point[3] !== undefined && point[3] !== '') {
+        text.push('Power: ' + point[3] + ' kW');
+    }
+    document.getElementById('point-info').textContent = text.join(' | ');
+}
+
+function updateMarker(idx, center) {
+    if (!marker || !Array.isArray(tripPath) || !tripPath.length) {
+        return;
+    }
+    var point = tripPath[idx];
+    marker.setLatLng([point[0], point[1]]);
+    var angle = 0;
+    if (idx > 0) {
+        angle = bearing(tripPath[idx - 1], point);
+    }
+    marker.setRotationAngle(angle);
+    updateInfo(idx);
+    if (center) {
+        map.setView(marker.getLatLng(), map.getZoom());
+    }
+}
+
 function bearing(p1, p2) {
     var lat1 = p1[0] * Math.PI / 180;
     var lon1 = p1[1] * Math.PI / 180;
@@ -29,44 +75,12 @@ if (Array.isArray(tripPath) && tripPath.length) {
         iconAnchor: [15, 15]
     });
 
-    var marker = L.marker(coords[0], {
+    marker = L.marker(coords[0], {
         icon: arrowIcon,
         rotationAngle: tripHeading,
         rotationOrigin: 'center center'
     }).addTo(map);
 
-    function updateInfo(idx) {
-        var point = tripPath[idx];
-        var text = [];
-        if (point[4]) {
-            var date = new Date(point[4]);
-            text.push(date.toLocaleString());
-        }
-        if (point[2] !== null && point[2] !== undefined && point[2] !== '') {
-            var kmh = Math.round(point[2] * MILES_TO_KM);
-            text.push('Geschwindigkeit: ' + kmh + ' km/h');
-        }
-        if (point[3] !== null && point[3] !== undefined && point[3] !== '') {
-            text.push('Power: ' + point[3] + ' kW');
-        }
-        document.getElementById('point-info').textContent = text.join(' | ');
-    }
-
-    function updateMarker(idx, center) {
-        var point = tripPath[idx];
-        marker.setLatLng([point[0], point[1]]);
-        var angle = 0;
-        if (idx > 0) {
-            angle = bearing(tripPath[idx - 1], point);
-        }
-        marker.setRotationAngle(angle);
-        updateInfo(idx);
-        if (center) {
-            map.setView(marker.getLatLng(), map.getZoom());
-        }
-    }
-
-    var slider = document.getElementById('point-slider');
     slider.max = tripPath.length - 1;
     slider.value = 0;
 
@@ -96,46 +110,47 @@ if (Array.isArray(tripPath) && tripPath.length) {
     });
 
     updateMarker(0, true);
+}
 
-    var playBtn = document.getElementById('play-btn');
-    var stopBtn = document.getElementById('stop-btn');
-    var speedSel = document.getElementById('speed-select');
-    var playTimeout = null;
-    var speed = 1;
-
-    function stopPlayback() {
-        if (playTimeout) {
-            clearTimeout(playTimeout);
-            playTimeout = null;
-        }
+function stopPlayback() {
+    if (playTimeout) {
+        clearTimeout(playTimeout);
+        playTimeout = null;
     }
+}
 
-    function stepPlayback(idx) {
-        if (idx >= tripPath.length) {
-            stopPlayback();
-            return;
-        }
-        slider.value = idx;
-        updateMarker(idx, true);
-        if (idx < tripPath.length - 1) {
-            var cur = tripPath[idx][4];
-            var nxt = tripPath[idx + 1][4];
-            var diff = nxt - cur;
-            if (!diff || diff < 0) {
-                diff = 1000;
-            }
-            diff = diff / speed;
-            playTimeout = setTimeout(function() { stepPlayback(idx + 1); }, diff);
-        }
+function stepPlayback(idx) {
+    if (!Array.isArray(tripPath) || !tripPath.length) {
+        return;
     }
+    if (idx >= tripPath.length) {
+        stopPlayback();
+        return;
+    }
+    slider.value = idx;
+    updateMarker(idx, true);
+    if (idx < tripPath.length - 1) {
+        var cur = tripPath[idx][4];
+        var nxt = tripPath[idx + 1][4];
+        var diff = nxt - cur;
+        if (!diff || diff < 0) {
+            diff = 1000;
+        }
+        diff = diff / speed;
+        playTimeout = setTimeout(function() { stepPlayback(idx + 1); }, diff);
+    }
+}
 
+if (playBtn) {
     playBtn.addEventListener('click', function() {
         speed = parseFloat(speedSel.value) || 1;
         if (!playTimeout) {
             stepPlayback(parseInt(slider.value, 10));
         }
     });
+}
 
+if (stopBtn) {
     stopBtn.addEventListener('click', function() {
         stopPlayback();
     });

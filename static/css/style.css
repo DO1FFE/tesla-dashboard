@@ -285,6 +285,7 @@ select {
   flex-direction: column;
   gap: 10px;
   align-items: center;
+  pointer-events: auto;
 }
 
 #slider-container input[type="range"] {
@@ -303,6 +304,7 @@ select {
   color: var(--text-color);
   border: 1px solid #444;
   border-radius: 4px;
+  pointer-events: auto;
 }
 
 #point-info {
