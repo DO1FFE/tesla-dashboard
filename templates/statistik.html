@@ -15,7 +15,7 @@
 <body>
     <h1>Statistik</h1>
     <table>
-        <tr><th>Datum</th><th>Online %</th><th>Offline %</th><th>Asleep %</th><th>Gefahrene km</th></tr>
+        <tr><th>Datum</th><th>Online %</th><th>Offline %</th><th>Asleep %</th><th>Gefahrene km</th><th>Hinzugefügte Energie (kWh)</th></tr>
         {% for row in rows %}
         <tr>
             <td>{{ row.date }}</td>
@@ -23,6 +23,7 @@
             <td>{{ row.offline }}</td>
             <td>{{ row.asleep }}</td>
             <td>{{ row.km }}</td>
+            <td>{{ row.energy }}</td>
         </tr>
         {% endfor %}
     </table>

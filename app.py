@@ -70,6 +70,17 @@ if not state_logger.handlers:
     state_logger.addHandler(handler)
     state_logger.setLevel(logging.INFO)
 
+energy_logger = logging.getLogger("energy_logger")
+if not energy_logger.handlers:
+    handler = RotatingFileHandler(
+        os.path.join(DATA_DIR, "energy.log"), maxBytes=100_000, backupCount=1
+    )
+    formatter = logging.Formatter("%(asctime)s %(message)s")
+    formatter.converter = lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
+    handler.setFormatter(formatter)
+    energy_logger.addHandler(handler)
+    energy_logger.setLevel(logging.INFO)
+
 
 def _load_last_state(filename=os.path.join(DATA_DIR, "state.log")):
     """Load the last logged state for each vehicle from ``state.log``."""
@@ -456,6 +467,16 @@ def log_vehicle_state(vehicle_id, state):
         pass
 
 
+def _log_energy(vehicle_id, amount):
+    """Append added energy information to ``energy.log``."""
+    try:
+        energy_logger.info(
+            json.dumps({"vehicle_id": vehicle_id, "added_energy": amount})
+        )
+    except Exception:
+        pass
+
+
 def _cache_file(vehicle_id):
     """Return filename for cached data of a vehicle."""
     name = vehicle_id if vehicle_id is not None else "default"
@@ -788,9 +809,39 @@ def _compute_state_stats(entries):
     return stats
 
 
+def _compute_energy_stats(filename=os.path.join(DATA_DIR, "energy.log")):
+    """Return per-day added energy in kWh based on ``energy.log``."""
+    energy = {}
+    try:
+        with open(filename, "r", encoding="utf-8") as f:
+            for line in f:
+                idx = line.find("{")
+                if idx == -1:
+                    continue
+                ts_str = line[:idx].strip()
+                try:
+                    ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S,%f")
+                except Exception:
+                    try:
+                        ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        continue
+                day = ts.date().isoformat()
+                try:
+                    entry = json.loads(line[idx:])
+                    val = float(entry.get("added_energy", 0.0))
+                except Exception:
+                    continue
+                energy[day] = energy.get(day, 0.0) + val
+    except Exception:
+        pass
+    return energy
+
+
 def compute_statistics():
     """Compute daily statistics and save them to ``STAT_FILE``."""
     stats = _compute_state_stats(_load_state_entries())
+    energy = _compute_energy_stats()
     for fname in _get_trip_files():
         date_str = fname.split("_")[-1].split(".")[0]
         try:
@@ -799,13 +850,19 @@ def compute_statistics():
             pass
         path = os.path.join(TRIP_DIR, fname)
         km = _trip_distance(path)
-        stats.setdefault(date_str, {"online": 0.0, "offline": 0.0, "asleep": 0.0})
+        stats.setdefault(
+            date_str, {"online": 0.0, "offline": 0.0, "asleep": 0.0}
+        )
         stats[date_str]["km"] = km
+    for day, val in energy.items():
+        stats.setdefault(day, {"online": 0.0, "offline": 0.0, "asleep": 0.0})
+        stats[day]["energy"] = round(val, 2)
     for day, val in stats.items():
         total = 24 * 3600
         for k in ("online", "offline", "asleep"):
             val[k] = round(val.get(k, 0.0) / total * 100, 2)
         val.setdefault("km", 0.0)
+        val.setdefault("energy", 0.0)
     try:
         os.makedirs(os.path.dirname(STAT_FILE), exist_ok=True)
         with open(STAT_FILE, "w", encoding="utf-8") as f:
@@ -1089,15 +1146,19 @@ def _fetch_data_once(vehicle_id="default"):
         last_val = None
         if isinstance(cached, dict):
             last_val = cached.get("last_charge_energy_added")
+        if last_val is None:
+            last_val = _load_last_energy(cache_id)
+
         charge = data.get("charge_state", {})
         if (
             charge.get("charging_state") == "Charging"
             and charge.get("charge_energy_added") is not None
         ):
-            last_val = charge.get("charge_energy_added")
+            val = charge.get("charge_energy_added")
+            if last_val is not None and val > last_val:
+                _log_energy(cache_id, val - last_val)
+            last_val = val
             _save_last_energy(cache_id, last_val)
-        elif last_val is None:
-            last_val = _load_last_energy(cache_id)
         if last_val is not None:
             data["last_charge_energy_added"] = last_val
 
@@ -1399,6 +1460,7 @@ def statistics_page():
                 "offline": entry.get("offline", 0.0),
                 "asleep": entry.get("asleep", 0.0),
                 "km": round(entry.get("km", 0.0), 2),
+                "energy": round(entry.get("energy", 0.0), 2),
             }
         )
     return render_template("statistik.html", rows=rows)
