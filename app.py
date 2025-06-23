@@ -27,6 +27,13 @@ load_dotenv()
 app = Flask(__name__)
 __version__ = get_version()
 CURRENT_YEAR = datetime.now().year
+GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
+
+
+@app.context_processor
+def inject_ga_id():
+    """Add Google Analytics tracking ID to all templates."""
+    return {"ga_id": GA_TRACKING_ID}
 
 # Ensure data paths are relative to this file regardless of the
 # current working directory.  This allows running the application
