@@ -788,9 +788,49 @@ def _compute_state_stats(entries):
     return stats
 
 
+def _compute_energy_stats(filename=os.path.join(DATA_DIR, "api.log")):
+    """Return per-day added energy in kWh based on ``api.log``."""
+    energy = {}
+    try:
+        with open(filename, "r", encoding="utf-8") as f:
+            last_val = None
+            last_day = None
+            for line in f:
+                idx = line.find("{")
+                if idx == -1:
+                    continue
+                ts_str = line[:idx].strip()
+                try:
+                    ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S,%f")
+                    day = ts.date().isoformat()
+                except Exception:
+                    continue
+                try:
+                    entry = json.loads(line[idx:])
+                    charge = entry.get("data", {}).get("charge_state", {})
+                    val = charge.get("charge_energy_added")
+                    if val is None:
+                        continue
+                    val = float(val)
+                except Exception:
+                    continue
+
+                if day != last_day:
+                    last_day = day
+                    last_val = val
+                    continue
+                if last_val is not None and val >= last_val:
+                    energy[day] = energy.get(day, 0.0) + (val - last_val)
+                last_val = val
+    except Exception:
+        pass
+    return energy
+
+
 def compute_statistics():
     """Compute daily statistics and save them to ``STAT_FILE``."""
     stats = _compute_state_stats(_load_state_entries())
+    energy = _compute_energy_stats()
     for fname in _get_trip_files():
         date_str = fname.split("_")[-1].split(".")[0]
         try:
@@ -799,13 +839,19 @@ def compute_statistics():
             pass
         path = os.path.join(TRIP_DIR, fname)
         km = _trip_distance(path)
-        stats.setdefault(date_str, {"online": 0.0, "offline": 0.0, "asleep": 0.0})
+        stats.setdefault(
+            date_str, {"online": 0.0, "offline": 0.0, "asleep": 0.0}
+        )
         stats[date_str]["km"] = km
+    for day, val in energy.items():
+        stats.setdefault(day, {"online": 0.0, "offline": 0.0, "asleep": 0.0})
+        stats[day]["energy"] = round(val, 2)
     for day, val in stats.items():
         total = 24 * 3600
         for k in ("online", "offline", "asleep"):
             val[k] = round(val.get(k, 0.0) / total * 100, 2)
         val.setdefault("km", 0.0)
+        val.setdefault("energy", 0.0)
     try:
         os.makedirs(os.path.dirname(STAT_FILE), exist_ok=True)
         with open(STAT_FILE, "w", encoding="utf-8") as f:
@@ -1399,6 +1445,7 @@ def statistics_page():
                 "offline": entry.get("offline", 0.0),
                 "asleep": entry.get("asleep", 0.0),
                 "km": round(entry.get("km", 0.0), 2),
+                "energy": round(entry.get("energy", 0.0), 2),
             }
         )
     return render_template("statistik.html", rows=rows)
