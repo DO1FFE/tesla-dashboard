@@ -1252,7 +1252,7 @@ def trip_history():
         path = _load_trip(os.path.join(TRIP_DIR, selected))
     heading = 0.0
     if len(path) >= 2:
-        heading = _bearing(path[-2][:2], path[-1][:2])
+        heading = _bearing(path[0][:2], path[1][:2])
     weekly, monthly = compute_trip_summaries()
     return render_template(
         "history.html",
