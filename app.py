@@ -70,6 +70,17 @@ if not state_logger.handlers:
     state_logger.addHandler(handler)
     state_logger.setLevel(logging.INFO)
 
+energy_logger = logging.getLogger("energy_logger")
+if not energy_logger.handlers:
+    handler = RotatingFileHandler(
+        os.path.join(DATA_DIR, "energy.log"), maxBytes=100_000, backupCount=1
+    )
+    formatter = logging.Formatter("%(asctime)s %(message)s")
+    formatter.converter = lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
+    handler.setFormatter(formatter)
+    energy_logger.addHandler(handler)
+    energy_logger.setLevel(logging.INFO)
+
 
 def _load_last_state(filename=os.path.join(DATA_DIR, "state.log")):
     """Load the last logged state for each vehicle from ``state.log``."""
@@ -456,6 +467,16 @@ def log_vehicle_state(vehicle_id, state):
         pass
 
 
+def _log_energy(vehicle_id, amount):
+    """Append added energy information to ``energy.log``."""
+    try:
+        energy_logger.info(
+            json.dumps({"vehicle_id": vehicle_id, "added_energy": amount})
+        )
+    except Exception:
+        pass
+
+
 def _cache_file(vehicle_id):
     """Return filename for cached data of a vehicle."""
     name = vehicle_id if vehicle_id is not None else "default"
@@ -788,13 +809,11 @@ def _compute_state_stats(entries):
     return stats
 
 
-def _compute_energy_stats(filename=os.path.join(DATA_DIR, "api.log")):
-    """Return per-day added energy in kWh based on ``api.log``."""
+def _compute_energy_stats(filename=os.path.join(DATA_DIR, "energy.log")):
+    """Return per-day added energy in kWh based on ``energy.log``."""
     energy = {}
     try:
         with open(filename, "r", encoding="utf-8") as f:
-            last_val = None
-            last_day = None
             for line in f:
                 idx = line.find("{")
                 if idx == -1:
@@ -802,26 +821,18 @@ def _compute_energy_stats(filename=os.path.join(DATA_DIR, "api.log")):
                 ts_str = line[:idx].strip()
                 try:
                     ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S,%f")
-                    day = ts.date().isoformat()
                 except Exception:
-                    continue
+                    try:
+                        ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        continue
+                day = ts.date().isoformat()
                 try:
                     entry = json.loads(line[idx:])
-                    charge = entry.get("data", {}).get("charge_state", {})
-                    val = charge.get("charge_energy_added")
-                    if val is None:
-                        continue
-                    val = float(val)
+                    val = float(entry.get("added_energy", 0.0))
                 except Exception:
                     continue
-
-                if day != last_day:
-                    last_day = day
-                    last_val = val
-                    continue
-                if last_val is not None and val >= last_val:
-                    energy[day] = energy.get(day, 0.0) + (val - last_val)
-                last_val = val
+                energy[day] = energy.get(day, 0.0) + val
     except Exception:
         pass
     return energy
@@ -1135,15 +1146,19 @@ def _fetch_data_once(vehicle_id="default"):
         last_val = None
         if isinstance(cached, dict):
             last_val = cached.get("last_charge_energy_added")
+        if last_val is None:
+            last_val = _load_last_energy(cache_id)
+
         charge = data.get("charge_state", {})
         if (
             charge.get("charging_state") == "Charging"
             and charge.get("charge_energy_added") is not None
         ):
-            last_val = charge.get("charge_energy_added")
+            val = charge.get("charge_energy_added")
+            if last_val is not None and val > last_val:
+                _log_energy(cache_id, val - last_val)
+            last_val = val
             _save_last_energy(cache_id, last_val)
-        elif last_val is None:
-            last_val = _load_last_energy(cache_id)
         if last_val is not None:
             data["last_charge_energy_added"] = last_val
 
