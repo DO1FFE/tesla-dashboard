@@ -1181,9 +1181,8 @@ def _fetch_data_once(vehicle_id="default"):
             _save_cached(cache_id, cached_copy)
         except Exception:
             pass
-        if data.get("_live"):
-            for q in subscribers.get(cache_id, []):
-                q.put(data)
+        for q in subscribers.get(cache_id, []):
+            q.put(data)
     return data
 
 
@@ -1313,10 +1312,21 @@ def stream_vehicle(vehicle_id="default"):
             if vehicle_id in latest_data:
                 yield f"data: {json.dumps(latest_data[vehicle_id])}\n\n"
             while True:
-                data = q.get()
-                yield f"data: {json.dumps(data)}\n\n"
+                try:
+                    data = q.get(timeout=15)
+                    msg = f"data: {json.dumps(data)}\n\n"
+                except queue.Empty:
+                    # Periodically send a comment to keep the connection alive
+                    msg = ": ping\n\n"
+                try:
+                    yield msg
+                except GeneratorExit:
+                    break
         finally:
-            subscribers.get(vehicle_id, []).remove(q)
+            try:
+                subscribers.get(vehicle_id, []).remove(q)
+            except ValueError:
+                pass
 
     return Response(gen(), mimetype="text/event-stream")
 
