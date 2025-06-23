@@ -144,8 +144,14 @@ function stepPlayback(idx) {
 if (playBtn) {
     playBtn.addEventListener('click', function() {
         speed = parseFloat(speedSel.value) || 1;
+        var startIdx = parseInt(slider.value, 10);
+        if (startIdx >= tripPath.length - 1) {
+            startIdx = 0;
+            slider.value = 0;
+            updateMarker(0, true);
+        }
         if (!playTimeout) {
-            stepPlayback(parseInt(slider.value, 10));
+            stepPlayback(startIdx);
         }
     });
 }
