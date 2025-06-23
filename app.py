@@ -1111,6 +1111,9 @@ def _fetch_data_once(vehicle_id="default"):
             _save_cached(cache_id, cached_copy)
         except Exception:
             pass
+        if data.get("_live"):
+            for q in subscribers.get(cache_id, []):
+                q.put(data)
     return data
 
 
@@ -1133,8 +1136,6 @@ def _fetch_loop(vehicle_id, interval=3):
                 send_aprs(data)
             except Exception:
                 pass
-        for q in subscribers.get(vehicle_id, []):
-            q.put(data)
         # Increase the delay to reduce API usage when no clients are
         # connected. Once a client connects the shorter interval is used
         # again on the next loop iteration.
