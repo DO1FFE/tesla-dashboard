@@ -242,8 +242,8 @@ def update_api_list(data, filename=os.path.join(DATA_DIR, "api-liste.txt")):
 
 
 # Communication with the Tesla API is logged via ``log_api_data`` and the
-# ``teslapy``/``urllib3`` loggers.  Requests to this web application only
-# record the called endpoint in ``api.log``.
+# ``teslapy``/``urllib3`` loggers. Requests to this web application are not
+# recorded in ``api.log``.
 
 
 def log_api_data(endpoint, data):
@@ -253,16 +253,6 @@ def log_api_data(endpoint, data):
         update_api_list(data)
     except Exception:
         pass
-
-
-@app.before_request
-def log_request():
-    """Record the endpoint path for every request in ``api.log``."""
-    try:
-        api_logger.info(json.dumps({"request": request.path}))
-    except Exception:
-        pass
-
 
 TRIP_DIR = os.path.join(DATA_DIR, "trips")
 STAT_FILE = os.path.join(DATA_DIR, "statistics.json")
