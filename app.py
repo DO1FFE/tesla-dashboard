@@ -1055,7 +1055,13 @@ def _fetch_loop(vehicle_id, interval=3):
                 pass
         for q in subscribers.get(vehicle_id, []):
             q.put(data)
-        time.sleep(interval)
+        # Increase the delay to reduce API usage when no clients are
+        # connected. Once a client connects the shorter interval is used
+        # again on the next loop iteration.
+        if subscribers.get(vehicle_id):
+            time.sleep(interval)
+        else:
+            time.sleep(30)
 
 
 def _start_thread(vehicle_id):
