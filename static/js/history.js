@@ -14,6 +14,12 @@ var playTimeout = null;
 var speed = 1;
 var marker = null;
 
+if (speedSel) {
+    speedSel.addEventListener('change', function() {
+        speed = parseFloat(speedSel.value) || 1;
+    });
+}
+
 function updateInfo(idx) {
     if (!Array.isArray(tripPath) || !tripPath.length) {
         return;
@@ -143,13 +149,7 @@ function stepPlayback(idx) {
     slider.value = idx;
     updateMarker(idx, true);
     if (idx < tripPath.length - 1) {
-        var cur = tripPath[idx][4];
-        var nxt = tripPath[idx + 1][4];
-        var diff = nxt - cur;
-        if (!diff || diff < 0) {
-            diff = 1000;
-        }
-        diff = diff / speed;
+        var diff = 1000 / speed;
         playTimeout = setTimeout(function() { stepPlayback(idx + 1); }, diff);
     }
 }
