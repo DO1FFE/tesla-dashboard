@@ -8,6 +8,7 @@ var announcementTimer = null;
 var lastConfigJSON = null;
 var lastApiInterval = null;
 var lastApiIntervalIdle = null;
+var parkStartTime = null;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 18;
@@ -217,6 +218,7 @@ function handleData(data) {
     updateLockStatus(vehicle.locked);
     updateUserPresence(vehicle.is_user_present);
     updateGearShift(drive.shift_state);
+    updateParkTime(data.park_start);
     updateNavBar(drive);
     updateSpeedometer(drive.speed, drive.power);
     updateOdometer(vehicle.odometer);
@@ -911,6 +913,34 @@ function updateDataAge(ts) {
     $el.text('Letztes Update vor ' + text + ' (' + timeStr + ')');
 }
 
+function updateParkTime(ts) {
+    if (typeof ts !== 'undefined') {
+        if (ts && ts < 1e12) {
+            ts *= 1000;
+        }
+        parkStartTime = ts || null;
+    }
+    displayParkTime();
+}
+
+function displayParkTime() {
+    var $el = $('#park-since');
+    if (!parkStartTime) {
+        $el.text('');
+        return;
+    }
+    var diff = Math.max(0, Date.now() - parkStartTime);
+    var minutes = Math.floor(diff / 60000);
+    var hours = Math.floor(minutes / 60);
+    minutes = minutes % 60;
+    var parts = [];
+    if (hours > 0) {
+        parts.push(hours + ' ' + (hours === 1 ? 'Stunde' : 'Stunden'));
+    }
+    parts.push(minutes + ' ' + (minutes === 1 ? 'Minute' : 'Minuten'));
+    $el.text('Geparkt seit ' + parts.join(' '));
+}
+
 function updateVehicleState(state) {
     if (typeof state === 'string' && state.length > 0) {
         $('#vehicle-state').text('State: ' + state);
@@ -1145,5 +1175,6 @@ setInterval(function() { updateDataAge(); }, 1000);
 setInterval(updateClientCount, 5000);
 setInterval(fetchAnnouncement, 15000);
 setInterval(fetchConfig, 15000);
+setInterval(displayParkTime, 60000);
 updateClientCount();
 fetchAnnouncement();
