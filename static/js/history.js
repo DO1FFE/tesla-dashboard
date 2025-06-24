@@ -89,6 +89,12 @@ if (Array.isArray(tripPath) && tripPath.length) {
 
     slider.addEventListener('input', function() {
         var idx = parseInt(this.value, 10);
+        if (playTimeout) {
+            stopPlayback(false);
+            if (playBtn) {
+                playBtn.textContent = 'Play';
+            }
+        }
         updateMarker(idx, false);
         var latlng = marker.getLatLng();
 
@@ -112,10 +118,14 @@ if (Array.isArray(tripPath) && tripPath.length) {
     updateMarker(0, true);
 }
 
-function stopPlayback() {
+function stopPlayback(reset) {
     if (playTimeout) {
         clearTimeout(playTimeout);
         playTimeout = null;
+    }
+    if (reset && Array.isArray(tripPath) && tripPath.length) {
+        slider.value = 0;
+        updateMarker(0, true);
     }
 }
 
@@ -124,7 +134,10 @@ function stepPlayback(idx) {
         return;
     }
     if (idx >= tripPath.length) {
-        stopPlayback();
+        stopPlayback(false);
+        if (playBtn) {
+            playBtn.textContent = 'Play';
+        }
         return;
     }
     slider.value = idx;
@@ -143,6 +156,12 @@ function stepPlayback(idx) {
 
 if (playBtn) {
     playBtn.addEventListener('click', function() {
+        if (playTimeout) {
+            stopPlayback(false);
+            playBtn.textContent = 'Play';
+            return;
+        }
+
         speed = parseFloat(speedSel.value) || 1;
         var startIdx = parseInt(slider.value, 10);
         if (startIdx >= tripPath.length - 1) {
@@ -150,14 +169,16 @@ if (playBtn) {
             slider.value = 0;
             updateMarker(0, true);
         }
-        if (!playTimeout) {
-            stepPlayback(startIdx);
-        }
+        stepPlayback(startIdx);
+        playBtn.textContent = 'Pause';
     });
 }
 
 if (stopBtn) {
     stopBtn.addEventListener('click', function() {
-        stopPlayback();
+        stopPlayback(true);
+        if (playBtn) {
+            playBtn.textContent = 'Play';
+        }
     });
 }
