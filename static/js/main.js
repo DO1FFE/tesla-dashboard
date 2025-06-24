@@ -9,6 +9,7 @@ var lastConfigJSON = null;
 var lastApiInterval = null;
 var lastApiIntervalIdle = null;
 var parkStartTime = null;
+var currentGear = null;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 18;
@@ -325,8 +326,10 @@ function handleData(data) {
 
 function updateGearShift(state) {
     var gear = state || 'P';
+    currentGear = gear;
     $('#gear-shift div').removeClass('active');
     $('#gear-shift div[data-gear="' + gear + '"]').addClass('active');
+    displayParkTime();
 }
 
 function updateLockStatus(locked) {
@@ -925,8 +928,12 @@ function updateParkTime(ts) {
 
 function displayParkTime() {
     var $el = $('#park-since');
+    if (currentGear && currentGear !== 'P') {
+        $el.hide();
+        return;
+    }
     if (!parkStartTime) {
-        $el.text('');
+        $el.hide();
         return;
     }
     var diff = Math.max(0, Date.now() - parkStartTime);
@@ -938,7 +945,7 @@ function displayParkTime() {
         parts.push(hours + ' ' + (hours === 1 ? 'Stunde' : 'Stunden'));
     }
     parts.push(minutes + ' ' + (minutes === 1 ? 'Minute' : 'Minuten'));
-    $el.text('Geparkt seit ' + parts.join(' '));
+    $el.text('Geparkt seit ' + parts.join(' ')).show();
 }
 
 function updateVehicleState(state) {
