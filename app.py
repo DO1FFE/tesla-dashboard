@@ -785,6 +785,17 @@ def _trip_distance(filename):
     return dist
 
 
+def _trip_max_speed(filename):
+    """Return the maximum speed recorded in a trip CSV file."""
+    points = _load_trip(filename)
+    max_speed = 0.0
+    for p in points:
+        speed = p[2]
+        if speed is not None and speed > max_speed:
+            max_speed = speed
+    return max_speed
+
+
 def _load_state_entries(filename=os.path.join(DATA_DIR, "state.log")):
     """Parse state log entries as (timestamp, state) tuples."""
     entries = []
@@ -887,10 +898,12 @@ def compute_statistics():
             pass
         path = os.path.join(TRIP_DIR, fname)
         km = _trip_distance(path)
+        speed = _trip_max_speed(path)
         stats.setdefault(
             date_str, {"online": 0.0, "offline": 0.0, "asleep": 0.0}
         )
         stats[date_str]["km"] = km
+        stats[date_str]["speed"] = speed
     for day, val in energy.items():
         stats.setdefault(day, {"online": 0.0, "offline": 0.0, "asleep": 0.0})
         stats[day]["energy"] = round(val, 2)
@@ -899,6 +912,7 @@ def compute_statistics():
         for k in ("online", "offline", "asleep"):
             val[k] = round(val.get(k, 0.0) / total * 100, 2)
         val.setdefault("km", 0.0)
+        val.setdefault("speed", 0.0)
         val.setdefault("energy", 0.0)
     try:
         os.makedirs(os.path.dirname(STAT_FILE), exist_ok=True)
@@ -1512,6 +1526,7 @@ def statistics_page():
                 "offline": entry.get("offline", 0.0),
                 "asleep": entry.get("asleep", 0.0),
                 "km": round(entry.get("km", 0.0), 2),
+                "speed": round(entry.get("speed", 0.0), 2),
                 "energy": round(entry.get("energy", 0.0), 2),
             }
         )
