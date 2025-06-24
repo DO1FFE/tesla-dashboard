@@ -390,6 +390,29 @@ select {
   width: 0;
 }
 
+/* Navigation menu linking to other pages */
+#page-menu {
+  margin: 10px 0;
+  text-align: center;
+}
+
+#page-menu a {
+  display: inline-block;
+  padding: 4px 8px;
+  background: var(--surface-color);
+  color: var(--text-color);
+  border: 1px solid #444;
+  border-radius: 4px;
+  margin: 0 5px;
+  text-decoration: none;
+}
+
+#page-menu a:hover {
+  background: var(--accent-color);
+  color: var(--bg-color);
+  text-decoration: none;
+}
+
 /* Simple automatic gear shift display */
 #gear-shift {
   display: inline-block;

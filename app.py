@@ -283,6 +283,10 @@ CONFIG_ITEMS = [
     {"id": "charging-info", "desc": "Ladeinformationen"},
     {"id": "v2l-infos", "desc": "V2L-Hinweis"},
     {"id": "announcement-box", "desc": "Hinweistext"},
+    {"id": "page-menu", "desc": "Seitenmenü"},
+    {"id": "menu-dashboard", "desc": "Dashboard im Seitenmenü"},
+    {"id": "menu-statistik", "desc": "Statistik im Seitenmenü"},
+    {"id": "menu-history", "desc": "History im Seitenmenü"},
     {"id": "nav-bar", "desc": "Navigationsleiste"},
     {"id": "media-player", "desc": "Medienwiedergabe"},
 ]
@@ -1273,7 +1277,13 @@ def _start_thread(vehicle_id):
 
 @app.route("/")
 def index():
-    return render_template("index.html", version=__version__, year=CURRENT_YEAR)
+    cfg = load_config()
+    return render_template(
+        "index.html",
+        version=__version__,
+        year=CURRENT_YEAR,
+        config=cfg,
+    )
 
 
 @app.route("/map")
@@ -1305,6 +1315,7 @@ def trip_history():
     if len(path) >= 2:
         heading = _bearing(path[0][:2], path[1][:2])
     weekly, monthly = compute_trip_summaries()
+    cfg = load_config()
     return render_template(
         "history.html",
         path=path,
@@ -1315,6 +1326,7 @@ def trip_history():
         selected=selected,
         weekly=weekly,
         monthly=monthly,
+        config=cfg,
     )
 
 
@@ -1531,7 +1543,8 @@ def statistics_page():
                 "energy": round(entry.get("energy", 0.0), 2),
             }
         )
-    return render_template("statistik.html", rows=rows)
+    cfg = load_config()
+    return render_template("statistik.html", rows=rows, config=cfg)
 
 
 @app.route("/api/errors")
