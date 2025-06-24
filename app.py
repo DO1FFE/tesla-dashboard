@@ -263,6 +263,7 @@ def log_api_data(endpoint, data):
 
 TRIP_DIR = os.path.join(DATA_DIR, "trips")
 STAT_FILE = os.path.join(DATA_DIR, "statistics.json")
+PARKTIME_FILE = os.path.join(DATA_DIR, "parktime.json")
 
 # Elements on the dashboard that can be toggled via the config page
 CONFIG_ITEMS = [
@@ -330,7 +331,7 @@ def requires_auth(f):
     return decorated
 
 
-park_start_ms = None
+park_start_ms = _load_parktime()
 last_shift_state = None
 trip_path = []
 current_trip_file = None
@@ -365,8 +366,11 @@ def track_park_time(vehicle_data):
     if shift in (None, "P"):
         if park_start_ms is None or last_shift_state not in (None, "P"):
             park_start_ms = int(ts) if ts is not None else None
+            if park_start_ms is not None:
+                _save_parktime(park_start_ms)
     else:
         park_start_ms = None
+        _delete_parktime()
     last_shift_state = shift
 
 
@@ -527,6 +531,32 @@ def _save_last_energy(vehicle_id, value):
     try:
         with open(_last_energy_file(vehicle_id), "w", encoding="utf-8") as f:
             f.write(str(value))
+    except Exception:
+        pass
+
+
+def _load_parktime():
+    """Load the last park timestamp from ``parktime.json``."""
+    try:
+        with open(PARKTIME_FILE, "r", encoding="utf-8") as f:
+            return int(json.load(f))
+    except Exception:
+        return None
+
+
+def _save_parktime(ts):
+    """Persist the park timestamp to ``parktime.json``."""
+    try:
+        with open(PARKTIME_FILE, "w", encoding="utf-8") as f:
+            json.dump(int(ts), f)
+    except Exception:
+        pass
+
+
+def _delete_parktime():
+    """Remove the stored park timestamp if present."""
+    try:
+        os.remove(PARKTIME_FILE)
     except Exception:
         pass
 
@@ -1067,6 +1097,7 @@ def get_vehicle_data(vehicle_id=None, state=None):
         pass
     log_api_data("get_vehicle_data", sanitized)
     sanitized["park_start"] = park_start_ms
+    sanitized["park_duration"] = park_duration_string(park_start_ms)
     sanitized["path"] = trip_path
     sanitized["_live"] = True
     return sanitized
