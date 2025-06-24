@@ -1,9 +1,31 @@
-var map = L.map('map').setView([51.4556, 7.0116], 13);
+var DEFAULT_ZOOM = 18;
+var map = L.map('map').setView([51.4556, 7.0116], DEFAULT_ZOOM);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
 }).addTo(map);
 
 var MILES_TO_KM = 1.60934;
+
+function computeZoomForSpeed(speedKmh) {
+    var zoom = DEFAULT_ZOOM;
+    if (speedKmh != null && !isNaN(speedKmh)) {
+        var kmh = Math.round(Number(speedKmh));
+        if (kmh <= 20) {
+            zoom = 18;
+        } else if (kmh <= 30) {
+            zoom = 17;
+        } else if (kmh <= 50) {
+            zoom = 16;
+        } else if (kmh <= 70) {
+            zoom = 15;
+        } else if (kmh <= 100) {
+            zoom = 14;
+        } else {
+            zoom = 13;
+        }
+    }
+    return zoom;
+}
 
 // Elements for playback controls
 var playBtn = document.getElementById('play-btn');
@@ -53,7 +75,13 @@ function updateMarker(idx, center) {
     marker.setRotationAngle(angle);
     updateInfo(idx);
     if (center) {
-        map.setView(marker.getLatLng(), map.getZoom());
+        var speedVal = point[2];
+        var speedKmh = 0;
+        if (speedVal !== null && speedVal !== undefined && speedVal !== '') {
+            speedKmh = Number(speedVal) * MILES_TO_KM;
+        }
+        var zoom = computeZoomForSpeed(speedKmh);
+        map.setView(marker.getLatLng(), zoom);
     }
 }
 
