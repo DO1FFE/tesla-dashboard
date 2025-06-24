@@ -150,6 +150,11 @@ function stepPlayback(idx) {
     updateMarker(idx, true);
     if (idx < tripPath.length - 1) {
         var diff = 1000 / speed;
+        var t1 = tripPath[idx][4];
+        var t2 = tripPath[idx + 1][4];
+        if (t1 && t2 && t2 > t1) {
+            diff = (t2 - t1) / speed;
+        }
         playTimeout = setTimeout(function() { stepPlayback(idx + 1); }, diff);
     }
 }
