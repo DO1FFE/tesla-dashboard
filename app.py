@@ -45,6 +45,7 @@ CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 APRS_HOST = "euro.aprs2.net"
 APRS_PORT = 14580
 LOCAL_TZ = ZoneInfo("Europe/Berlin")
+MILES_TO_KM = 1.60934
 api_logger = logging.getLogger("api_logger")
 if not api_logger.handlers:
     handler = RotatingFileHandler(
@@ -786,14 +787,14 @@ def _trip_distance(filename):
 
 
 def _trip_max_speed(filename):
-    """Return the maximum speed recorded in a trip CSV file."""
+    """Return the maximum speed recorded in a trip CSV file in km/h."""
     points = _load_trip(filename)
     max_speed = 0.0
     for p in points:
         speed = p[2]
         if speed is not None and speed > max_speed:
             max_speed = speed
-    return max_speed
+    return max_speed * MILES_TO_KM
 
 
 def _load_state_entries(filename=os.path.join(DATA_DIR, "state.log")):
@@ -1526,7 +1527,7 @@ def statistics_page():
                 "offline": entry.get("offline", 0.0),
                 "asleep": entry.get("asleep", 0.0),
                 "km": round(entry.get("km", 0.0), 2),
-                "speed": round(entry.get("speed", 0.0), 2),
+                "speed": int(round(entry.get("speed", 0.0))),
                 "energy": round(entry.get("energy", 0.0), 2),
             }
         )
