@@ -1202,13 +1202,17 @@ def _fetch_loop(vehicle_id, interval=3):
                 send_aprs(data)
             except Exception:
                 pass
-        # Increase the delay to reduce API usage when no clients are
-        # connected. Once a client connects the shorter interval is used
-        # again on the next loop iteration.
-        if subscribers.get(vehicle_id):
-            time.sleep(interval)
-        else:
+        # Increase the delay to reduce API usage when the car is parked or
+        # no clients are connected. Once a client connects while driving the
+        # shorter interval is used again on the next loop iteration.
+        now_ms = int(time.time() * 1000)
+        parked_long = False
+        if park_start_ms is not None and now_ms - park_start_ms >= 600000:
+            parked_long = True
+        if parked_long or not subscribers.get(vehicle_id):
             time.sleep(idle_interval)
+        else:
+            time.sleep(interval)
 
 
 def _start_thread(vehicle_id):

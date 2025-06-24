@@ -57,6 +57,10 @@ Additional toggles allow hiding the heater indicators and the list of nearby Sup
 You can also enable or disable the announcement text and adjust the API polling interval without restarting the server.
 Clients reload automatically when the polling interval changes so the new setting takes effect immediately.
 
+When the vehicle remains parked for more than ten minutes the backend
+automatically switches to the idle polling interval so the car can go to
+sleep even if clients stay connected.
+
 Data is streamed to the frontend via `/stream/<vehicle_id>` using Server-Sent Events so the dashboard updates instantly when new information arrives.
 The endpoint `/apiliste` exposes a text file listing all seen API variables and their latest values.
 
