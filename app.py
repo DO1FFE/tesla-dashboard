@@ -331,6 +331,32 @@ def requires_auth(f):
     return decorated
 
 
+def _load_parktime():
+    """Load the last park timestamp from ``parktime.json``."""
+    try:
+        with open(PARKTIME_FILE, "r", encoding="utf-8") as f:
+            return int(json.load(f))
+    except Exception:
+        return None
+
+
+def _save_parktime(ts):
+    """Persist the park timestamp to ``parktime.json``."""
+    try:
+        with open(PARKTIME_FILE, "w", encoding="utf-8") as f:
+            json.dump(int(ts), f)
+    except Exception:
+        pass
+
+
+def _delete_parktime():
+    """Remove the stored park timestamp if present."""
+    try:
+        os.remove(PARKTIME_FILE)
+    except Exception:
+        pass
+
+
 park_start_ms = _load_parktime()
 last_shift_state = None
 trip_path = []
@@ -534,31 +560,6 @@ def _save_last_energy(vehicle_id, value):
     except Exception:
         pass
 
-
-def _load_parktime():
-    """Load the last park timestamp from ``parktime.json``."""
-    try:
-        with open(PARKTIME_FILE, "r", encoding="utf-8") as f:
-            return int(json.load(f))
-    except Exception:
-        return None
-
-
-def _save_parktime(ts):
-    """Persist the park timestamp to ``parktime.json``."""
-    try:
-        with open(PARKTIME_FILE, "w", encoding="utf-8") as f:
-            json.dump(int(ts), f)
-    except Exception:
-        pass
-
-
-def _delete_parktime():
-    """Remove the stored park timestamp if present."""
-    try:
-        os.remove(PARKTIME_FILE)
-    except Exception:
-        pass
 
 
 def send_aprs(vehicle_data):
