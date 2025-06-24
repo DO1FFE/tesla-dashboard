@@ -142,7 +142,7 @@ var arrowIcon = L.divIcon({
     iconAnchor: [15, 15]
 });
 
-var marker = L.marker([0, 0], {
+var marker = L.marker(DEFAULT_POS, {
     icon: arrowIcon,
     rotationAngle: 0,
     rotationOrigin: 'center center'
