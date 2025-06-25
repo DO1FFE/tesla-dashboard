@@ -504,10 +504,10 @@ function updateTPMS(fl, fr, rl, rr) {
         var num = Number(val);
         $text.text(num.toFixed(1));
         var color = '#4caf50';
-        if (num < 2.8 || num > 3.3) {
+        if (num < 2.7 || num > 3.3) {
             color = '#ff9800';
         }
-        if (num < 2.5 || num > 3.6) {
+        if (num < 2.1 || num > 3.7) {
             color = '#d00';
         }
         $circle.css('stroke', color);
