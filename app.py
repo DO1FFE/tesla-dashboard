@@ -1012,6 +1012,17 @@ def _cached_vehicle_list(tesla, ttl=86400):
         return _vehicle_list_cache
 
 
+def _refresh_state(vehicle, times=2):
+    """Query the vehicle state multiple times and return the last value."""
+    state = None
+    for _ in range(times):
+        vehicle.get_vehicle_summary()
+        state = vehicle.get("state") or vehicle["state"]
+        log_vehicle_state(vehicle["id_s"], state)
+        log_api_data("get_vehicle_summary", {"state": state})
+    return state
+
+
 def get_vehicle_state(vehicle_id=None):
     """Return the current vehicle state without waking the car."""
     global _default_vehicle_id
@@ -1033,10 +1044,7 @@ def get_vehicle_state(vehicle_id=None):
         vehicle = vehicles[0]
 
     try:
-        vehicle.get_vehicle_summary()
-        state = vehicle.get("state") or vehicle["state"]
-        log_vehicle_state(vehicle["id_s"], state)
-        log_api_data("get_vehicle_summary", {"state": state})
+        state = _refresh_state(vehicle)
     except Exception as exc:
         _log_api_error(exc)
         log_vehicle_state(vehicle["id_s"], "offline")
@@ -1063,10 +1071,7 @@ def get_vehicle_data(vehicle_id=None, state=None):
 
     if state is None:
         try:
-            vehicle.get_vehicle_summary()
-            state = vehicle.get("state") or vehicle["state"]
-            log_vehicle_state(vehicle["id_s"], state)
-            log_api_data("get_vehicle_summary", {"state": state})
+            state = _refresh_state(vehicle)
         except Exception as exc:
             _log_api_error(exc)
             log_vehicle_state(vehicle["id_s"], "offline")
