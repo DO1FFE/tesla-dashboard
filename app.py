@@ -1268,16 +1268,16 @@ def _fetch_loop(vehicle_id, interval=3):
                 send_aprs(data)
             except Exception:
                 pass
-        # Increase the delay to reduce API usage when the car is parked or
-        # no clients are connected. Once a client connects while driving the
-        # shorter interval is used again on the next loop iteration.
+        # Increase the delay to reduce API usage when the car is parked. When
+        # a person is detected in the car, revert to the normal interval
+        # immediately.
         now_ms = int(time.time() * 1000)
         parked_long = False
         if park_start_ms is not None and now_ms - park_start_ms >= 600000:
             parked_long = True
         if occupant_present:
             time.sleep(interval)
-        elif parked_long or not subscribers.get(vehicle_id):
+        elif parked_long:
             _sleep_idle(idle_interval)
         else:
             time.sleep(interval)
