@@ -41,6 +41,54 @@ def inject_ga_id():
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
+
+def vehicle_dir(vehicle_id):
+    """Return directory for a specific vehicle."""
+    name = str(vehicle_id) if vehicle_id is not None else "default"
+    path = os.path.join(DATA_DIR, name)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+def trip_dir(vehicle_id):
+    """Return directory holding trip CSV files for ``vehicle_id``."""
+    path = os.path.join(vehicle_dir(vehicle_id), "trips")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def migrate_legacy_files():
+    """Move files from the old layout to per-vehicle directories."""
+    try:
+        for fname in os.listdir(DATA_DIR):
+            if fname.startswith("cache_") and fname.endswith(".json"):
+                vid = fname[len("cache_") : -5]
+                src = os.path.join(DATA_DIR, fname)
+                dst = os.path.join(vehicle_dir(vid), "cache.json")
+                if not os.path.exists(dst):
+                    os.rename(src, dst)
+            if fname.startswith("last_energy_") and fname.endswith(".txt"):
+                vid = fname[len("last_energy_") : -4]
+                src = os.path.join(DATA_DIR, fname)
+                dst = os.path.join(vehicle_dir(vid), "last_energy.txt")
+                if not os.path.exists(dst):
+                    os.rename(src, dst)
+        old_trip_dir = os.path.join(DATA_DIR, "trips")
+        if os.path.isdir(old_trip_dir):
+            for f in os.listdir(old_trip_dir):
+                if f.endswith(".csv"):
+                    src = os.path.join(old_trip_dir, f)
+                    dst = os.path.join(trip_dir(None), f)
+                    if not os.path.exists(dst):
+                        os.rename(src, dst)
+            try:
+                os.rmdir(old_trip_dir)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+migrate_legacy_files()
+
 CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 APRS_HOST = "euro.aprs2.net"
 APRS_PORT = 14580
@@ -262,7 +310,6 @@ def log_api_data(endpoint, data):
     except Exception:
         pass
 
-TRIP_DIR = os.path.join(DATA_DIR, "trips")
 STAT_FILE = os.path.join(DATA_DIR, "statistics.json")
 PARKTIME_FILE = os.path.join(DATA_DIR, "parktime.json")
 
@@ -474,9 +521,10 @@ def track_drive_path(vehicle_data):
     if lat is not None and lon is not None:
         if ts is None:
             ts = int(time.time() * 1000)
+        vid = vehicle_data.get("id_s") or vehicle_data.get("vehicle_id")
         date_str = time.strftime("%Y%m%d", time.localtime(ts / 1000))
         if current_trip_file is None or current_trip_date != date_str:
-            current_trip_file = os.path.join(TRIP_DIR, f"trip_{date_str}.csv")
+            current_trip_file = os.path.join(trip_dir(vid), f"trip_{date_str}.csv")
             current_trip_date = date_str
         point = [lat, lon]
         if not trip_path or trip_path[-1] != point:
@@ -520,8 +568,7 @@ def _log_energy(vehicle_id, amount):
 
 def _cache_file(vehicle_id):
     """Return filename for cached data of a vehicle."""
-    name = vehicle_id if vehicle_id is not None else "default"
-    return os.path.join(DATA_DIR, f"cache_{name}.json")
+    return os.path.join(vehicle_dir(vehicle_id), "cache.json")
 
 
 def _load_cached(vehicle_id):
@@ -544,8 +591,7 @@ def _save_cached(vehicle_id, data):
 
 def _last_energy_file(vehicle_id):
     """Return filename for the last added energy of a vehicle."""
-    name = vehicle_id if vehicle_id is not None else "default"
-    return os.path.join(DATA_DIR, f"last_energy_{name}.txt")
+    return os.path.join(vehicle_dir(vehicle_id), "last_energy.txt")
 
 
 def _load_last_energy(vehicle_id):
@@ -680,22 +726,37 @@ def send_aprs(vehicle_data):
         _log_api_error(exc)
 
 
-def _get_trip_files(directory=TRIP_DIR):
-    """Return a list of available trip CSV files sorted chronologically."""
-    try:
-        os.makedirs(directory, exist_ok=True)
-        files = [f for f in os.listdir(directory) if f.endswith(".csv")]
-        files.sort()
-        return files
-    except Exception:
-        return []
+def _get_trip_files(vehicle_id=None):
+    """Return a sorted list of available trip CSV paths."""
+    dirs = []
+    if vehicle_id is None:
+        try:
+            for name in os.listdir(DATA_DIR):
+                d = os.path.join(DATA_DIR, name, "trips")
+                if os.path.isdir(d):
+                    dirs.append(d)
+        except Exception:
+            pass
+    else:
+        dirs.append(trip_dir(vehicle_id))
+    files = []
+    for d in dirs:
+        try:
+            for f in os.listdir(d):
+                if f.endswith(".csv"):
+                    files.append(os.path.join(d, f))
+        except Exception:
+            continue
+    files.sort()
+    return files
 
 
 def _get_trip_periods():
     """Return sorted lists of available weeks and months."""
     weeks = set()
     months = set()
-    for fname in _get_trip_files():
+    for path in _get_trip_files():
+        fname = os.path.basename(path)
         date_str = fname.split("_")[-1].split(".")[0]
         try:
             day = datetime.strptime(date_str, "%Y%m%d").date()
@@ -710,7 +771,8 @@ def _get_trip_periods():
 def _load_trip_period(prefix, key):
     """Load all trip points for the given week or month key."""
     points = []
-    for fname in _get_trip_files():
+    for path in _get_trip_files():
+        fname = os.path.basename(path)
         date_str = fname.split("_")[-1].split(".")[0]
         try:
             day = datetime.strptime(date_str, "%Y%m%d").date()
@@ -723,7 +785,7 @@ def _load_trip_period(prefix, key):
             continue
         if prefix == "month" and month_key != key:
             continue
-        points.extend(_load_trip(os.path.join(TRIP_DIR, fname)))
+        points.extend(_load_trip(path))
     return points
 
 
@@ -895,13 +957,13 @@ def compute_statistics():
     """Compute daily statistics and save them to ``STAT_FILE``."""
     stats = _compute_state_stats(_load_state_entries())
     energy = _compute_energy_stats()
-    for fname in _get_trip_files():
+    for path in _get_trip_files():
+        fname = os.path.basename(path)
         date_str = fname.split("_")[-1].split(".")[0]
         try:
             date_str = datetime.strptime(date_str, "%Y%m%d").date().isoformat()
         except Exception:
             pass
-        path = os.path.join(TRIP_DIR, fname)
         km = _trip_distance(path)
         speed = _trip_max_speed(path)
         stats.setdefault(
@@ -932,13 +994,14 @@ def compute_trip_summaries():
     """Return weekly and monthly distance summaries."""
     weekly = {}
     monthly = {}
-    for fname in _get_trip_files():
+    for path in _get_trip_files():
+        fname = os.path.basename(path)
         date_str = fname.split("_")[-1].split(".")[0]
         try:
             day = datetime.strptime(date_str, "%Y%m%d").date()
         except Exception:
             continue
-        km = _trip_distance(os.path.join(TRIP_DIR, fname))
+        km = _trip_distance(path)
         iso_year, iso_week, _ = day.isocalendar()
         week_key = f"{iso_year}-W{iso_week:02d}"
         weekly[week_key] = round(weekly.get(week_key, 0.0) + km, 2)
@@ -1312,7 +1375,8 @@ def map_only():
 @app.route("/history")
 def trip_history():
     """Show recorded trips and allow selecting a trip to display."""
-    files = _get_trip_files()
+    paths = _get_trip_files()
+    files = [os.path.relpath(p, DATA_DIR) for p in paths]
     weeks, months = _get_trip_periods()
     selected = request.args.get("file")
     path = []
@@ -1324,10 +1388,10 @@ def trip_history():
         else:
             if selected not in files and files:
                 selected = files[-1]
-            path = _load_trip(os.path.join(TRIP_DIR, selected)) if selected else []
+            path = _load_trip(os.path.join(DATA_DIR, selected)) if selected else []
     elif files:
         selected = files[-1]
-        path = _load_trip(os.path.join(TRIP_DIR, selected))
+        path = _load_trip(os.path.join(DATA_DIR, selected))
     heading = 0.0
     if len(path) >= 2:
         heading = _bearing(path[0][:2], path[1][:2])
