@@ -1239,6 +1239,16 @@ def _fetch_data_once(vehicle_id="default"):
     return data
 
 
+def _sleep_idle(seconds, vehicle_id):
+    """Sleep up to ``seconds`` but return early when activity is detected."""
+    remaining = seconds
+    while remaining > 0:
+        time.sleep(min(1, remaining))
+        remaining -= 1
+        if occupant_present or subscribers.get(vehicle_id):
+            break
+
+
 def _fetch_loop(vehicle_id, interval=3):
     """Continuously fetch data for a vehicle and notify subscribers."""
     idle_interval = 30
@@ -1266,7 +1276,7 @@ def _fetch_loop(vehicle_id, interval=3):
         if park_start_ms is not None and now_ms - park_start_ms >= 600000:
             parked_long = True
         if (parked_long and not occupant_present) or not subscribers.get(vehicle_id):
-            time.sleep(idle_interval)
+            _sleep_idle(idle_interval, vehicle_id)
         else:
             time.sleep(interval)
 
