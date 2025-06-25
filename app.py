@@ -1265,7 +1265,7 @@ def _fetch_loop(vehicle_id, interval=3):
         parked_long = False
         if park_start_ms is not None and now_ms - park_start_ms >= 600000:
             parked_long = True
-        if parked_long or not subscribers.get(vehicle_id):
+        if (parked_long and not occupant_present) or not subscribers.get(vehicle_id):
             time.sleep(idle_interval)
         else:
             time.sleep(interval)

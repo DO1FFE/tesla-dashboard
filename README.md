@@ -59,7 +59,8 @@ Clients reload automatically when the polling interval changes so the new settin
 
 When the vehicle remains parked for more than ten minutes the backend
 automatically switches to the idle polling interval so the car can go to
-sleep even if clients stay connected.
+sleep even if clients stay connected. If occupant presence is reported via
+`/api/occupant` the normal interval is used even while parked.
 
 Data is streamed to the frontend via `/stream/<vehicle_id>` using Server-Sent Events so the dashboard updates instantly when new information arrives.
 The endpoint `/apiliste` exposes a text file listing all seen API variables and their latest values.
