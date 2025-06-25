@@ -25,11 +25,14 @@ This is a simple Flask application that displays real-time data from a Tesla veh
 All API calls are logged to `data/api.log` without storing request details. The log file uses rotation and will grow to at most 1&nbsp;MB.
 Vehicle state changes are written to `data/state.log`.
 Added charging energy is appended to `data/energy.log` whenever the value changes while charging. Timestamps in this file are recorded in the Europe/Berlin timezone.
-The latest successful API response is stored in `data/cache_<vehicle_id>.json`.
+The latest successful API response is stored in `data/<vehicle_id>/cache.json`.
 This cache is always updated with the current vehicle state so the dashboard
 knows whether the car is online, asleep or offline even when no fresh data is
 available. When the Tesla API cannot be reached the server serves this cached
-data back to the client.
+data back to the client. Beim Start prüft der Server, ob sich noch Dateien im
+alten Schema befinden (etwa `cache_<id>.json`, `last_energy_<id>.txt` oder
+CSV-Dateien in `data/trips`) und verschiebt sie automatisch in den passenden
+Fahrzeugordner.
 All data paths are resolved relative to the application directory, so the server
 can be started from any location while still accessing existing trips and logs.
 
@@ -46,7 +49,7 @@ the application wake the vehicle and query live data.
 
 The dashboard shows a short overview depending on whether the vehicle is parked, driving or charging. Below this, additional tables are grouped by category (battery/charging, climate, drive state, vehicle status and media information) to make the raw API data easier to read. While parked the dashboard also displays tire pressures, power usage of the drive unit and the 12V battery as well as how long the vehicle has been parked.
 
-While driving, a blue path is drawn on the map using the reported GPS positions. All trips of a day are logged to a single CSV file under `data/trips` for later analysis.
+While driving, a blue path is drawn on the map using the reported GPS positions. All trips of a day are logged to a single CSV file under `data/<vehicle_id>/trips` for later analysis.
 The `/history` page lists these files so previous trips can be selected and displayed on an interactive map.
 Entire weeks or months can also be chosen to display longer time spans at once.
 Using the slider you can inspect each recorded point and see the exact timestamp along with speed and power information.
