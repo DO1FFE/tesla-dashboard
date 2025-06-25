@@ -1239,13 +1239,13 @@ def _fetch_data_once(vehicle_id="default"):
     return data
 
 
-def _sleep_idle(seconds, vehicle_id):
-    """Sleep up to ``seconds`` but return early when activity is detected."""
+def _sleep_idle(seconds):
+    """Sleep up to ``seconds`` but return early when occupant presence is detected."""
     remaining = seconds
     while remaining > 0:
         time.sleep(min(1, remaining))
         remaining -= 1
-        if occupant_present or subscribers.get(vehicle_id):
+        if occupant_present:
             break
 
 
@@ -1275,8 +1275,10 @@ def _fetch_loop(vehicle_id, interval=3):
         parked_long = False
         if park_start_ms is not None and now_ms - park_start_ms >= 600000:
             parked_long = True
-        if (parked_long and not occupant_present) or not subscribers.get(vehicle_id):
-            _sleep_idle(idle_interval, vehicle_id)
+        if occupant_present:
+            time.sleep(interval)
+        elif parked_long or not subscribers.get(vehicle_id):
+            _sleep_idle(idle_interval)
         else:
             time.sleep(interval)
 
