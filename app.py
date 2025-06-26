@@ -1331,24 +1331,47 @@ def _fetch_loop(vehicle_id, interval=3):
                 send_aprs(data)
             except Exception:
                 pass
-        # Increase the delay to reduce API usage when the car is parked. When
-        # a person is detected in the car or the vehicle is charging, revert to
-        # the normal interval immediately.
-        now_ms = int(time.time() * 1000)
-        parked_long = False
-        if park_start_ms is not None and now_ms - park_start_ms >= 600000:
-            parked_long = True
+        # Use the normal interval whenever someone is in the vehicle, any
+        # opening is not fully closed or a drive gear is engaged.  Otherwise
+        # fall back to the idle interval so the car can go to sleep.
+        door_open = False
+        window_open = False
+        trunk_open = False
+        unlocked = False
+        gear_active = False
         charging = False
+        present = occupant_present
         if isinstance(data, dict):
-            charge_state = data.get("charge_state", {})
-            if charge_state.get("charging_state") == "Charging":
-                charging = True
-        if occupant_present or charging:
+            v_state = data.get("vehicle_state", {})
+            d_state = data.get("drive_state", {})
+            c_state = data.get("charge_state", {})
+            door_open = any(v_state.get(k) for k in ["df", "dr", "pf", "pr"])
+            window_open = any(
+                v_state.get(k) for k in [
+                    "fd_window",
+                    "rd_window",
+                    "fp_window",
+                    "rp_window",
+                ]
+            )
+            trunk_open = any(v_state.get(k) for k in ["ft", "rt"])
+            unlocked = v_state.get("locked") is False
+            present = present or v_state.get("is_user_present")
+            gear_active = d_state.get("shift_state") in ("R", "N", "D")
+            charging = c_state.get("charging_state") == "Charging"
+
+        if (
+            present
+            or gear_active
+            or door_open
+            or window_open
+            or trunk_open
+            or unlocked
+            or charging
+        ):
             time.sleep(interval)
-        elif parked_long:
-            _sleep_idle(idle_interval)
         else:
-            time.sleep(interval)
+            _sleep_idle(idle_interval)
 
 
 def _start_thread(vehicle_id):
