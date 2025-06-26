@@ -1332,13 +1332,18 @@ def _fetch_loop(vehicle_id, interval=3):
             except Exception:
                 pass
         # Increase the delay to reduce API usage when the car is parked. When
-        # a person is detected in the car, revert to the normal interval
-        # immediately.
+        # a person is detected in the car or the vehicle is charging, revert to
+        # the normal interval immediately.
         now_ms = int(time.time() * 1000)
         parked_long = False
         if park_start_ms is not None and now_ms - park_start_ms >= 600000:
             parked_long = True
-        if occupant_present:
+        charging = False
+        if isinstance(data, dict):
+            charge_state = data.get("charge_state", {})
+            if charge_state.get("charging_state") == "Charging":
+                charging = True
+        if occupant_present or charging:
             time.sleep(interval)
         elif parked_long:
             _sleep_idle(idle_interval)
