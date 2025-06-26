@@ -767,7 +767,7 @@ function updateChargingInfo(charge) {
             rows.push('<tr><th>Schnelllader Typ:</th><td>' + charge.fast_charger_type + '</td></tr>');
         }
         if (charge.minutes_to_full_charge != null) {
-            rows.push('<tr><th>Minuten bis voll:</th><td>' + Math.round(charge.minutes_to_full_charge) + ' min</td></tr>');
+            rows.push('<tr><th>Minuten bis Ladegrenze (' + charge.charge_limit_soc + ' %):</th><td>' + Math.round(charge.minutes_to_full_charge) + ' min</td></tr>');
         }
         if (state !== 'Charging' && lastEnergyAdded != null) {
             rows.push('<tr><th>Zuletzt hinzugefügte Energie:</th><td>' + lastEnergyAdded.toFixed(2) + ' kWh</td></tr>');
