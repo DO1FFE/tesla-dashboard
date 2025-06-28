@@ -806,7 +806,11 @@ function updateNavBar(drive) {
         var m = mins % 60;
         var timeStr = (h > 0 ? h + 'h ' : '') + m + 'min';
         var arrival = new Date(Date.now() + mins * 60000);
-        var arrivalStr = arrival.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        var arrivalStr = arrival.toLocaleTimeString('de-DE', {
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZone: 'Europe/Berlin'
+        });
         rows.push('<tr><th><span class="icon">⏱️</span>Restzeit (Ankunftszeit):</th><td>' + timeStr + ' (' + arrivalStr + ')</td></tr>');
     }
     if (drive.active_route_traffic_minutes_delay != null) {
@@ -912,7 +916,12 @@ function updateDataAge(ts) {
         var s = diff % 60;
         text = h + ' h ' + m + ' min ' + s + ' s';
     }
-    var timeStr = new Date(lastDataTimestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+    var timeStr = new Date(lastDataTimestamp).toLocaleTimeString('de-DE', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        timeZone: 'Europe/Berlin'
+    });
     $el.text('Letztes Update vor ' + text + ' (' + timeStr + ')');
 }
 
