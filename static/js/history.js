@@ -50,7 +50,7 @@ function updateInfo(idx) {
     var text = [];
     if (point[4]) {
         var date = new Date(point[4]);
-        text.push(date.toLocaleString());
+        text.push(date.toLocaleString('de-DE', { timeZone: 'Europe/Berlin' }));
     }
     if (point[2] !== null && point[2] !== undefined && point[2] !== '') {
         var kmh = Math.round(point[2] * MILES_TO_KM);

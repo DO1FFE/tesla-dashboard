@@ -522,7 +522,7 @@ def track_drive_path(vehicle_data):
         if ts is None:
             ts = int(time.time() * 1000)
         vid = vehicle_data.get("id_s") or vehicle_data.get("vehicle_id")
-        date_str = time.strftime("%Y%m%d", time.localtime(ts / 1000))
+        date_str = datetime.fromtimestamp(ts / 1000, LOCAL_TZ).strftime("%Y%m%d")
         if current_trip_file is None or current_trip_date != date_str:
             current_trip_file = os.path.join(trip_dir(vid), f"trip_{date_str}.csv")
             current_trip_date = date_str
@@ -1626,9 +1626,9 @@ def error_page():
         errors = list(api_errors)
     for e in errors:
         try:
-            e["time_str"] = time.strftime(
-                "%Y-%m-%d %H:%M:%S", time.localtime(e["timestamp"])
-            )
+            e["time_str"] = datetime.fromtimestamp(
+                e["timestamp"], LOCAL_TZ
+            ).strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
             e["time_str"] = str(e["timestamp"])
     return render_template("errors.html", errors=errors)
