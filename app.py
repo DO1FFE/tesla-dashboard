@@ -1585,8 +1585,13 @@ def api_sms():
         return jsonify({"success": False, "error": "Vehicle is not driving"}), 400
     data = request.get_json(silent=True) or {}
     message = data.get("message", "").strip()
+    name = data.get("name", "").strip()
     if not message:
         return jsonify({"success": False, "error": "Missing message"}), 400
+    if name:
+        message = f"{name}: {message}"
+    if len(message) > 160:
+        return jsonify({"success": False, "error": "Message too long"}), 400
     try:
         if not base_url.startswith("http"):
             base_url = "https://" + base_url

@@ -56,6 +56,7 @@ var CONFIG = {};
 var HIGHLIGHT_BLUE = false;
 var OFFLINE_TEXT = 'Das Fahrzeug ist offline und schläft - Bitte nicht wecken! - Die Daten sind die zuletzt bekannten und somit nicht aktuell!';
 var smsForm = $('#sms-form');
+var smsNameInput = $('#sms-name');
 var smsInput = $('#sms-text');
 var smsButton = $('#sms-send');
 var smsStatus = $('#sms-status');
@@ -120,10 +121,12 @@ function updateSmsForm() {
     smsForm.toggle(!!hasNumber);
     var driveOnly = cfg.sms_drive_only !== false;
     var enabled = hasNumber && (!driveOnly || (currentGear && currentGear !== 'P'));
+    smsNameInput.prop('disabled', !enabled);
     smsInput.prop('disabled', !enabled);
     smsButton.prop('disabled', !enabled);
     if (!enabled) {
         smsStatus.text('');
+        smsNameInput.val('');
         smsInput.val('');
     }
 }
@@ -1218,17 +1221,24 @@ fetchAnnouncement();
 updateSmsForm();
 
 $('#sms-send').on('click', function() {
+    var name = $('#sms-name').val().trim();
     var msg = $('#sms-text').val().trim();
     if (!msg) return;
+    var fullMsg = name ? name + ': ' + msg : msg;
+    if (fullMsg.length > 160) {
+        $('#sms-status').text('Nachricht zu lang');
+        return;
+    }
     $('#sms-status').text('Senden...');
     $.ajax({
         url: '/api/sms',
         method: 'POST',
         contentType: 'application/json',
-        data: JSON.stringify({message: msg}),
+        data: JSON.stringify({message: msg, name: name}),
         success: function(resp) {
             if (resp && resp.success) {
                 $('#sms-status').text('Gesendet');
+                $('#sms-name').val('');
                 $('#sms-text').val('');
             } else {
                 $('#sms-status').text('Fehler: ' + (resp.error || 'unbekannt'));

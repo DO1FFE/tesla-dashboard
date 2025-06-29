@@ -191,6 +191,7 @@
     <div id="offline-msg"></div>
     {% if config.get('phone_number') and config.get('sms_enabled', True) %}
     <div id="sms-form" style="display:none;">
+        <input id="sms-name" type="text" placeholder="Ihr Name">
         <input id="sms-text" type="text" maxlength="160" placeholder="Nachricht">
         <button id="sms-send" type="button">Nachricht an Fahrer senden</button>
         <span id="sms-status"></span>
