@@ -120,13 +120,15 @@ function updateSmsForm() {
     var hasNumber = cfg.phone_number && cfg.infobip_api_key && cfg.sms_enabled !== false;
     smsForm.toggle(!!hasNumber);
     var driveOnly = cfg.sms_drive_only !== false;
-    var enabled = hasNumber && (!driveOnly || (currentGear && currentGear !== 'P'));
+    var parkedSince = parkStartTime ? Date.now() - parkStartTime : 0;
+    var allowWhileParked = parkedSince > 0 && parkedSince < 600000;
+    var enabled = hasNumber && (!driveOnly || (currentGear && currentGear !== 'P') || allowWhileParked);
     smsNameInput.prop('disabled', !enabled);
     smsInput.prop('disabled', !enabled);
     smsButton.prop('disabled', !enabled);
     if (!enabled) {
         if (hasNumber && driveOnly && (!currentGear || currentGear === 'P')) {
-            smsStatus.text('SMS nur während der Fahrt erlaubt');
+            smsStatus.text('Nachricht nur während der Fahrt erlaubt');
         } else {
             smsStatus.text('');
         }

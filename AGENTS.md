@@ -19,6 +19,7 @@ under `static/`.  Documentation and example files are located in `docs/`.
 - The `docs/` directory contains reference material and example data in German.
   Do **not** modify these files when altering code. Any new documentation must
   also be written in German.
+- `README.md` must be written entirely in English.
 
 ## Templates and static assets
 

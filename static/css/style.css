@@ -865,9 +865,27 @@ select {
 
 #sms-form {
   margin: 10px 0;
+  padding: 8px;
+  background: var(--surface-color);
+  border: 1px solid #444;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-#sms-form input[type="text"] {
+#sms-name {
+  width: 100px;
+  padding: 4px 8px;
+  background: var(--surface-color);
+  color: var(--text-color);
+  border: 1px solid #444;
+  border-radius: 4px;
+}
+
+#sms-text {
+  flex: 1;
+  min-width: 200px;
   padding: 4px 8px;
   background: var(--surface-color);
   color: var(--text-color);
@@ -881,7 +899,6 @@ select {
   color: var(--text-color);
   border: 1px solid #444;
   border-radius: 4px;
-  margin-left: 4px;
 }
 
 #sms-status {
