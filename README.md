@@ -21,6 +21,7 @@ This is a simple Flask application that displays real-time data from a Tesla veh
 
 4. Open `http://localhost:8013` in your browser (the server listens on `0.0.0.0:8013`).
 5. On the configuration page (`/config`) you can set your APRS call sign, passcode and an optional comment to transmit position packets via an EU APRS-IS server. You may also enable an additional WX packet using a separate call sign. Temperatures are included in Celsius within the comment. Positions are sent at most every 30 seconds while driving and at least every 10 minutes even without changes. WX packets obey the same limits and are only transmitted when the outside temperature changes or after ten minutes without an update. The page also lets you adjust the Tesla API polling interval and disable the announcement text.
+6. You can also enter the driver's phone number here to send a free message from the main page. The form only appears when a number is set and is usable only while the vehicle is driving.
 
 All API calls are logged to `data/api.log` without storing request details. The log file uses rotation and will grow to at most 1&nbsp;MB.
 Vehicle state changes are written to `data/state.log`.
@@ -29,10 +30,9 @@ The latest successful API response is stored in `data/<vehicle_id>/cache.json`.
 This cache is always updated with the current vehicle state so the dashboard
 knows whether the car is online, asleep or offline even when no fresh data is
 available. When the Tesla API cannot be reached the server serves this cached
-data back to the client. Beim Start prüft der Server, ob sich noch Dateien im
-alten Schema befinden (etwa `cache_<id>.json`, `last_energy_<id>.txt` oder
-CSV-Dateien in `data/trips`) und verschiebt sie automatisch in den passenden
-Fahrzeugordner.
+data back to the client. On startup the server checks for leftover files using the
+old naming scheme such as `cache_<id>.json`, `last_energy_<id>.txt` or CSV files
+in `data/trips` and moves them to the appropriate vehicle folder automatically.
 All data paths are resolved relative to the application directory, so the server
 can be started from any location while still accessing existing trips and logs.
 
@@ -60,11 +60,7 @@ Additional toggles allow hiding the heater indicators and the list of nearby Sup
 You can also enable or disable the announcement text and adjust the API polling interval without restarting the server.
 Clients reload automatically when the polling interval changes so the new setting takes effect immediately.
 
-Sobald eine Tür, ein Fenster, der Kofferraum oder der Frunk geöffnet sind
-oder das Fahrzeug entriegelt ist, schaltet das Backend auf das normale
-Abfrageintervall. Gleiches gilt, wenn eine Person im Fahrzeug erkannt wird
-oder der Ganghebel auf R, N oder D steht. In allen anderen Situationen wird
-das Idle-Intervall verwendet, sodass das Auto in den Schlafmodus gehen kann.
+Whenever a door, window, the trunk or the frunk is open or the vehicle is unlocked the backend switches to the normal polling interval. The same happens when someone is detected inside or the gear lever is in R, N or D. In all other situations the idle interval is used so the car can enter sleep mode.
 
 Data is streamed to the frontend via `/stream/<vehicle_id>` using Server-Sent Events so the dashboard updates instantly when new information arrives.
 The endpoint `/apiliste` exposes a text file listing all seen API variables and their latest values.

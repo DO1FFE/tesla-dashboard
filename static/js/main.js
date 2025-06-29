@@ -55,6 +55,10 @@ var lastAddressLng = null;
 var CONFIG = {};
 var HIGHLIGHT_BLUE = false;
 var OFFLINE_TEXT = 'Das Fahrzeug ist offline und schläft - Bitte nicht wecken! - Die Daten sind die zuletzt bekannten und somit nicht aktuell!';
+var smsForm = $('#sms-form');
+var smsInput = $('#sms-text');
+var smsButton = $('#sms-send');
+var smsStatus = $('#sms-status');
 
 function parseAnnouncements(text) {
     var arr = [];
@@ -106,6 +110,20 @@ function showConfigured() {
     $('#dashboard-content').show();
     // Recalculate map dimensions when the content becomes visible.
     map.invalidateSize();
+    updateSmsForm();
+}
+
+function updateSmsForm() {
+    if (!smsForm.length) return;
+    var hasNumber = CONFIG && CONFIG.phone_number;
+    smsForm.toggle(!!hasNumber);
+    var enabled = hasNumber && currentGear && currentGear !== 'P';
+    smsInput.prop('disabled', !enabled);
+    smsButton.prop('disabled', !enabled);
+    if (!enabled) {
+        smsStatus.text('');
+        smsInput.val('');
+    }
 }
 
 function showLoading() {
@@ -330,6 +348,7 @@ function updateGearShift(state) {
     $('#gear-shift div').removeClass('active');
     $('#gear-shift div[data-gear="' + gear + '"]').addClass('active');
     displayParkTime();
+    updateSmsForm();
 }
 
 function updateLockStatus(locked) {
@@ -1194,3 +1213,27 @@ setInterval(fetchConfig, 15000);
 setInterval(displayParkTime, 60000);
 updateClientCount();
 fetchAnnouncement();
+updateSmsForm();
+
+$('#sms-send').on('click', function() {
+    var msg = $('#sms-text').val().trim();
+    if (!msg) return;
+    $('#sms-status').text('Senden...');
+    $.ajax({
+        url: '/api/sms',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({message: msg}),
+        success: function(resp) {
+            if (resp && resp.success) {
+                $('#sms-status').text('Gesendet');
+                $('#sms-text').val('');
+            } else {
+                $('#sms-status').text('Fehler: ' + (resp.error || 'unbekannt'));
+            }
+        },
+        error: function() {
+            $('#sms-status').text('Fehler beim Senden');
+        }
+    });
+});

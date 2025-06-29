@@ -1567,6 +1567,33 @@ def api_occupant():
     return jsonify({"present": occupant_present})
 
 
+@app.route("/api/sms", methods=["POST"])
+def api_sms():
+    """Send a short text message using the configured phone number."""
+    cfg = load_config()
+    phone = cfg.get("phone_number")
+    if not phone:
+        return jsonify({"success": False, "error": "No phone number configured"}), 400
+    if last_shift_state in (None, "P"):
+        return jsonify({"success": False, "error": "Vehicle is not driving"}), 400
+    data = request.get_json(silent=True) or {}
+    message = data.get("message", "").strip()
+    if not message:
+        return jsonify({"success": False, "error": "Missing message"}), 400
+    try:
+        resp = requests.post(
+            "https://textbelt.com/text",
+            data={"phone": phone, "message": message, "key": "textbelt"},
+            timeout=10,
+        )
+        result = resp.json()
+        if result.get("success"):
+            return jsonify({"success": True})
+        return jsonify({"success": False, "error": result.get("error")})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)})
+
+
 @app.route("/config", methods=["GET", "POST"])
 @requires_auth
 def config_page():
@@ -1580,6 +1607,7 @@ def config_page():
         wx_enabled = "aprs_wx_enabled" in request.form
         aprs_comment = request.form.get("aprs_comment", "").strip()
         announcement = request.form.get("announcement", "").strip()
+        phone_number = request.form.get("phone_number", "").strip()
         api_interval = request.form.get("api_interval", "").strip()
         api_interval_idle = request.form.get("api_interval_idle", "").strip()
         if "refresh_vehicle_list" in request.form:
@@ -1607,6 +1635,10 @@ def config_page():
             cfg["announcement"] = announcement
         elif "announcement" in cfg:
             cfg.pop("announcement")
+        if phone_number:
+            cfg["phone_number"] = phone_number
+        elif "phone_number" in cfg:
+            cfg.pop("phone_number")
         if api_interval.isdigit():
             cfg["api_interval"] = max(1, int(api_interval))
         elif "api_interval" in cfg:

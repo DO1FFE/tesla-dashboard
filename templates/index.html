@@ -189,6 +189,13 @@
         </div>
     </div>
     <div id="offline-msg"></div>
+    {% if config.get('phone_number') %}
+    <div id="sms-form" style="display:none;">
+        <input id="sms-text" type="text" maxlength="160" placeholder="Nachricht">
+        <button id="sms-send" type="button">SMS senden</button>
+        <span id="sms-status"></span>
+    </div>
+    {% endif %}
     <div id="loading-msg">Daten werden geladen...</div>
     <div id="v2l-infos"></div>
     <div id="charging-info"></div>
