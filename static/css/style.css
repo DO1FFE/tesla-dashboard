@@ -661,6 +661,19 @@ select {
   #map {
     height: 50vh !important;
   }
+  #sms-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  #sms-name,
+  #sms-text,
+  #sms-form button {
+    width: 100%;
+  }
+  #sms-status {
+    margin-left: 0;
+    margin-top: 4px;
+  }
 }
 
 #openings-indicator {
