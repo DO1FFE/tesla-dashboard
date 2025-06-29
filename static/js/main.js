@@ -125,9 +125,15 @@ function updateSmsForm() {
     smsInput.prop('disabled', !enabled);
     smsButton.prop('disabled', !enabled);
     if (!enabled) {
-        smsStatus.text('');
+        if (hasNumber && driveOnly && (!currentGear || currentGear === 'P')) {
+            smsStatus.text('SMS nur während der Fahrt erlaubt');
+        } else {
+            smsStatus.text('');
+        }
         smsNameInput.val('');
         smsInput.val('');
+    } else {
+        smsStatus.text('');
     }
 }
 
