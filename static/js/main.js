@@ -115,7 +115,7 @@ function showConfigured() {
 
 function updateSmsForm() {
     if (!smsForm.length) return;
-    var hasNumber = CONFIG && CONFIG.phone_number;
+    var hasNumber = CONFIG && CONFIG.phone_number && CONFIG.infobip_api_key;
     smsForm.toggle(!!hasNumber);
     var enabled = hasNumber && currentGear && currentGear !== 'P';
     smsInput.prop('disabled', !enabled);

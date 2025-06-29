@@ -1572,8 +1572,11 @@ def api_sms():
     """Send a short text message using the configured phone number."""
     cfg = load_config()
     phone = cfg.get("phone_number")
+    api_key = cfg.get("infobip_api_key")
     if not phone:
         return jsonify({"success": False, "error": "No phone number configured"}), 400
+    if not api_key:
+        return jsonify({"success": False, "error": "No API key configured"}), 400
     if last_shift_state in (None, "P"):
         return jsonify({"success": False, "error": "Vehicle is not driving"}), 400
     data = request.get_json(silent=True) or {}
@@ -1582,14 +1585,30 @@ def api_sms():
         return jsonify({"success": False, "error": "Missing message"}), 400
     try:
         resp = requests.post(
-            "https://textbelt.com/text",
-            data={"phone": phone, "message": message, "key": "textbelt"},
+            "https://api.infobip.com/sms/2/text/advanced",
+            json={
+                "messages": [
+                    {
+                        "destinations": [{"to": phone}],
+                        "from": "TeslaDash",
+                        "text": message,
+                    }
+                ]
+            },
+            headers={
+                "Authorization": f"App {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
             timeout=10,
         )
-        result = resp.json()
-        if result.get("success"):
+        if 200 <= resp.status_code < 300:
             return jsonify({"success": True})
-        return jsonify({"success": False, "error": result.get("error")})
+        try:
+            error = resp.json().get("requestError", {}).get("serviceException", {}).get("text")
+        except Exception:
+            error = resp.text
+        return jsonify({"success": False, "error": error})
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)})
 
@@ -1608,6 +1627,7 @@ def config_page():
         aprs_comment = request.form.get("aprs_comment", "").strip()
         announcement = request.form.get("announcement", "").strip()
         phone_number = request.form.get("phone_number", "").strip()
+        infobip_api_key = request.form.get("infobip_api_key", "").strip()
         api_interval = request.form.get("api_interval", "").strip()
         api_interval_idle = request.form.get("api_interval_idle", "").strip()
         if "refresh_vehicle_list" in request.form:
@@ -1639,6 +1659,10 @@ def config_page():
             cfg["phone_number"] = phone_number
         elif "phone_number" in cfg:
             cfg.pop("phone_number")
+        if infobip_api_key:
+            cfg["infobip_api_key"] = infobip_api_key
+        elif "infobip_api_key" in cfg:
+            cfg.pop("infobip_api_key")
         if api_interval.isdigit():
             cfg["api_interval"] = max(1, int(api_interval))
         elif "api_interval" in cfg:
