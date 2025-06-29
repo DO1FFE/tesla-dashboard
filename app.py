@@ -1571,13 +1571,16 @@ def api_occupant():
 def api_sms():
     """Send a short text message using the configured phone number."""
     cfg = load_config()
+    if not cfg.get("sms_enabled", True):
+        return jsonify({"success": False, "error": "SMS disabled"}), 400
     phone = cfg.get("phone_number")
     api_key = cfg.get("infobip_api_key")
     if not phone:
         return jsonify({"success": False, "error": "No phone number configured"}), 400
     if not api_key:
         return jsonify({"success": False, "error": "No API key configured"}), 400
-    if last_shift_state in (None, "P"):
+    drive_only = cfg.get("sms_drive_only", True)
+    if drive_only and last_shift_state in (None, "P"):
         return jsonify({"success": False, "error": "Vehicle is not driving"}), 400
     data = request.get_json(silent=True) or {}
     message = data.get("message", "").strip()
@@ -1628,6 +1631,8 @@ def config_page():
         announcement = request.form.get("announcement", "").strip()
         phone_number = request.form.get("phone_number", "").strip()
         infobip_api_key = request.form.get("infobip_api_key", "").strip()
+        sms_enabled = "sms_enabled" in request.form
+        sms_drive_only = "sms_drive_only" in request.form
         api_interval = request.form.get("api_interval", "").strip()
         api_interval_idle = request.form.get("api_interval_idle", "").strip()
         if "refresh_vehicle_list" in request.form:
@@ -1663,6 +1668,8 @@ def config_page():
             cfg["infobip_api_key"] = infobip_api_key
         elif "infobip_api_key" in cfg:
             cfg.pop("infobip_api_key")
+        cfg["sms_enabled"] = sms_enabled
+        cfg["sms_drive_only"] = sms_drive_only
         if api_interval.isdigit():
             cfg["api_interval"] = max(1, int(api_interval))
         elif "api_interval" in cfg:
