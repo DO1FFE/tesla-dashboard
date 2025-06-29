@@ -358,6 +358,23 @@ def save_config(cfg):
         pass
 
 
+def get_news_events_info():
+    """Return the current state of the news/events toggles via the API."""
+    tesla = get_tesla()
+    if tesla is None:
+        return "NOTIFICATIONS_GET_NEWS_AND_EVENTS_TOGGLES"
+
+    try:
+        data = tesla.api("NOTIFICATIONS_GET_NEWS_AND_EVENTS_TOGGLES")
+        log_api_data("NOTIFICATIONS_GET_NEWS_AND_EVENTS_TOGGLES", data)
+        if isinstance(data, dict):
+            pairs = [f"{k}={v}" for k, v in data.items()]
+            return "Toggles: " + ", ".join(pairs)
+    except Exception as exc:
+        _log_api_error(exc)
+    return "NOTIFICATIONS_GET_NEWS_AND_EVENTS_TOGGLES"
+
+
 def check_auth(username, password):
     user = os.getenv("TESLA_EMAIL")
     pw = os.getenv("TESLA_PASSWORD")
@@ -1550,7 +1567,11 @@ def api_config():
 def api_announcement():
     """Return the current announcement text."""
     cfg = load_config()
-    return jsonify({"announcement": cfg.get("announcement", "")})
+    text = cfg.get("announcement", "")
+    info = get_news_events_info()
+    if info and info not in text:
+        text = text + ("\n" if text else "") + info
+    return jsonify({"announcement": text})
 
 
 @app.route("/api/occupant", methods=["GET", "POST"])
