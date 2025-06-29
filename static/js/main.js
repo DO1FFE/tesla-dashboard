@@ -115,9 +115,11 @@ function showConfigured() {
 
 function updateSmsForm() {
     if (!smsForm.length) return;
-    var hasNumber = CONFIG && CONFIG.phone_number && CONFIG.infobip_api_key;
+    var cfg = CONFIG || {};
+    var hasNumber = cfg.phone_number && cfg.infobip_api_key && cfg.sms_enabled !== false;
     smsForm.toggle(!!hasNumber);
-    var enabled = hasNumber && currentGear && currentGear !== 'P';
+    var driveOnly = cfg.sms_drive_only !== false;
+    var enabled = hasNumber && (!driveOnly || (currentGear && currentGear !== 'P'));
     smsInput.prop('disabled', !enabled);
     smsButton.prop('disabled', !enabled);
     if (!enabled) {
