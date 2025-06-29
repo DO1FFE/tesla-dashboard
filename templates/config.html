@@ -75,6 +75,12 @@
                 <input type="text" name="phone_number" value="{{ config.get('phone_number','') }}">
             </label>
         </div>
+        <div>
+            <label>
+                Infobip API Key
+                <input type="text" name="infobip_api_key" value="{{ config.get('infobip_api_key','') }}">
+            </label>
+        </div>
         <button type="submit">Speichern</button>
         <button type="submit" name="refresh_vehicle_list" value="1">Fahrzeugliste aktualisieren</button>
     </form>
