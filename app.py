@@ -1582,7 +1582,11 @@ def api_sms():
         return jsonify({"success": False, "error": "No API key configured"}), 400
     drive_only = cfg.get("sms_drive_only", True)
     if drive_only and last_shift_state in (None, "P"):
-        return jsonify({"success": False, "error": "Vehicle is not driving"}), 400
+        grace = 0
+        if park_start_ms is not None:
+            grace = int(time.time() * 1000) - park_start_ms
+        if grace >= 600000 or park_start_ms is None:
+            return jsonify({"success": False, "error": "Vehicle is not driving"}), 400
     data = request.get_json(silent=True) or {}
     message = data.get("message", "").strip()
     name = data.get("name", "").strip()
