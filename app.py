@@ -1575,6 +1575,7 @@ def api_sms():
         return jsonify({"success": False, "error": "SMS disabled"}), 400
     phone = cfg.get("phone_number")
     api_key = cfg.get("infobip_api_key")
+    base_url = cfg.get("infobip_base_url", "https://api.infobip.com")
     if not phone:
         return jsonify({"success": False, "error": "No phone number configured"}), 400
     if not api_key:
@@ -1587,8 +1588,11 @@ def api_sms():
     if not message:
         return jsonify({"success": False, "error": "Missing message"}), 400
     try:
+        if not base_url.startswith("http"):
+            base_url = "https://" + base_url
+        url = base_url.rstrip("/") + "/sms/2/text/advanced"
         resp = requests.post(
-            "https://api.infobip.com/sms/2/text/advanced",
+            url,
             json={
                 "messages": [
                     {
@@ -1631,6 +1635,7 @@ def config_page():
         announcement = request.form.get("announcement", "").strip()
         phone_number = request.form.get("phone_number", "").strip()
         infobip_api_key = request.form.get("infobip_api_key", "").strip()
+        infobip_base_url = request.form.get("infobip_base_url", "").strip()
         sms_enabled = "sms_enabled" in request.form
         sms_drive_only = "sms_drive_only" in request.form
         api_interval = request.form.get("api_interval", "").strip()
@@ -1668,6 +1673,10 @@ def config_page():
             cfg["infobip_api_key"] = infobip_api_key
         elif "infobip_api_key" in cfg:
             cfg.pop("infobip_api_key")
+        if infobip_base_url:
+            cfg["infobip_base_url"] = infobip_base_url
+        elif "infobip_base_url" in cfg:
+            cfg.pop("infobip_base_url")
         cfg["sms_enabled"] = sms_enabled
         cfg["sms_drive_only"] = sms_drive_only
         if api_interval.isdigit():
