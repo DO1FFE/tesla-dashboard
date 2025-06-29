@@ -83,6 +83,12 @@
         </div>
         <div>
             <label>
+                Infobip Basis-URL
+                <input type="text" name="infobip_base_url" value="{{ config.get('infobip_base_url','https://api.infobip.com') }}">
+            </label>
+        </div>
+        <div>
+            <label>
                 <input type="checkbox" name="sms_enabled" value="1" {% if config.get('sms_enabled', True) %}checked{% endif %}>
                 SMS-Versand erlauben
             </label>
