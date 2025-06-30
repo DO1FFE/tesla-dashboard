@@ -1588,6 +1588,103 @@ def api_occupant():
     return jsonify({"present": occupant_present})
 
 
+def _send_whatsapp(phone, message, cfg):
+    """Send a WhatsApp template message via Infobip."""
+    wa_from = cfg.get("whatsapp_from")
+    template = cfg.get("whatsapp_template")
+    api_key = cfg.get("infobip_api_key")
+    base_url = cfg.get("infobip_base_url", "https://api.infobip.com")
+    if not wa_from or not template or not api_key or not phone:
+        return False, "Missing WhatsApp configuration"
+    if not base_url.startswith("http"):
+        base_url = "https://" + base_url
+    url = base_url.rstrip("/") + "/whatsapp/1/message/template"
+    try:
+        resp = requests.post(
+            url,
+            json={
+                "messages": [
+                    {
+                        "from": wa_from,
+                        "to": phone,
+                        "content": {
+                            "templateName": template,
+                            "templateData": {"body": {"placeholders": [message]}},
+                            "language": "de",
+                        },
+                    }
+                ]
+            },
+            headers={
+                "Authorization": f"App {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            timeout=10,
+        )
+        if 200 <= resp.status_code < 300:
+            return True, None
+        try:
+            error = resp.json().get("requestError", {}).get("serviceException", {}).get("text")
+        except Exception:
+            error = resp.text
+        return False, error
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _create_chat_link(cfg):
+    """Create a call link for the configured chat room via Infobip."""
+    room = cfg.get("chat_room", "TeslaDashboard")
+    api_key = cfg.get("infobip_api_key")
+    base_url = cfg.get("infobip_base_url", "https://api.infobip.com")
+    if not api_key or not room:
+        return False, None, "Missing chat configuration"
+    if not base_url.startswith("http"):
+        base_url = "https://" + base_url
+    url = base_url.rstrip("/") + "/call-link/1/links"
+    try:
+        resp = requests.post(
+            url,
+            json={"destination": {"roomName": room, "type": "ROOM"}},
+            headers={
+                "Authorization": f"App {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            timeout=10,
+        )
+        if 200 <= resp.status_code < 300:
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+            link = (
+                data.get("url")
+                or data.get("link")
+                or data.get("shortUrl")
+                or next((v for k, v in data.items() if str(k).lower().endswith("url")), None)
+            )
+            return True, link, None
+        try:
+            error = resp.json().get("requestError", {}).get("serviceException", {}).get("text")
+        except Exception:
+            error = resp.text
+        return False, None, error
+    except Exception as exc:
+        return False, None, str(exc)
+
+
+@app.route("/api/chatlink", methods=["POST"])
+def api_chatlink():
+    """Return a call link for the configured chat room."""
+    cfg = load_config()
+    ok, link, err = _create_chat_link(cfg)
+    if ok:
+        return jsonify({"url": link})
+    return jsonify({"success": False, "error": err}), 400
+
+
 @app.route("/api/sms", methods=["POST"])
 def api_sms():
     """Send a short text message using the configured phone number."""
@@ -1602,12 +1699,6 @@ def api_sms():
     if not api_key:
         return jsonify({"success": False, "error": "No API key configured"}), 400
     drive_only = cfg.get("sms_drive_only", True)
-    if drive_only and last_shift_state in (None, "P"):
-        grace = 0
-        if park_start_ms is not None:
-            grace = int(time.time() * 1000) - park_start_ms
-        if grace >= 600000 or park_start_ms is None:
-            return jsonify({"success": False, "error": "Vehicle is not driving"}), 400
     data = request.get_json(silent=True) or {}
     message = data.get("message", "").strip()
     name = data.get("name", "").strip()
@@ -1617,6 +1708,11 @@ def api_sms():
         message = f"{name}: {message}"
     if len(message) > 160:
         return jsonify({"success": False, "error": "Message too long"}), 400
+    if drive_only and last_shift_state in (None, "P"):
+        ok, err = _send_whatsapp(phone, message, cfg)
+        if ok:
+            return jsonify({"success": True})
+        return jsonify({"success": False, "error": err}), 400
     try:
         if not base_url.startswith("http"):
             base_url = "https://" + base_url
@@ -1666,6 +1762,9 @@ def config_page():
         phone_number = request.form.get("phone_number", "").strip()
         infobip_api_key = request.form.get("infobip_api_key", "").strip()
         infobip_base_url = request.form.get("infobip_base_url", "").strip()
+        whatsapp_from = request.form.get("whatsapp_from", "").strip()
+        whatsapp_template = request.form.get("whatsapp_template", "").strip()
+        chat_room = request.form.get("chat_room", "").strip()
         sms_enabled = "sms_enabled" in request.form
         sms_drive_only = "sms_drive_only" in request.form
         api_interval = request.form.get("api_interval", "").strip()
@@ -1707,6 +1806,18 @@ def config_page():
             cfg["infobip_base_url"] = infobip_base_url
         elif "infobip_base_url" in cfg:
             cfg.pop("infobip_base_url")
+        if whatsapp_from:
+            cfg["whatsapp_from"] = whatsapp_from
+        elif "whatsapp_from" in cfg:
+            cfg.pop("whatsapp_from")
+        if whatsapp_template:
+            cfg["whatsapp_template"] = whatsapp_template
+        elif "whatsapp_template" in cfg:
+            cfg.pop("whatsapp_template")
+        if chat_room:
+            cfg["chat_room"] = chat_room
+        elif "chat_room" in cfg:
+            cfg.pop("chat_room")
         cfg["sms_enabled"] = sms_enabled
         cfg["sms_drive_only"] = sms_drive_only
         if api_interval.isdigit():
