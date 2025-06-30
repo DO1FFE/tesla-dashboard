@@ -634,18 +634,30 @@ def get_service_appointments():
     tesla = get_tesla()
     if tesla is None:
         return []
+
+    def _parse(result):
+        if isinstance(result, dict):
+            for key in ("serviceAppointments", "appointments", "serviceVisits"):
+                if key in result:
+                    return result.get(key) or []
+        return result if isinstance(result, list) else []
+
     try:
         data = tesla.api("SERVICE_GET_SERVICE_APPOINTMENTS")
         log_api_data("SERVICE_GET_SERVICE_APPOINTMENTS", data)
-        if isinstance(data, dict):
-            if "serviceAppointments" in data:
-                return data.get("serviceAppointments")
-            if "appointments" in data:
-                return data.get("appointments")
-        return data
+        visits = _parse(data)
+        if visits:
+            return visits
     except Exception as exc:
         _log_api_error(exc)
-        return []
+
+    try:
+        data = tesla.api("SERVICE_GET_SERVICE_VISITS")
+        log_api_data("SERVICE_GET_SERVICE_VISITS", data)
+        return _parse(data)
+    except Exception as exc:
+        _log_api_error(exc)
+    return []
 
 
 
