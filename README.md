@@ -24,7 +24,6 @@ This is a simple Flask application that displays real-time data from a Tesla veh
 6. You can also enter the driver's phone number and your Infobip API key here. SMS messages to the driver can be enabled or disabled and you may choose whether they are only allowed while driving or at any time. If you restrict SMS to driving mode, the dashboard switches to WhatsApp delivery as soon as the vehicle is parked.
 7. When sending a text message the sender's name is requested as well. The entire message including the name must not exceed 160 characters.
 8. You can optionally provide a base URL for Infobip, the WhatsApp sender number and the template name. If omitted, `https://api.infobip.com` is used. The field is also available on the `/config` page.
-9. Set a chat room name to allow users to join via a generated link. The join button appears above the SMS form when a room is configured.
 
 All API calls are logged to `data/api.log` without storing request details. The log file uses rotation and will grow to at most 1&nbsp;MB.
 Vehicle state changes are written to `data/state.log`.

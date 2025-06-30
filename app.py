@@ -1633,56 +1633,6 @@ def _send_whatsapp(phone, message, cfg):
         return False, str(exc)
 
 
-def _create_chat_link(cfg):
-    """Create a call link for the configured chat room via Infobip."""
-    room = cfg.get("chat_room", "TeslaDashboard")
-    api_key = cfg.get("infobip_api_key")
-    base_url = cfg.get("infobip_base_url", "https://api.infobip.com")
-    if not api_key or not room:
-        return False, None, "Missing chat configuration"
-    if not base_url.startswith("http"):
-        base_url = "https://" + base_url
-    url = base_url.rstrip("/") + "/call-link/1/links"
-    try:
-        resp = requests.post(
-            url,
-            json={"destination": {"roomName": room, "type": "ROOM"}},
-            headers={
-                "Authorization": f"App {api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            timeout=10,
-        )
-        if 200 <= resp.status_code < 300:
-            try:
-                data = resp.json()
-            except Exception:
-                data = {}
-            link = (
-                data.get("url")
-                or data.get("link")
-                or data.get("shortUrl")
-                or next((v for k, v in data.items() if str(k).lower().endswith("url")), None)
-            )
-            return True, link, None
-        try:
-            error = resp.json().get("requestError", {}).get("serviceException", {}).get("text")
-        except Exception:
-            error = resp.text
-        return False, None, error
-    except Exception as exc:
-        return False, None, str(exc)
-
-
-@app.route("/api/chatlink", methods=["POST"])
-def api_chatlink():
-    """Return a call link for the configured chat room."""
-    cfg = load_config()
-    ok, link, err = _create_chat_link(cfg)
-    if ok:
-        return jsonify({"url": link})
-    return jsonify({"success": False, "error": err}), 400
 
 
 @app.route("/api/sms", methods=["POST"])
@@ -1764,7 +1714,6 @@ def config_page():
         infobip_base_url = request.form.get("infobip_base_url", "").strip()
         whatsapp_from = request.form.get("whatsapp_from", "").strip()
         whatsapp_template = request.form.get("whatsapp_template", "").strip()
-        chat_room = request.form.get("chat_room", "").strip()
         sms_enabled = "sms_enabled" in request.form
         sms_drive_only = "sms_drive_only" in request.form
         api_interval = request.form.get("api_interval", "").strip()
@@ -1814,10 +1763,6 @@ def config_page():
             cfg["whatsapp_template"] = whatsapp_template
         elif "whatsapp_template" in cfg:
             cfg.pop("whatsapp_template")
-        if chat_room:
-            cfg["chat_room"] = chat_room
-        elif "chat_room" in cfg:
-            cfg.pop("chat_room")
         cfg["sms_enabled"] = sms_enabled
         cfg["sms_drive_only"] = sms_drive_only
         if api_interval.isdigit():
