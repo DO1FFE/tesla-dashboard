@@ -69,35 +69,37 @@
                 <textarea name="announcement" rows="6" style="width:100%">{{ config.get('announcement','') }}</textarea>
             </label>
         </div>
-        <div>
-            <label>
-                Handynummer des Fahrers
-                <input type="text" name="phone_number" value="{{ config.get('phone_number','') }}">
-            </label>
-        </div>
-        <div>
-            <label>
-                Infobip API Key
-                <input type="text" name="infobip_api_key" value="{{ config.get('infobip_api_key','') }}">
-            </label>
-        </div>
-        <div>
-            <label>
-                Infobip Basis-URL
-                <input type="text" name="infobip_base_url" value="{{ config.get('infobip_base_url','https://api.infobip.com') }}">
-            </label>
-        </div>
-        <div>
-            <label>
-                <input type="checkbox" name="sms_enabled" value="1" {% if config.get('sms_enabled', True) %}checked{% endif %}>
-                SMS-Versand erlauben
-            </label>
-        </div>
-        <div>
-            <label>
-                <input type="checkbox" name="sms_drive_only" value="1" {% if config.get('sms_drive_only', True) %}checked{% endif %}>
-                SMS nur während der Fahrt
-            </label>
+        <div id="sms-section">
+            <div>
+                <label>
+                    Handynummer des Fahrers
+                    <input type="text" name="phone_number" value="{{ config.get('phone_number','') }}">
+                </label>
+            </div>
+            <div>
+                <label>
+                    Infobip API Key
+                    <input type="text" name="infobip_api_key" value="{{ config.get('infobip_api_key','') }}">
+                </label>
+            </div>
+            <div>
+                <label>
+                    Infobip Basis-URL
+                    <input type="text" name="infobip_base_url" value="{{ config.get('infobip_base_url','https://api.infobip.com') }}">
+                </label>
+            </div>
+            <div>
+                <label>
+                    <input type="checkbox" name="sms_enabled" value="1" {% if config.get('sms_enabled', True) %}checked{% endif %}>
+                    SMS-Versand erlauben
+                </label>
+            </div>
+            <div>
+                <label>
+                    <input type="checkbox" name="sms_drive_only" value="1" {% if config.get('sms_drive_only', True) %}checked{% endif %}>
+                    SMS nur während der Fahrt
+                </label>
+            </div>
         </div>
         <button type="submit">Speichern</button>
         <button type="submit" name="refresh_vehicle_list" value="1">Fahrzeugliste aktualisieren</button>
