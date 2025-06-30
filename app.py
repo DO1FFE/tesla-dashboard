@@ -642,15 +642,21 @@ def get_service_appointments():
                 result = result["data"]
             if "response" in result and isinstance(result["response"], dict):
                 result = result["response"]
-            for key in (
+            keys = (
                 "serviceAppointments",
                 "appointments",
                 "serviceVisits",
                 "upcomingServiceVisits",
                 "scheduledVisits",
-            ):
+            )
+            for key in keys:
                 if key in result:
                     return result.get(key) or []
+                snake = "".join(
+                    "_" + c.lower() if c.isupper() else c for c in key
+                ).lstrip("_")
+                if snake in result:
+                    return result.get(snake) or []
         return result if isinstance(result, list) else []
 
     try:
