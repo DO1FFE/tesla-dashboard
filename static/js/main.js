@@ -901,6 +901,42 @@ function updateMediaPlayer(media) {
     $player.html('<table>' + rows.join('') + '</table>');
 }
 
+function updateServiceAppointments(list) {
+    var $box = $('#service-appointments');
+    if (!list || !list.length) {
+        $box.html('<table><tr><td colspan="2"><span class="icon">🛠️</span>Keine Servicetermine</td></tr></table>');
+        return;
+    }
+    var rows = [];
+    list.forEach(function(item) {
+        var date = item.date || item.start_time || item.startTime || '';
+        var loc = item.location || item.service_center || '';
+        var status = item.status || '';
+        var text = '';
+        if (date) {
+            try {
+                text += new Date(date).toLocaleString('de-DE');
+            } catch (e) {
+                text += date;
+            }
+        }
+        if (loc) {
+            text += (text ? ' - ' : '') + loc;
+        }
+        if (status) {
+            text += (text ? ' - ' : '') + status;
+        }
+        rows.push('<tr><td>' + escapeHtml(text) + '</td></tr>');
+    });
+    $box.html('<table>' + rows.join('') + '</table>');
+}
+
+function fetchServiceAppointments() {
+    $.getJSON('/api/service_appointments', function(resp) {
+        updateServiceAppointments(resp);
+    });
+}
+
 function getStatus(data) {
     var drive = data.drive_state || {};
     var charge = data.charge_state || {};
@@ -1224,8 +1260,10 @@ setInterval(updateClientCount, 5000);
 setInterval(fetchAnnouncement, 15000);
 setInterval(fetchConfig, 15000);
 setInterval(displayParkTime, 60000);
+setInterval(fetchServiceAppointments, 900000);
 updateClientCount();
 fetchAnnouncement();
+fetchServiceAppointments();
 updateSmsForm();
 
 $('#sms-send').on('click', function() {

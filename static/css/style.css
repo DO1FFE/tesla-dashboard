@@ -374,6 +374,37 @@ select {
   margin-right: 4px;
 }
 
+/* Service appointments below the media player */
+#service-appointments {
+  margin: 10px 0;
+  padding: 10px;
+  background: var(--surface-color);
+  color: var(--text-color);
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+#service-appointments table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#service-appointments th,
+#service-appointments td {
+  border: 1px solid #444;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+#service-appointments th {
+  white-space: nowrap;
+  font-weight: normal;
+}
+
+#service-appointments span.icon {
+  margin-right: 4px;
+}
+
 /* Progress bar for media position */
 #media-progress {
   width: 100%;

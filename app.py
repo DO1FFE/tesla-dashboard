@@ -629,6 +629,22 @@ def _save_last_energy(vehicle_id, value):
         pass
 
 
+def get_service_appointments():
+    """Return upcoming service appointments from the Tesla API."""
+    tesla = get_tesla()
+    if tesla is None:
+        return []
+    try:
+        data = tesla.api("SERVICE_GET_SERVICE_APPOINTMENTS")
+        log_api_data("SERVICE_GET_SERVICE_APPOINTMENTS", data)
+        if isinstance(data, dict) and "serviceAppointments" in data:
+            return data.get("serviceAppointments")
+        return data
+    except Exception as exc:
+        _log_api_error(exc)
+        return []
+
+
 
 def send_aprs(vehicle_data):
     """Transmit a position packet via APRS-IS using aprslib."""
@@ -1561,6 +1577,13 @@ def api_reverse_geocode():
 def api_config():
     """Return visibility configuration as JSON."""
     return jsonify(load_config())
+
+
+@app.route("/api/service_appointments")
+def api_service_appointments():
+    """Return upcoming service appointments."""
+    visits = get_service_appointments()
+    return jsonify(visits)
 
 
 @app.route("/api/announcement")
