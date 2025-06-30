@@ -1253,8 +1253,15 @@ $('#sms-send').on('click', function() {
                 $('#sms-status').text('Fehler: ' + (resp.error || 'unbekannt'));
             }
         },
-        error: function() {
-            $('#sms-status').text('Fehler beim Senden');
+        error: function(xhr) {
+            var msg = 'unbekannt';
+            try {
+                var resp = JSON.parse(xhr.responseText);
+                if (resp && resp.error) {
+                    msg = resp.error;
+                }
+            } catch (e) {}
+            $('#sms-status').text('Fehler: ' + msg);
         }
     });
 });
