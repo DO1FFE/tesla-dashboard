@@ -1589,32 +1589,45 @@ def api_occupant():
 
 
 def _send_whatsapp(phone, message, cfg):
-    """Send a WhatsApp template message via Infobip."""
+    """Send a WhatsApp message via Infobip."""
     wa_from = cfg.get("whatsapp_from")
     template = cfg.get("whatsapp_template")
     api_key = cfg.get("infobip_api_key")
     base_url = cfg.get("infobip_base_url", "https://api.infobip.com")
-    if not wa_from or not template or not api_key or not phone:
+    if not wa_from or not api_key or not phone:
         return False, "Missing WhatsApp configuration"
     if not base_url.startswith("http"):
         base_url = "https://" + base_url
-    url = base_url.rstrip("/") + "/whatsapp/1/message/template"
+    if template:
+        url = base_url.rstrip("/") + "/whatsapp/1/message/template"
+        payload = {
+            "messages": [
+                {
+                    "from": wa_from,
+                    "to": phone,
+                    "content": {
+                        "templateName": template,
+                        "templateData": {"body": {"placeholders": [message]}},
+                        "language": "de",
+                    },
+                }
+            ]
+        }
+    else:
+        url = base_url.rstrip("/") + "/whatsapp/1/message/text"
+        payload = {
+            "messages": [
+                {
+                    "from": wa_from,
+                    "to": phone,
+                    "content": {"text": message},
+                }
+            ]
+        }
     try:
         resp = requests.post(
             url,
-            json={
-                "messages": [
-                    {
-                        "from": wa_from,
-                        "to": phone,
-                        "content": {
-                            "templateName": template,
-                            "templateData": {"body": {"placeholders": [message]}},
-                            "language": "de",
-                        },
-                    }
-                ]
-            },
+            json=payload,
             headers={
                 "Authorization": f"App {api_key}",
                 "Content-Type": "application/json",
