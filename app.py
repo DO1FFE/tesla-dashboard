@@ -637,7 +637,18 @@ def get_service_appointments():
 
     def _parse(result):
         if isinstance(result, dict):
-            for key in ("serviceAppointments", "appointments", "serviceVisits"):
+            # Unwrap nested containers first
+            if "data" in result and isinstance(result["data"], dict):
+                result = result["data"]
+            if "response" in result and isinstance(result["response"], dict):
+                result = result["response"]
+            for key in (
+                "serviceAppointments",
+                "appointments",
+                "serviceVisits",
+                "upcomingServiceVisits",
+                "scheduledVisits",
+            ):
                 if key in result:
                     return result.get(key) or []
         return result if isinstance(result, list) else []
@@ -654,6 +665,15 @@ def get_service_appointments():
     try:
         data = tesla.api("SERVICE_GET_SERVICE_VISITS")
         log_api_data("SERVICE_GET_SERVICE_VISITS", data)
+        visits = _parse(data)
+        if visits:
+            return visits
+    except Exception as exc:
+        _log_api_error(exc)
+
+    try:
+        data = tesla.api("GET_UPCOMING_SERVICE_VISIT_DATA")
+        log_api_data("GET_UPCOMING_SERVICE_VISIT_DATA", data)
         return _parse(data)
     except Exception as exc:
         _log_api_error(exc)
