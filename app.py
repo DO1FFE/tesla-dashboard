@@ -362,7 +362,7 @@ def get_news_events_info():
     """Return the current state of the news/events toggles via the API."""
     tesla = get_tesla()
     if tesla is None:
-        return "NOTIFICATIONS_GET_NEWS_AND_EVENTS_TOGGLES"
+        return ""
 
     try:
         data = tesla.api("NOTIFICATIONS_GET_NEWS_AND_EVENTS_TOGGLES")
@@ -372,7 +372,7 @@ def get_news_events_info():
             return "Toggles: " + ", ".join(pairs)
     except Exception as exc:
         _log_api_error(exc)
-    return "NOTIFICATIONS_GET_NEWS_AND_EVENTS_TOGGLES"
+    return ""
 
 
 def check_auth(username, password):
@@ -1569,7 +1569,7 @@ def api_announcement():
     cfg = load_config()
     text = cfg.get("announcement", "")
     info = get_news_events_info()
-    if info and info not in text:
+    if info:
         text = text + ("\n" if text else "") + info
     return jsonify({"announcement": text})
 
