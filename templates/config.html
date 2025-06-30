@@ -101,12 +101,6 @@
         </div>
         <div>
             <label>
-                Chatraum Name
-                <input type="text" name="chat_room" value="{{ config.get('chat_room','TeslaDashboard') }}">
-            </label>
-        </div>
-        <div>
-            <label>
                 <input type="checkbox" name="sms_enabled" value="1" {% if config.get('sms_enabled', True) %}checked{% endif %}>
                 SMS-Versand erlauben
             </label>
