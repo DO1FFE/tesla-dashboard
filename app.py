@@ -1601,28 +1601,20 @@ def _send_whatsapp(phone, message, cfg):
     if template:
         url = base_url.rstrip("/") + "/whatsapp/1/message/template"
         payload = {
-            "messages": [
-                {
-                    "from": wa_from,
-                    "to": phone,
-                    "content": {
-                        "templateName": template,
-                        "templateData": {"body": {"placeholders": [message]}},
-                        "language": "de",
-                    },
-                }
-            ]
+            "from": wa_from,
+            "to": phone,
+            "content": {
+                "templateName": template,
+                "templateData": {"body": {"placeholders": [message]}},
+                "language": "de",
+            },
         }
     else:
         url = base_url.rstrip("/") + "/whatsapp/1/message/text"
         payload = {
-            "messages": [
-                {
-                    "from": wa_from,
-                    "to": phone,
-                    "content": {"text": message},
-                }
-            ]
+            "from": wa_from,
+            "to": phone,
+            "content": {"text": message},
         }
     try:
         resp = requests.post(
