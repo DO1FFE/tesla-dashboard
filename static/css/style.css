@@ -917,3 +917,11 @@ select {
 #sms-status {
   margin-left: 10px;
 }
+
+#sms-section {
+  background: rgba(211, 47, 47, 0.2);
+  border: 1px solid var(--accent-color);
+  padding: 8px;
+  border-radius: 8px;
+  margin: 10px 0;
+}
