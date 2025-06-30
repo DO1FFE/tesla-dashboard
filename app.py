@@ -637,8 +637,11 @@ def get_service_appointments():
     try:
         data = tesla.api("SERVICE_GET_SERVICE_APPOINTMENTS")
         log_api_data("SERVICE_GET_SERVICE_APPOINTMENTS", data)
-        if isinstance(data, dict) and "serviceAppointments" in data:
-            return data.get("serviceAppointments")
+        if isinstance(data, dict):
+            if "serviceAppointments" in data:
+                return data.get("serviceAppointments")
+            if "appointments" in data:
+                return data.get("appointments")
         return data
     except Exception as exc:
         _log_api_error(exc)
