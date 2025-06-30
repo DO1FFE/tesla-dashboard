@@ -192,6 +192,7 @@ select {
   font-size: 1.2em;
   font-weight: bold;
   margin: 10px 0;
+  color: #4caf50;
 }
 
 
@@ -254,10 +255,24 @@ select {
 #nav-bar {
   margin: 10px 0;
   padding: 10px;
-  background: var(--surface-color);
   color: var(--text-color);
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+#v2l-infos {
+  background: rgba(76, 175, 80, 0.2);
+  border: 1px solid #4caf50;
+}
+
+#charging-info {
+  background: rgba(30, 136, 229, 0.2);
+  border: 1px solid #1e88e5;
+}
+
+#nav-bar {
+  background: rgba(255, 152, 0, 0.2);
+  border: 1px solid #ff9800;
 }
 
 #trip-form {
@@ -347,8 +362,9 @@ select {
 #media-player {
   margin: 10px 0;
   padding: 10px;
-  background: var(--surface-color);
+  background: rgba(171, 71, 188, 0.2);
   color: var(--text-color);
+  border: 1px solid #ab47bc;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
 }
