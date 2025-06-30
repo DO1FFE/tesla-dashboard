@@ -1588,55 +1588,6 @@ def api_occupant():
     return jsonify({"present": occupant_present})
 
 
-def _send_whatsapp(phone, message, cfg):
-    """Send a WhatsApp message via Infobip."""
-    wa_from = cfg.get("whatsapp_from")
-    template = cfg.get("whatsapp_template")
-    api_key = cfg.get("infobip_api_key")
-    base_url = cfg.get("infobip_base_url", "https://api.infobip.com")
-    if not wa_from or not api_key or not phone:
-        return False, "Missing WhatsApp configuration"
-    if not base_url.startswith("http"):
-        base_url = "https://" + base_url
-    if template:
-        url = base_url.rstrip("/") + "/whatsapp/1/message/template"
-        payload = {
-            "from": wa_from,
-            "to": phone,
-            "content": {
-                "templateName": template,
-                "templateData": {"body": {"placeholders": [message]}},
-                "language": "de",
-            },
-        }
-    else:
-        url = base_url.rstrip("/") + "/whatsapp/1/message/text"
-        payload = {
-            "from": wa_from,
-            "to": phone,
-            "content": {"text": message},
-        }
-    try:
-        resp = requests.post(
-            url,
-            json=payload,
-            headers={
-                "Authorization": f"App {api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            timeout=10,
-        )
-        if 200 <= resp.status_code < 300:
-            return True, None
-        try:
-            error = resp.json().get("requestError", {}).get("serviceException", {}).get("text")
-        except Exception:
-            error = resp.text
-        return False, error
-    except Exception as exc:
-        return False, str(exc)
-
 
 
 
@@ -1664,10 +1615,12 @@ def api_sms():
     if len(message) > 160:
         return jsonify({"success": False, "error": "Message too long"}), 400
     if drive_only and last_shift_state in (None, "P"):
-        ok, err = _send_whatsapp(phone, message, cfg)
-        if ok:
-            return jsonify({"success": True})
-        return jsonify({"success": False, "error": err}), 400
+        now_ms = int(time.time() * 1000)
+        if park_start_ms is None or now_ms - park_start_ms > 300000:
+            return (
+                jsonify({"success": False, "error": "SMS only allowed while driving"}),
+                400,
+            )
     try:
         if not base_url.startswith("http"):
             base_url = "https://" + base_url
@@ -1717,8 +1670,6 @@ def config_page():
         phone_number = request.form.get("phone_number", "").strip()
         infobip_api_key = request.form.get("infobip_api_key", "").strip()
         infobip_base_url = request.form.get("infobip_base_url", "").strip()
-        whatsapp_from = request.form.get("whatsapp_from", "").strip()
-        whatsapp_template = request.form.get("whatsapp_template", "").strip()
         sms_enabled = "sms_enabled" in request.form
         sms_drive_only = "sms_drive_only" in request.form
         api_interval = request.form.get("api_interval", "").strip()
@@ -1760,14 +1711,6 @@ def config_page():
             cfg["infobip_base_url"] = infobip_base_url
         elif "infobip_base_url" in cfg:
             cfg.pop("infobip_base_url")
-        if whatsapp_from:
-            cfg["whatsapp_from"] = whatsapp_from
-        elif "whatsapp_from" in cfg:
-            cfg.pop("whatsapp_from")
-        if whatsapp_template:
-            cfg["whatsapp_template"] = whatsapp_template
-        elif "whatsapp_template" in cfg:
-            cfg.pop("whatsapp_template")
         cfg["sms_enabled"] = sms_enabled
         cfg["sms_drive_only"] = sms_drive_only
         if api_interval.isdigit():

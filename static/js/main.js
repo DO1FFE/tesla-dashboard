@@ -10,6 +10,7 @@ var lastApiInterval = null;
 var lastApiIntervalIdle = null;
 var parkStartTime = null;
 var currentGear = null;
+var PARK_GRACE_MS = 5 * 60 * 1000;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 18;
@@ -121,14 +122,20 @@ function updateSmsForm() {
     smsForm.toggle(!!hasNumber);
     var driveOnly = cfg.sms_drive_only !== false;
     var parkedSince = parkStartTime ? Date.now() - parkStartTime : 0;
-    var allowWhileParked = parkedSince > 0;
+    var allowWhileParked = parkedSince > 0 && parkedSince <= PARK_GRACE_MS;
     var enabled = hasNumber && (!driveOnly || (currentGear && currentGear !== 'P') || allowWhileParked);
     smsNameInput.prop('disabled', !enabled);
     smsInput.prop('disabled', !enabled);
     smsButton.prop('disabled', !enabled);
     if (!enabled) {
-        if (hasNumber && driveOnly && (!currentGear || currentGear === 'P')) {
-            smsStatus.text('Nachricht nur während der Fahrt erlaubt');
+        if (hasNumber && driveOnly && currentGear === 'P') {
+            if (parkedSince > PARK_GRACE_MS) {
+                smsStatus.text('Nachrichten nur bis 5 Minuten nach dem Parken m\u00F6glich');
+            } else {
+                smsStatus.text('Nachricht nur w\u00E4hrend der Fahrt erlaubt');
+            }
+        } else if (hasNumber && driveOnly && !currentGear) {
+            smsStatus.text('Nachricht nur w\u00E4hrend der Fahrt erlaubt');
         } else {
             smsStatus.text('');
         }
@@ -971,10 +978,12 @@ function displayParkTime() {
     var $el = $('#park-since');
     if (currentGear && currentGear !== 'P') {
         $el.hide();
+        updateSmsForm();
         return;
     }
     if (!parkStartTime) {
         $el.hide();
+        updateSmsForm();
         return;
     }
     var diff = Math.max(0, Date.now() - parkStartTime);
@@ -987,6 +996,7 @@ function displayParkTime() {
     }
     parts.push(minutes + ' ' + (minutes === 1 ? 'Minute' : 'Minuten'));
     $el.text('Geparkt seit ' + parts.join(' ')).show();
+    updateSmsForm();
 }
 
 function updateVehicleState(state) {
