@@ -629,63 +629,6 @@ def _save_last_energy(vehicle_id, value):
         pass
 
 
-def get_service_appointments():
-    """Return upcoming service appointments from the Tesla API."""
-    tesla = get_tesla()
-    if tesla is None:
-        return []
-
-    def _parse(result):
-        if isinstance(result, dict):
-            # Unwrap nested containers first
-            if "data" in result and isinstance(result["data"], dict):
-                result = result["data"]
-            if "response" in result and isinstance(result["response"], dict):
-                result = result["response"]
-            keys = (
-                "serviceAppointments",
-                "appointments",
-                "serviceVisits",
-                "upcomingServiceVisits",
-                "scheduledVisits",
-            )
-            for key in keys:
-                if key in result:
-                    return result.get(key) or []
-                snake = "".join(
-                    "_" + c.lower() if c.isupper() else c for c in key
-                ).lstrip("_")
-                if snake in result:
-                    return result.get(snake) or []
-        return result if isinstance(result, list) else []
-
-    try:
-        data = tesla.api("SERVICE_GET_SERVICE_APPOINTMENTS")
-        log_api_data("SERVICE_GET_SERVICE_APPOINTMENTS", data)
-        visits = _parse(data)
-        if visits:
-            return visits
-    except Exception as exc:
-        _log_api_error(exc)
-
-    try:
-        data = tesla.api("SERVICE_GET_SERVICE_VISITS")
-        log_api_data("SERVICE_GET_SERVICE_VISITS", data)
-        visits = _parse(data)
-        if visits:
-            return visits
-    except Exception as exc:
-        _log_api_error(exc)
-
-    try:
-        data = tesla.api("GET_UPCOMING_SERVICE_VISIT_DATA")
-        log_api_data("GET_UPCOMING_SERVICE_VISIT_DATA", data)
-        return _parse(data)
-    except Exception as exc:
-        _log_api_error(exc)
-    return []
-
-
 
 def send_aprs(vehicle_data):
     """Transmit a position packet via APRS-IS using aprslib."""
@@ -1618,13 +1561,6 @@ def api_reverse_geocode():
 def api_config():
     """Return visibility configuration as JSON."""
     return jsonify(load_config())
-
-
-@app.route("/api/service_appointments")
-def api_service_appointments():
-    """Return upcoming service appointments."""
-    visits = get_service_appointments()
-    return jsonify(visits)
 
 
 @app.route("/api/announcement")
