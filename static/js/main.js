@@ -60,6 +60,9 @@ var smsNameInput = $('#sms-name');
 var smsInput = $('#sms-text');
 var smsButton = $('#sms-send');
 var smsStatus = $('#sms-status');
+var chatLink = $('#chat-link');
+var chatButton = $('#chat-join');
+var chatStatus = $('#chat-status');
 
 function parseAnnouncements(text) {
     var arr = [];
@@ -112,6 +115,7 @@ function showConfigured() {
     // Recalculate map dimensions when the content becomes visible.
     map.invalidateSize();
     updateSmsForm();
+    updateChatLink();
 }
 
 function updateSmsForm() {
@@ -121,7 +125,7 @@ function updateSmsForm() {
     smsForm.toggle(!!hasNumber);
     var driveOnly = cfg.sms_drive_only !== false;
     var parkedSince = parkStartTime ? Date.now() - parkStartTime : 0;
-    var allowWhileParked = parkedSince > 0 && parkedSince < 600000;
+    var allowWhileParked = parkedSince > 0;
     var enabled = hasNumber && (!driveOnly || (currentGear && currentGear !== 'P') || allowWhileParked);
     smsNameInput.prop('disabled', !enabled);
     smsInput.prop('disabled', !enabled);
@@ -137,6 +141,13 @@ function updateSmsForm() {
     } else {
         smsStatus.text('');
     }
+}
+
+function updateChatLink() {
+    if (!chatLink.length) return;
+    var cfg = CONFIG || {};
+    var hasRoom = cfg.chat_room && cfg.infobip_api_key;
+    chatLink.toggle(!!hasRoom);
 }
 
 function showLoading() {
@@ -1227,6 +1238,31 @@ setInterval(displayParkTime, 60000);
 updateClientCount();
 fetchAnnouncement();
 updateSmsForm();
+updateChatLink();
+
+$('#chat-join').on('click', function() {
+    chatStatus.text('Link wird erstellt...');
+    $.ajax({
+        url: '/api/chatlink',
+        method: 'POST',
+        contentType: 'application/json',
+        success: function(resp) {
+            if (resp && resp.url) {
+                window.open(resp.url, '_blank');
+                chatStatus.text('');
+            } else if (resp && resp.success && resp.link) {
+                window.open(resp.link, '_blank');
+                chatStatus.text('');
+            } else {
+                var err = resp && (resp.error || resp.url || resp.link) || 'unbekannt';
+                chatStatus.text('Fehler: ' + err);
+            }
+        },
+        error: function() {
+            chatStatus.text('Fehler beim Abrufen');
+        }
+    });
+});
 
 $('#sms-send').on('click', function() {
     var name = $('#sms-name').val().trim();

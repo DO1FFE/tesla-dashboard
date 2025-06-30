@@ -189,6 +189,12 @@
         </div>
     </div>
     <div id="offline-msg"></div>
+    {% if config.get('chat_room') and config.get('infobip_api_key') %}
+    <div id="chat-link" style="display:none;">
+        <button id="chat-join" type="button">Chat beitreten</button>
+        <span id="chat-status"></span>
+    </div>
+    {% endif %}
     {% if config.get('phone_number') and config.get('sms_enabled', True) %}
     <div id="sms-form" style="display:none;">
         <input id="sms-name" type="text" placeholder="Ihr Name">
