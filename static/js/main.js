@@ -384,9 +384,15 @@ function updateLockStatus(locked) {
         isLocked = !!locked;
     }
     if (isLocked) {
-        $('#lock-status').text('\uD83D\uDD12').attr('title', 'Verriegelt');
+        $('#lock-status')
+            .text('\uD83D\uDD12')
+            .attr('title', 'Verriegelt')
+            .attr('aria-label', 'Verriegelt');
     } else {
-        $('#lock-status').text('\uD83D\uDD13').attr('title', 'Offen');
+        $('#lock-status')
+            .text('\uD83D\uDD13')
+            .attr('title', 'Offen')
+            .attr('aria-label', 'Offen');
     }
 }
 
@@ -409,15 +415,21 @@ function updateUserPresence(present) {
                '</svg>';
     $('#user-presence').html(icon);
     if (isPresent) {
-        $('#user-presence').css('color', '#4caf50').attr('title', 'Person im Fahrzeug');
+        $('#user-presence')
+            .css('color', '#4caf50')
+            .attr('title', 'Person im Fahrzeug')
+            .attr('aria-label', 'Person im Fahrzeug');
     } else {
-        $('#user-presence').css('color', '#d00').attr('title', 'Keine Person im Fahrzeug');
+        $('#user-presence')
+            .css('color', '#d00')
+            .attr('title', 'Keine Person im Fahrzeug')
+            .attr('aria-label', 'Keine Person im Fahrzeug');
     }
 }
 
 function updateClimateStatus(on) {
     if (on == null) {
-        $('#climate-status').text('').attr('title', '');
+        $('#climate-status').text('').attr('title', '').attr('aria-label', '');
         return;
     }
     var active = false;
@@ -428,25 +440,34 @@ function updateClimateStatus(on) {
         active = !!on;
     }
     if (active) {
-        $('#climate-status').text('\u2744\uFE0F').attr('title', 'Klimaanlage an');
+        $('#climate-status')
+            .text('\u2744\uFE0F')
+            .attr('title', 'Klimaanlage an')
+            .attr('aria-label', 'Klimaanlage an');
     } else {
-        $('#climate-status').text('\uD83D\uDEAB').attr('title', 'Klimaanlage aus');
+        $('#climate-status')
+            .text('\uD83D\uDEAB')
+            .attr('title', 'Klimaanlage aus')
+            .attr('aria-label', 'Klimaanlage aus');
     }
 }
 
 function updateFanStatus(speed) {
     if (speed == null || isNaN(speed)) {
-        $('#fan-status').text('').attr('title', '');
+        $('#fan-status').text('').attr('title', '').attr('aria-label', '');
         return;
     }
     var val = Math.max(0, Math.min(11, Number(speed)));
-    $('#fan-status').text('\uD83C\uDF00 ' + val).attr('title', 'L\u00FCfterstufe ' + val);
+    $('#fan-status')
+        .text('\uD83C\uDF00 ' + val)
+        .attr('title', 'L\u00FCfterstufe ' + val)
+        .attr('aria-label', 'L\u00FCfterstufe ' + val);
 }
 
 function updateClimateMode(mode) {
     var $el = $('#climate-mode');
     if (!mode || mode === 'off') {
-        $el.text('').attr('title', '').hide();
+        $el.text('').attr('title', '').attr('aria-label', '').hide();
         return;
     }
     var icon = '';
@@ -461,25 +482,39 @@ function updateClimateMode(mode) {
         $el.text('').attr('title', '').hide();
         return;
     }
-    $el.text(icon).attr('title', title).show();
+    $el.text(icon)
+        .attr('title', title)
+        .attr('aria-label', title)
+        .show();
 }
 
 function updateCabinProtection(value) {
     var $el = $('#cabin-protection');
     if (value === 'On') {
-        $el.text('\u2600\uFE0F').attr('title', 'Kabinenschutz aktiv').show();
+        $el.text('\u2600\uFE0F')
+            .attr('title', 'Kabinenschutz aktiv')
+            .attr('aria-label', 'Kabinenschutz aktiv')
+            .show();
     } else {
-        $el.text('').attr('title', '').hide();
+        $el.text('')
+            .attr('title', '')
+            .attr('aria-label', '')
+            .hide();
     }
 }
 
 function updateDesiredTemp(temp) {
     if (temp == null || isNaN(temp)) {
-        $('#desired-temp').text('Wunsch: -- \u00B0C').attr('title', 'Wunschtemperatur');
+        $('#desired-temp')
+            .text('Wunsch: -- \u00B0C')
+            .attr('title', 'Wunschtemperatur')
+            .attr('aria-label', 'Wunschtemperatur -- \u00B0C');
         return;
     }
-    $('#desired-temp').text('Wunsch: ' + temp.toFixed(1) + ' \u00B0C')
-        .attr('title', 'Wunschtemperatur');
+    $('#desired-temp')
+        .text('Wunsch: ' + temp.toFixed(1) + ' \u00B0C')
+        .attr('title', 'Wunschtemperatur')
+        .attr('aria-label', 'Wunschtemperatur ' + temp.toFixed(1) + ' \u00B0C');
 }
 
 function updateHeaterIndicator(front, rear, steering, wiper,
@@ -487,8 +522,10 @@ function updateHeaterIndicator(front, rear, steering, wiper,
                                seatL, seatR, seatRL, seatRC, seatRR) {
     function set(id, val, name) {
         if (val == null) {
-            $('#' + id).html(name + ': \uD83D\uDEAB')
-                .attr('title', name + ' unbekannt');
+            $('#' + id)
+                .html(name + ': \uD83D\uDEAB')
+                .attr('title', name + ' unbekannt')
+                .attr('aria-label', name + ' unbekannt');
             return;
         }
         var active = false;
@@ -498,22 +535,30 @@ function updateHeaterIndicator(front, rear, steering, wiper,
         } else {
             active = !!val;
         }
-        $('#' + id).html(name + ': ' + (active ? '\uD83D\uDD25' : '\uD83D\uDEAB'))
-            .attr('title', name + (active ? ' an' : ' aus'));
+        $('#' + id)
+            .html(name + ': ' + (active ? '\uD83D\uDD25' : '\uD83D\uDEAB'))
+            .attr('title', name + (active ? ' an' : ' aus'))
+            .attr('aria-label', name + (active ? ' an' : ' aus'));
     }
     function setLevel(id, val, name) {
         if (val == null || isNaN(val)) {
-            $('#' + id).html(name + ': \uD83D\uDEAB')
-                .attr('title', name + ' unbekannt');
+            $('#' + id)
+                .html(name + ': \uD83D\uDEAB')
+                .attr('title', name + ' unbekannt')
+                .attr('aria-label', name + ' unbekannt');
             return;
         }
         var level = Number(val);
         if (level <= 0) {
-            $('#' + id).html(name + ': \uD83D\uDEAB')
-                .attr('title', name + ' aus');
+            $('#' + id)
+                .html(name + ': \uD83D\uDEAB')
+                .attr('title', name + ' aus')
+                .attr('aria-label', name + ' aus');
         } else {
-            $('#' + id).html(name + ': \uD83D\uDD25' + level)
-                .attr('title', name + ' Stufe ' + level);
+            $('#' + id)
+                .html(name + ': \uD83D\uDD25' + level)
+                .attr('title', name + ' Stufe ' + level)
+                .attr('aria-label', name + ' Stufe ' + level);
         }
     }
 
