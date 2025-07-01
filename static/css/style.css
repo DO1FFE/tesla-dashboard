@@ -16,6 +16,26 @@ body {
   padding: 0;
 }
 
+.skip-link {
+  position: absolute;
+  left: -10000px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.skip-link:focus {
+  left: 10px;
+  top: 10px;
+  width: auto;
+  height: auto;
+  padding: 8px 16px;
+  background: var(--surface-color);
+  color: var(--text-color);
+  z-index: 1000;
+}
+
 h2 {
   background: var(--surface-color);
   margin: 0;
