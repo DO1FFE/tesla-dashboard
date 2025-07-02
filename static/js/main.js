@@ -1060,11 +1060,13 @@ function updateOfflineInfo(state, serviceMode, serviceModePlus) {
     if (serviceModePlus) {
         hideLoading();
         $msg.text(SERVICE_MODE_PLUS_TEXT).show();
+        fetchServiceProgress();
         return;
     }
     if (serviceMode) {
         hideLoading();
         $msg.text(SERVICE_MODE_TEXT).show();
+        fetchServiceProgress();
         return;
     }
     if (typeof state === 'string') {
@@ -1077,6 +1079,7 @@ function updateOfflineInfo(state, serviceMode, serviceModePlus) {
     }
     hideLoading();
     $msg.hide().text('');
+    $('#service-progress-container').hide();
 }
 
 function updateClientCount() {
@@ -1127,6 +1130,33 @@ function fetchAnnouncement() {
                 updateAnnouncement();
             }
         }
+    });
+}
+
+function fetchServiceProgress() {
+    $.getJSON('/api/service-progress', function(resp) {
+        if (resp && resp.error) {
+            $('#service-progress-container').hide();
+            return;
+        }
+        var pct = null;
+        if (typeof resp.progress === 'number') {
+            pct = resp.progress;
+        } else if (typeof resp.percentComplete === 'number') {
+            pct = resp.percentComplete;
+        } else if (typeof resp.progressPercent === 'number') {
+            pct = resp.progressPercent;
+        }
+        if (pct != null) {
+            pct = Math.max(0, Math.min(100, pct));
+            $('#service-progress-bar').css('width', pct + '%');
+            $('#service-progress-text').text(pct.toFixed(0) + '%');
+            $('#service-progress-container').show();
+        } else {
+            $('#service-progress-container').hide();
+        }
+    }).fail(function() {
+        $('#service-progress-container').hide();
     });
 }
 
@@ -1292,8 +1322,10 @@ setInterval(updateClientCount, 5000);
 setInterval(fetchAnnouncement, 15000);
 setInterval(fetchConfig, 15000);
 setInterval(displayParkTime, 60000);
+setInterval(fetchServiceProgress, 30000);
 updateClientCount();
 fetchAnnouncement();
+fetchServiceProgress();
 updateSmsForm();
 
 
