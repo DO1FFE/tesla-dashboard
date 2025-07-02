@@ -66,8 +66,6 @@ Whenever a door, window, the trunk or the frunk is open or the vehicle is unlock
 Data is streamed to the frontend via `/stream/<vehicle_id>` using Server-Sent Events so the dashboard updates instantly when new information arrives.
 The endpoint `/apiliste` exposes a text file listing all seen API variables and their latest values.
 
-When a service appointment is detected via the API the dashboard polls Tesla's service activity endpoint and shows a progress bar below the offline message while the car is in service.
-
 The same information is also stored as hierarchical JSON in `data/api-liste.json`.
 
 ## Endpoints

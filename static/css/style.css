@@ -71,30 +71,6 @@ select {
   color: var(--accent-color);
 }
 
-#service-progress-container {
-  display: none;
-  margin: 10px 0;
-}
-
-#service-progress {
-  width: 100%;
-  background: #444;
-  height: 6px;
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-#service-progress-bar {
-  height: 100%;
-  background: var(--accent-color);
-  width: 0;
-}
-
-#service-progress-text {
-  text-align: center;
-  margin-top: 4px;
-}
-
 #loading-msg {
   display: none;
   text-align: center;
