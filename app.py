@@ -1305,16 +1305,23 @@ def _fetch_data_once(vehicle_id="default"):
 
         charge = data.get("charge_state", {})
         val = charge.get("charge_energy_added")
+        saved_val = last_val
         if val is not None:
+            if last_val is not None and val < last_val:
+                # Save final value of previous session before counter resets
+                _save_last_energy(cache_id, last_val)
+                saved_val = last_val
             if last_val is not None and val > last_val:
                 _log_energy(cache_id, val - last_val)
             last_val = val
+            if charge.get("charging_state") != "Charging":
+                _save_last_energy(cache_id, last_val)
+                saved_val = last_val
+        elif charge.get("charging_state") != "Charging" and last_val is not None:
             _save_last_energy(cache_id, last_val)
-        elif charge.get("charging_state") == "Charging":
-            # Keep polling while charging even if no value is reported
-            pass
-        if last_val is not None:
-            data["last_charge_energy_added"] = last_val
+            saved_val = last_val
+        if saved_val is not None:
+            data["last_charge_energy_added"] = saved_val
 
     if isinstance(data, dict):
         data["_live"] = live
