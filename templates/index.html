@@ -190,6 +190,10 @@
         </div>
     </div>
     <div id="offline-msg"></div>
+    <div id="service-progress-container">
+        <div id="service-progress"><div id="service-progress-bar"></div></div>
+        <div id="service-progress-text"></div>
+    </div>
     {% if config.get('phone_number') and config.get('sms_enabled', True) %}
     <div id="sms-form" style="display:none;">
         <input id="sms-name" type="text" placeholder="Ihr Name">
