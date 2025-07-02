@@ -1130,7 +1130,19 @@ def get_vehicle_state(vehicle_id=None):
         log_vehicle_state(vehicle["id_s"], "offline")
         return {"error": "Vehicle unavailable", "state": "offline"}
 
-    return {"state": state}
+    cached = _load_cached(vid)
+    service_mode = None
+    service_mode_plus = None
+    if isinstance(cached, dict):
+        vs = cached.get("vehicle_state", {})
+        service_mode = vs.get("service_mode")
+        service_mode_plus = vs.get("service_mode_plus")
+
+    return {
+        "state": state,
+        "service_mode": service_mode,
+        "service_mode_plus": service_mode_plus,
+    }
 
 
 def get_vehicle_data(vehicle_id=None, state=None):

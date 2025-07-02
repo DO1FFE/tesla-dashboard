@@ -56,6 +56,8 @@ var lastAddressLng = null;
 var CONFIG = {};
 var HIGHLIGHT_BLUE = false;
 var OFFLINE_TEXT = 'Das Fahrzeug ist offline und schläft - Bitte nicht wecken! - Die Daten sind die zuletzt bekannten und somit nicht aktuell!';
+var SERVICE_MODE_TEXT = 'Fahrzeug befindet sich im Service Mode.';
+var SERVICE_MODE_PLUS_TEXT = 'Fahrzeug befindet sich im Service Mode Plus.';
 var smsForm = $('#sms-form');
 var smsNameInput = $('#sms-name');
 var smsInput = $('#sms-text');
@@ -250,7 +252,8 @@ function handleData(data) {
     updateHeader(data);
     updateUI(data);
     updateVehicleState(data.state);
-    updateOfflineInfo(data.state);
+    var vehicleState = data.vehicle_state || {};
+    updateOfflineInfo(data.state, vehicleState.service_mode, vehicleState.service_mode_plus);
     var drive = data.drive_state || {};
     var vehicle = data.vehicle_state || {};
     updateDataAge(vehicle.timestamp);
@@ -1052,8 +1055,18 @@ function updateVehicleState(state) {
     }
 }
 
-function updateOfflineInfo(state) {
+function updateOfflineInfo(state, serviceMode, serviceModePlus) {
     var $msg = $('#offline-msg');
+    if (serviceModePlus) {
+        hideLoading();
+        $msg.text(SERVICE_MODE_PLUS_TEXT).show();
+        return;
+    }
+    if (serviceMode) {
+        hideLoading();
+        $msg.text(SERVICE_MODE_TEXT).show();
+        return;
+    }
     if (typeof state === 'string') {
         var st = state.toLowerCase();
         if (st === 'offline' || st === 'asleep') {
@@ -1203,7 +1216,7 @@ function startStream() {
         $.getJSON('/api/state/' + currentVehicle, function(resp) {
             var st = resp.state;
             updateVehicleState(st);
-            updateOfflineInfo(st);
+            updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
             $.getJSON('/api/data/' + currentVehicle, function(data) {
                 if (data && !data.error) {
                     handleData(data);
@@ -1226,7 +1239,7 @@ function startStreamIfOnline() {
     $.getJSON('/api/state/' + currentVehicle, function(resp) {
         var st = resp.state;
         updateVehicleState(st);
-        updateOfflineInfo(st);
+        updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
         startStream();
         $.getJSON('/api/data/' + currentVehicle, function(data) {
             if (data && !data.error) {
