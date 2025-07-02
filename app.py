@@ -1304,15 +1304,15 @@ def _fetch_data_once(vehicle_id="default"):
             last_val = _load_last_energy(cache_id)
 
         charge = data.get("charge_state", {})
-        if (
-            charge.get("charging_state") == "Charging"
-            and charge.get("charge_energy_added") is not None
-        ):
-            val = charge.get("charge_energy_added")
+        val = charge.get("charge_energy_added")
+        if val is not None:
             if last_val is not None and val > last_val:
                 _log_energy(cache_id, val - last_val)
             last_val = val
             _save_last_energy(cache_id, last_val)
+        elif charge.get("charging_state") == "Charging":
+            # Keep polling while charging even if no value is reported
+            pass
         if last_val is not None:
             data["last_charge_energy_added"] = last_val
 
@@ -1598,41 +1598,6 @@ def api_occupant():
         else:
             occupant_present = bool(val)
     return jsonify({"present": occupant_present})
-
-
-@app.route("/api/service-progress")
-def api_service_progress():
-    """Return progress for the current service visit."""
-    tesla = get_tesla()
-    if tesla is None:
-        return jsonify({"error": "Tesla authentication failed"}), 500
-    try:
-        visits = tesla.api("SERVICE_GET_SERVICE_VISITS")
-        log_api_data("SERVICE_GET_SERVICE_VISITS", visits)
-    except Exception as exc:
-        _log_api_error(exc)
-        return jsonify({"error": str(exc)}), 500
-
-    svc_id = None
-    if isinstance(visits, list):
-        for item in visits:
-            svc_id = item.get("serviceVisitId") or item.get("serviceVisitID") or item.get("id")
-            status = str(item.get("status", "")).lower()
-            if svc_id and status not in ("completed", "cancelled", "canceled"):
-                break
-    elif isinstance(visits, dict):
-        svc_id = visits.get("serviceVisitId") or visits.get("serviceVisitID") or visits.get("id")
-
-    if not svc_id:
-        return jsonify({"error": "No service visit found"}), 404
-
-    try:
-        data = tesla.api("SERVICE_ACTIVITY_PROGRESS", path_vars={"serviceVisitID": svc_id})
-        log_api_data("SERVICE_ACTIVITY_PROGRESS", data)
-        return jsonify(data)
-    except Exception as exc:
-        _log_api_error(exc)
-        return jsonify({"error": str(exc)}), 500
 
 
 
