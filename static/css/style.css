@@ -269,6 +269,35 @@ select {
   white-space: normal;
 }
 
+#alarm-popup {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 0, 0, 0.7);
+  z-index: 2000;
+  color: #fff;
+  font-size: 1.2em;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+}
+
+#alarm-popup .box {
+  background: rgba(255, 0, 0, 0.9);
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+#alarm-popup button {
+  margin-top: 10px;
+}
+
 #v2l-infos,
 #charging-info,
 /* Navigation bar below the status bar */

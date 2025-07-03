@@ -298,6 +298,11 @@ function handleData(data) {
                vehicle.tpms_pressure_rr);
     updateOpenings(vehicle, charge);
     updateMediaPlayer(vehicle.media_info);
+    var alarm = data.alarm_state;
+    if (alarm == null && vehicle.alarm_state != null) {
+        alarm = vehicle.alarm_state;
+    }
+    updateAlarmPopup(alarm);
     var lat = drive.latitude;
     var lng = drive.longitude;
     var slide = false;
@@ -956,6 +961,23 @@ function updateMediaPlayer(media) {
     $player.html('<table>' + rows.join('') + '</table>');
 }
 
+function updateAlarmPopup(state) {
+    var active = false;
+    if (state != null) {
+        if (typeof state === 'string') {
+            var norm = state.toLowerCase();
+            active = norm !== 'off' && norm !== 'inactive' && norm !== '0';
+        } else {
+            active = !!state;
+        }
+    }
+    if (active) {
+        $('#alarm-popup').show();
+    } else {
+        $('#alarm-popup').hide();
+    }
+}
+
 function getStatus(data) {
     var drive = data.drive_state || {};
     var charge = data.charge_state || {};
@@ -1332,4 +1354,8 @@ $('#sms-send').on('click', function() {
             $('#sms-status').text('Fehler: ' + msg);
         }
     });
+});
+
+$('#alarm-close').on('click', function() {
+    $('#alarm-popup').hide();
 });
