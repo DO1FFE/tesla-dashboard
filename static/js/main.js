@@ -972,9 +972,9 @@ function updateAlarmPopup(state) {
         }
     }
     if (active) {
-        $('#alarm-popup').show();
+        $('#alarm-popup').addClass('show');
     } else {
-        $('#alarm-popup').hide();
+        $('#alarm-popup').removeClass('show');
     }
 }
 
@@ -1357,5 +1357,5 @@ $('#sms-send').on('click', function() {
 });
 
 $('#alarm-close').on('click', function() {
-    $('#alarm-popup').hide();
+    $('#alarm-popup').removeClass('show');
 });
