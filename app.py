@@ -1618,6 +1618,24 @@ def api_announcement():
     return jsonify({"announcement": text})
 
 
+@app.route("/api/alarm_state")
+@app.route("/api/alarm_state/<vehicle_id>")
+def api_alarm_state(vehicle_id=None):
+    """Return the current alarm state."""
+    vid = vehicle_id or "default"
+    _start_thread(vid)
+    data = latest_data.get(vid)
+    if data is None:
+        data = _fetch_data_once(vid)
+    alarm = None
+    if isinstance(data, dict):
+        alarm = data.get("alarm_state")
+        if alarm is None:
+            vs = data.get("vehicle_state", {})
+            alarm = vs.get("alarm_state")
+    return jsonify({"alarm_state": alarm})
+
+
 @app.route("/api/occupant", methods=["GET", "POST"])
 def api_occupant():
     """Return or update occupant presence status."""
