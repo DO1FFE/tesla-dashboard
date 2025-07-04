@@ -59,6 +59,9 @@ function updateInfo(idx) {
     if (point[3] !== null && point[3] !== undefined && point[3] !== '') {
         text.push('Power: ' + point[3] + ' kW');
     }
+    if (point[6] !== null && point[6] !== undefined && point[6] !== '') {
+        text.push('Gang: ' + point[6]);
+    }
     document.getElementById('point-info').textContent = text.join(' | ');
 }
 
@@ -69,7 +72,9 @@ function updateMarker(idx, center) {
     var point = tripPath[idx];
     marker.setLatLng([point[0], point[1]]);
     var angle = 0;
-    if (idx > 0) {
+    if (point[5] !== null && point[5] !== undefined && point[5] !== '') {
+        angle = point[5];
+    } else if (idx > 0) {
         angle = bearing(tripPath[idx - 1], point);
     }
     marker.setRotationAngle(angle);
