@@ -483,7 +483,9 @@ def park_duration_string(start_ms):
     return " ".join(parts)
 
 
-def _log_trip_point(ts, lat, lon, speed=None, power=None, filename=None):
+def _log_trip_point(
+    ts, lat, lon, speed=None, power=None, heading=None, gear=None, filename=None
+):
     """Append a GPS point to a trip history CSV."""
     if filename is None:
         filename = os.path.join(DATA_DIR, "trip_history.csv")
@@ -496,6 +498,8 @@ def _log_trip_point(ts, lat, lon, speed=None, power=None, filename=None):
                 lon,
                 "" if speed is None else speed,
                 "" if power is None else power,
+                "" if heading is None else heading,
+                "" if gear is None else gear,
             ]
             f.write(",".join(str(v) for v in row) + "\n")
     except Exception:
@@ -514,6 +518,7 @@ def track_drive_path(vehicle_data):
     ts = drive.get("timestamp") or drive.get("gps_as_of")
     speed = drive.get("speed")
     power = drive.get("power")
+    heading = drive.get("heading")
     if ts and ts < 1e12:
         ts = int(ts * 1000)
     if shift in (None, "P"):
@@ -547,7 +552,16 @@ def track_drive_path(vehicle_data):
         if not trip_path or trip_path[-1] != point:
             trip_path.append(point)
             if ts is not None:
-                _log_trip_point(ts, lat, lon, speed, power, current_trip_file)
+                _log_trip_point(
+                    ts,
+                    lat,
+                    lon,
+                    speed,
+                    power,
+                    heading,
+                    shift,
+                    current_trip_file,
+                )
 
 
 def _log_api_error(exc):
@@ -818,15 +832,19 @@ def _load_trip(filename):
                 ts, lat, lon = parts[:3]
                 speed = parts[3] if len(parts) >= 4 and parts[3] else None
                 power = parts[4] if len(parts) >= 5 and parts[4] else None
+                heading = parts[5] if len(parts) >= 6 and parts[5] else None
+                gear = parts[6] if len(parts) >= 7 and parts[6] else None
                 try:
                     ts = int(float(ts)) if ts else None
                     lat = float(lat)
                     lon = float(lon)
                     speed = float(speed) if speed is not None else None
                     power = float(power) if power is not None else None
+                    heading = float(heading) if heading is not None else None
+                    gear = gear if gear is not None else None
                 except Exception:
                     continue
-                points.append([lat, lon, speed, power, ts])
+                points.append([lat, lon, speed, power, ts, heading, gear])
     except Exception:
         pass
     return points
@@ -1482,8 +1500,12 @@ def trip_history():
         selected = files[-1]
         path = _load_trip(os.path.join(DATA_DIR, selected))
     heading = 0.0
-    if len(path) >= 2:
-        heading = _bearing(path[0][:2], path[1][:2])
+    if path:
+        first = path[0]
+        if len(first) >= 6 and first[5] is not None:
+            heading = first[5]
+        elif len(path) >= 2:
+            heading = _bearing(path[0][:2], path[1][:2])
     weekly, monthly = compute_trip_summaries()
     cfg = load_config()
     return render_template(
