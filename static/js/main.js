@@ -30,6 +30,7 @@ if (window.ResizeObserver && mapEl) {
     var mapResizeObserver = new ResizeObserver(function() {
         map.invalidateSize();
         if (typeof marker !== 'undefined' && marker.getLatLng) {
+            zoomSetByApp = true;
             map.setView(marker.getLatLng(), map.getZoom(), {animate: false});
         }
     });
@@ -38,6 +39,7 @@ if (window.ResizeObserver && mapEl) {
 // Track when the user last changed the zoom level
 var lastUserZoom = 0;
 var USER_ZOOM_PRIORITY_MS = 30 * 1000;
+var zoomSetByApp = false;
 var $zoomLevel = $('#zoom-level');
 function updateZoomDisplay() {
     if ($zoomLevel.length) {
@@ -46,7 +48,11 @@ function updateZoomDisplay() {
 }
 updateZoomDisplay();
 map.on('zoomend', function() {
-    lastUserZoom = Date.now();
+    if (zoomSetByApp) {
+        zoomSetByApp = false;
+    } else {
+        lastUserZoom = Date.now();
+    }
     updateZoomDisplay();
 });
 var polyline = null;
@@ -322,6 +328,7 @@ function handleData(data) {
         if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
             zoom = map.getZoom();
         }
+        zoomSetByApp = true;
         map.flyTo([lat, lng], zoom);
         updateZoomDisplay();
         if (typeof drive.heading === 'number') {
@@ -334,6 +341,7 @@ function handleData(data) {
         if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
             zoom = map.getZoom();
         }
+        zoomSetByApp = true;
         map.setView(DEFAULT_POS, zoom);
         updateZoomDisplay();
         $('#address-text').text('');
@@ -1260,6 +1268,7 @@ function startStream() {
         if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
             zoom = map.getZoom();
         }
+        zoomSetByApp = true;
         map.setView(DEFAULT_POS, zoom);
         updateZoomDisplay();
         // Attempt to reconnect after a short delay in case the browser has
