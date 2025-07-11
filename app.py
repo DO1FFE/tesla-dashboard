@@ -1016,8 +1016,14 @@ def compute_statistics():
         stats[day]["energy"] = round(val, 2)
     for day, val in stats.items():
         total = 24 * 3600
-        for k in ("online", "offline", "asleep"):
-            val[k] = round(val.get(k, 0.0) / total * 100, 2)
+        online = round(val.get("online", 0.0) / total * 100, 2)
+        offline = round(val.get("offline", 0.0) / total * 100, 2)
+        asleep = round(val.get("asleep", 0.0) / total * 100, 2)
+        diff = round(100.0 - (online + offline + asleep), 2)
+        offline = round(offline + diff, 2)
+        val["online"] = online
+        val["offline"] = offline
+        val["asleep"] = asleep
         val.setdefault("km", 0.0)
         val.setdefault("speed", 0.0)
         val.setdefault("energy", 0.0)
@@ -1860,17 +1866,19 @@ def statistics_page():
     for day in sorted(stats.keys()):
         entry = stats[day]
         if day.startswith(current_month):
-            rows.append(
-                {
-                    "date": day,
-                    "online": entry.get("online", 0.0),
-                    "offline": entry.get("offline", 0.0),
-                    "asleep": entry.get("asleep", 0.0),
-                    "km": round(entry.get("km", 0.0), 2),
-                    "speed": int(round(entry.get("speed", 0.0))),
-                    "energy": round(entry.get("energy", 0.0), 2),
-                }
-            )
+            row = {
+                "date": day,
+                "online": entry.get("online", 0.0),
+                "offline": entry.get("offline", 0.0),
+                "asleep": entry.get("asleep", 0.0),
+                "km": round(entry.get("km", 0.0), 2),
+                "speed": int(round(entry.get("speed", 0.0))),
+                "energy": round(entry.get("energy", 0.0), 2),
+            }
+            total = row["online"] + row["offline"] + row["asleep"]
+            diff = round(100.0 - total, 2)
+            row["offline"] = round(row["offline"] + diff, 2)
+            rows.append(row)
             continue
         month = day[:7]
         m = monthly.setdefault(
@@ -1897,17 +1905,19 @@ def statistics_page():
     for month in sorted(monthly.keys()):
         data = monthly[month]
         cnt = data["count"] or 1
-        monthly_rows.append(
-            {
-                "date": month,
-                "online": round(data["online_sum"] / cnt, 2),
-                "offline": round(data["offline_sum"] / cnt, 2),
-                "asleep": round(data["asleep_sum"] / cnt, 2),
-                "km": round(data["km"], 2),
-                "speed": int(round(data["speed"])),
-                "energy": round(data["energy"], 2),
-            }
-        )
+        row = {
+            "date": month,
+            "online": round(data["online_sum"] / cnt, 2),
+            "offline": round(data["offline_sum"] / cnt, 2),
+            "asleep": round(data["asleep_sum"] / cnt, 2),
+            "km": round(data["km"], 2),
+            "speed": int(round(data["speed"])),
+            "energy": round(data["energy"], 2),
+        }
+        total = row["online"] + row["offline"] + row["asleep"]
+        diff = round(100.0 - total, 2)
+        row["offline"] = round(row["offline"] + diff, 2)
+        monthly_rows.append(row)
 
     rows = monthly_rows + rows
     cfg = load_config()
