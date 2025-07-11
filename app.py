@@ -1852,22 +1852,64 @@ def error_page():
 
 @app.route("/statistik")
 def statistics_page():
-    """Display daily statistics of vehicle state and distance."""
+    """Display statistics of vehicle state and distance."""
     stats = compute_statistics()
+    current_month = datetime.now(LOCAL_TZ).strftime("%Y-%m")
+    monthly = {}
     rows = []
     for day in sorted(stats.keys()):
         entry = stats[day]
-        rows.append(
+        if day.startswith(current_month):
+            rows.append(
+                {
+                    "date": day,
+                    "online": entry.get("online", 0.0),
+                    "offline": entry.get("offline", 0.0),
+                    "asleep": entry.get("asleep", 0.0),
+                    "km": round(entry.get("km", 0.0), 2),
+                    "speed": int(round(entry.get("speed", 0.0))),
+                    "energy": round(entry.get("energy", 0.0), 2),
+                }
+            )
+            continue
+        month = day[:7]
+        m = monthly.setdefault(
+            month,
             {
-                "date": day,
-                "online": entry.get("online", 0.0),
-                "offline": entry.get("offline", 0.0),
-                "asleep": entry.get("asleep", 0.0),
-                "km": round(entry.get("km", 0.0), 2),
-                "speed": int(round(entry.get("speed", 0.0))),
-                "energy": round(entry.get("energy", 0.0), 2),
+                "online_sum": 0.0,
+                "offline_sum": 0.0,
+                "asleep_sum": 0.0,
+                "km": 0.0,
+                "speed": 0.0,
+                "energy": 0.0,
+                "count": 0,
+            },
+        )
+        m["online_sum"] += entry.get("online", 0.0)
+        m["offline_sum"] += entry.get("offline", 0.0)
+        m["asleep_sum"] += entry.get("asleep", 0.0)
+        m["km"] += entry.get("km", 0.0)
+        m["energy"] += entry.get("energy", 0.0)
+        m["speed"] = max(m["speed"], entry.get("speed", 0.0))
+        m["count"] += 1
+
+    monthly_rows = []
+    for month in sorted(monthly.keys()):
+        data = monthly[month]
+        cnt = data["count"] or 1
+        monthly_rows.append(
+            {
+                "date": month,
+                "online": round(data["online_sum"] / cnt, 2),
+                "offline": round(data["offline_sum"] / cnt, 2),
+                "asleep": round(data["asleep_sum"] / cnt, 2),
+                "km": round(data["km"], 2),
+                "speed": int(round(data["speed"])),
+                "energy": round(data["energy"], 2),
             }
         )
+
+    rows = monthly_rows + rows
     cfg = load_config()
     return render_template("statistik.html", rows=rows, config=cfg)
 
