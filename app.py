@@ -1684,6 +1684,7 @@ def api_sms():
     phone = cfg.get("phone_number")
     api_key = cfg.get("infobip_api_key")
     base_url = cfg.get("infobip_base_url", "https://api.infobip.com")
+    sms_sender_id = cfg.get("sms_sender_id", "").strip()
     if not phone:
         return jsonify({"success": False, "error": "No phone number configured"}), 400
     if not api_key:
@@ -1709,17 +1710,12 @@ def api_sms():
         if not base_url.startswith("http"):
             base_url = "https://" + base_url
         url = base_url.rstrip("/") + "/sms/2/text/advanced"
+        sms_payload = {"destinations": [{"to": phone}], "text": message}
+        if sms_sender_id:
+            sms_payload["from"] = sms_sender_id
         resp = requests.post(
             url,
-            json={
-                "messages": [
-                    {
-                        "destinations": [{"to": phone}],
-                        "from": "TeslaDash",
-                        "text": message,
-                    }
-                ]
-            },
+            json={"messages": [sms_payload]},
             headers={
                 "Authorization": f"App {api_key}",
                 "Content-Type": "application/json",
@@ -1754,6 +1750,7 @@ def config_page():
         phone_number = request.form.get("phone_number", "").strip()
         infobip_api_key = request.form.get("infobip_api_key", "").strip()
         infobip_base_url = request.form.get("infobip_base_url", "").strip()
+        sms_sender_id = request.form.get("sms_sender_id", "").strip()
         sms_enabled = "sms_enabled" in request.form
         sms_drive_only = "sms_drive_only" in request.form
         api_interval = request.form.get("api_interval", "").strip()
@@ -1795,6 +1792,10 @@ def config_page():
             cfg["infobip_base_url"] = infobip_base_url
         elif "infobip_base_url" in cfg:
             cfg.pop("infobip_base_url")
+        if sms_sender_id:
+            cfg["sms_sender_id"] = sms_sender_id
+        elif "sms_sender_id" in cfg:
+            cfg.pop("sms_sender_id")
         cfg["sms_enabled"] = sms_enabled
         cfg["sms_drive_only"] = sms_drive_only
         if api_interval.isdigit():
