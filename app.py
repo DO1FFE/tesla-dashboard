@@ -23,6 +23,11 @@ try:
 except ImportError:
     aprslib = None
 
+try:
+    import phonenumbers
+except ImportError:
+    phonenumbers = None
+
 load_dotenv()
 app = Flask(__name__)
 __version__ = get_version()
@@ -1672,6 +1677,21 @@ def api_occupant():
     return jsonify({"present": occupant_present})
 
 
+def _format_phone(phone, region="DE"):
+    """Return ``phone`` normalized to E.164 or ``None`` if invalid."""
+    if not phone:
+        return None
+    if phonenumbers is None:
+        return phone if phone.startswith("+") else None
+    try:
+        parsed = phonenumbers.parse(phone, None if phone.startswith("+") else region)
+        if not phonenumbers.is_valid_number(parsed):
+            return None
+        return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+    except Exception:
+        return None
+
+
 
 
 
@@ -1687,6 +1707,9 @@ def api_sms():
     sms_sender_id = cfg.get("sms_sender_id", "").strip()
     if not phone:
         return jsonify({"success": False, "error": "No phone number configured"}), 400
+    phone = _format_phone(phone)
+    if not phone:
+        return jsonify({"success": False, "error": "Invalid phone number"}), 400
     if not api_key:
         return jsonify({"success": False, "error": "No API key configured"}), 400
     drive_only = cfg.get("sms_drive_only", True)
@@ -1748,6 +1771,8 @@ def config_page():
         aprs_comment = request.form.get("aprs_comment", "").strip()
         announcement = request.form.get("announcement", "").strip()
         phone_number = request.form.get("phone_number", "").strip()
+        if phone_number:
+            phone_number = _format_phone(phone_number) or phone_number
         infobip_api_key = request.form.get("infobip_api_key", "").strip()
         infobip_base_url = request.form.get("infobip_base_url", "").strip()
         sms_sender_id = request.form.get("sms_sender_id", "").strip()
