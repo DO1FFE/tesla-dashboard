@@ -142,6 +142,16 @@ if not energy_logger.handlers:
     energy_logger.addHandler(handler)
     energy_logger.setLevel(logging.INFO)
 
+sms_logger = logging.getLogger("sms_logger")
+if not sms_logger.handlers:
+    handler = RotatingFileHandler(
+        os.path.join(DATA_DIR, "sms.log"), maxBytes=100_000, backupCount=1
+    )
+    formatter = logging.Formatter("%(asctime)s %(message)s")
+    handler.setFormatter(formatter)
+    sms_logger.addHandler(handler)
+    sms_logger.setLevel(logging.INFO)
+
 
 def _load_last_state(filename=os.path.join(DATA_DIR, "state.log")):
     """Load the last logged state for each vehicle from ``state.log``."""
@@ -598,6 +608,14 @@ def _log_energy(vehicle_id, amount):
         energy_logger.info(
             json.dumps({"vehicle_id": vehicle_id, "added_energy": amount})
         )
+    except Exception:
+        pass
+
+
+def _log_sms(message, success):
+    """Append SMS information to ``sms.log``."""
+    try:
+        sms_logger.info(json.dumps({"message": message, "success": success}))
     except Exception:
         pass
 
@@ -1752,7 +1770,9 @@ def api_sms():
             },
             timeout=10,
         )
-        if 200 <= resp.status_code < 300:
+        success = 200 <= resp.status_code < 300
+        _log_sms(message, success)
+        if success:
             return jsonify({"success": True})
         try:
             error = resp.json().get("requestError", {}).get("serviceException", {}).get("text")
@@ -1760,6 +1780,7 @@ def api_sms():
             error = resp.text
         return jsonify({"success": False, "error": error})
     except Exception as exc:
+        _log_sms(message, False)
         return jsonify({"success": False, "error": str(exc)})
 
 
@@ -1969,6 +1990,18 @@ def api_log_page():
     except Exception:
         pass
     return render_template("apilog.html", log_lines=log_lines)
+
+
+@app.route("/sms")
+def sms_log_page():
+    """Display the SMS log."""
+    log_lines = []
+    try:
+        with open(os.path.join(DATA_DIR, "sms.log"), "r", encoding="utf-8") as f:
+            log_lines = f.readlines()
+    except Exception:
+        pass
+    return render_template("sms.html", log_lines=log_lines)
 
 
 @app.route("/debug")
