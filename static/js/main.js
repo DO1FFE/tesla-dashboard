@@ -37,6 +37,7 @@ if (window.ResizeObserver && mapEl) {
 }
 // Track when the user last changed the zoom level
 var lastUserZoom = 0;
+var USER_ZOOM_PRIORITY_MS = 30 * 1000;
 var $zoomLevel = $('#zoom-level');
 function updateZoomDisplay() {
     if ($zoomLevel.length) {
@@ -318,14 +319,23 @@ function handleData(data) {
         var mph = !units || units.indexOf('km') === -1;
         var speedKmh = isNaN(speedVal) ? 0 : (mph ? speedVal * MILES_TO_KM : speedVal);
         var zoom = computeZoomForSpeed(speedKmh);
+        if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
+            zoom = map.getZoom();
+        }
         map.flyTo([lat, lng], zoom);
+        updateZoomDisplay();
         if (typeof drive.heading === 'number') {
             marker.setRotationAngle(drive.heading);
         }
         fetchAddress(lat, lng);
     } else {
         // Fall back to Essen if no coordinates are available
-        map.setView(DEFAULT_POS, DEFAULT_ZOOM);
+        var zoom = DEFAULT_ZOOM;
+        if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
+            zoom = map.getZoom();
+        }
+        map.setView(DEFAULT_POS, zoom);
+        updateZoomDisplay();
         $('#address-text').text('');
     }
 
@@ -1246,7 +1256,12 @@ function startStream() {
             });
         });
         // Ensure the map shows Essen if no cached data was found
-        map.setView(DEFAULT_POS, DEFAULT_ZOOM);
+        var zoom = DEFAULT_ZOOM;
+        if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
+            zoom = map.getZoom();
+        }
+        map.setView(DEFAULT_POS, zoom);
+        updateZoomDisplay();
         // Attempt to reconnect after a short delay in case the browser has
         // suspended the connection while running in the background.
         setTimeout(startStreamIfOnline, 5000);
