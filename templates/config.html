@@ -89,6 +89,12 @@
         </div>
         <div>
             <label>
+                SMS Absender
+                <input type="text" name="sms_sender_id" value="{{ config.get('sms_sender_id','') }}">
+            </label>
+        </div>
+        <div>
+            <label>
                 <input type="checkbox" name="sms_enabled" value="1" {% if config.get('sms_enabled', True) %}checked{% endif %}>
                 SMS-Versand erlauben
             </label>
