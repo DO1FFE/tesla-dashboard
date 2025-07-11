@@ -1734,6 +1734,8 @@ def api_sms():
             base_url = "https://" + base_url
         url = base_url.rstrip("/") + "/sms/2/text/advanced"
         sms_payload = {"destinations": [{"to": phone}], "text": message}
+        if sms_sender_id:
+            sms_payload["from"] = sms_sender_id
         resp = requests.post(
             url,
             json={"messages": [sms_payload]},
