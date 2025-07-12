@@ -25,6 +25,7 @@ This is a simple Flask application that displays real-time data from a Tesla veh
 7. When sending a text message the sender's name is requested as well. The entire message including the name must not exceed 160 characters.
 
 All sent text messages are written to `data/sms.log` and can be viewed on the `/sms` page.
+Timestamps in this file are recorded in the Europe/Berlin timezone.
 
 All API calls are logged to `data/api.log` without storing request details. The log file uses rotation and will grow to at most 1&nbsp;MB.
 Vehicle state changes are written to `data/state.log`.
