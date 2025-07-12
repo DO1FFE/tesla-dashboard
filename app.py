@@ -148,6 +148,7 @@ if not sms_logger.handlers:
         os.path.join(DATA_DIR, "sms.log"), maxBytes=100_000, backupCount=1
     )
     formatter = logging.Formatter("%(asctime)s %(message)s")
+    formatter.converter = lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
     handler.setFormatter(formatter)
     sms_logger.addHandler(handler)
     sms_logger.setLevel(logging.INFO)
