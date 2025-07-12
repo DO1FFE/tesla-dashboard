@@ -1148,6 +1148,17 @@ def _refresh_state(vehicle, times=2):
         state = vehicle.get("state") or vehicle["state"]
         log_vehicle_state(vehicle["id_s"], state)
         log_api_data("get_vehicle_summary", {"state": state})
+        if state == "online":
+            return state
+
+    if state == "asleep":
+        try:
+            vehicle.sync_wake_up(timeout=10)
+            state = vehicle.get("state") or vehicle["state"]
+            log_vehicle_state(vehicle["id_s"], state)
+            log_api_data("wake_up_retry", {"state": state})
+        except Exception:
+            pass
     return state
 
 
