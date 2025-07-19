@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Taxameter Quittung</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+    {% include 'analytics.html' %}
+</head>
+<body>
+    <h1>Taxameter</h1>
+    <div id="taximeter">
+        <div id="taximeter-receipt">
+            <div id="receipt-company">
+                {% if company %}
+                <div class="company-name">{{ company }}</div>
+                {% if slogan %}
+                <div class="company-slogan">{{ slogan }}</div>
+                {% endif %}
+                {% endif %}
+            </div>
+            <table id="receipt-table">
+                <tr><td>Grundpreis:</td><td class="num">{{ '%.2f'|format(breakdown.base) }} €</td></tr>
+                {% if breakdown.km_1_2 > 0 %}
+                <tr><td>{{ '%.2f'|format(breakdown.km_1_2) }} km x {{ '%.2f'|format(breakdown.rate_1_2) }} €</td><td class="num">{{ '%.2f'|format(breakdown.cost_1_2) }} €</td></tr>
+                {% endif %}
+                {% if breakdown.km_3_4 > 0 %}
+                <tr><td>{{ '%.2f'|format(breakdown.km_3_4) }} km x {{ '%.2f'|format(breakdown.rate_3_4) }} €</td><td class="num">{{ '%.2f'|format(breakdown.cost_3_4) }} €</td></tr>
+                {% endif %}
+                {% if breakdown.km_5_plus > 0 %}
+                <tr><td>{{ '%.2f'|format(breakdown.km_5_plus) }} km x {{ '%.2f'|format(breakdown.rate_5_plus) }} €</td><td class="num">{{ '%.2f'|format(breakdown.cost_5_plus) }} €</td></tr>
+                {% endif %}
+                {% if breakdown.wait_cost > 0 %}
+                <tr><td>Standzeit {{ breakdown.wait_time|round|int }}s</td><td class="num">{{ '%.2f'|format(breakdown.wait_cost) }} €</td></tr>
+                {% endif %}
+                <tr><td colspan="2"><hr></td></tr>
+                <tr><td>Gesamt:</td><td class="num">{{ '%.2f'|format(breakdown.total) }} €</td></tr>
+                <tr><td colspan="2" style="text-align:center">Fahrstrecke: {{ '%.2f'|format(distance) }} km</td></tr>
+            </table>
+            {% if qr_code %}
+            <div id="receipt-qr"><img src="{{ qr_code }}" alt="QR" style="width:50%"></div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
