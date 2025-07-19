@@ -1037,7 +1037,7 @@ select {
   display: inline-block;
   margin-top: 20px;
   text-align: left;
-  max-width: 240px;
+  width: max-content;
 }
 #receipt-table {
   width: 100%;

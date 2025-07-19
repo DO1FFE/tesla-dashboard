@@ -1232,6 +1232,20 @@ def _cached_vehicle_list(tesla, ttl=86400):
                 return []
         return _vehicle_list_cache
 
+def default_vehicle_id():
+    """Return the first vehicle ID or None if unavailable."""
+    global _default_vehicle_id
+    if _default_vehicle_id is not None:
+        return _default_vehicle_id
+    tesla = get_tesla()
+    if tesla is None:
+        return None
+    vehicles = _cached_vehicle_list(tesla)
+    if vehicles:
+        _default_vehicle_id = str(vehicles[0]["id_s"])
+        return _default_vehicle_id
+    return None
+
 
 def _refresh_state(vehicle, times=2):
     """Query the vehicle state multiple times and return the last value."""
@@ -2164,26 +2178,35 @@ def taxameter_page():
     company = cfg.get("taxi_company", "Taxi Schauer")
     files = [os.path.relpath(p, DATA_DIR) for p in _get_trip_files()]
     recent = files[-10:]
+    vehicle_id = default_vehicle_id()
     return render_template(
-        "taxameter.html", company=company, config=cfg, trips=recent
+        "taxameter.html", company=company, config=cfg, trips=recent, vehicle_id=vehicle_id
     )
 
 
 @app.route("/api/taxameter/start", methods=["POST"])
 def api_taxameter_start():
-    _start_thread("default")
+    vid = request.form.get("vehicle_id") or default_vehicle_id()
+    taximeter.vehicle_id = vid
+    _start_thread(vid)
     taximeter.start()
     return jsonify(taximeter.status())
 
 
 @app.route("/api/taxameter/pause", methods=["POST"])
 def api_taxameter_pause():
+    vid = request.form.get("vehicle_id")
+    if vid:
+        taximeter.vehicle_id = vid
     taximeter.pause()
     return jsonify(taximeter.status())
 
 
 @app.route("/api/taxameter/stop", methods=["POST"])
 def api_taxameter_stop():
+    vid = request.form.get("vehicle_id")
+    if vid:
+        taximeter.vehicle_id = vid
     result = taximeter.stop()
     if result:
         company = get_taxi_company()
@@ -2220,12 +2243,18 @@ def api_taxameter_stop():
 
 @app.route("/api/taxameter/reset", methods=["POST"])
 def api_taxameter_reset():
+    vid = request.form.get("vehicle_id")
+    if vid:
+        taximeter.vehicle_id = vid
     taximeter.reset()
     return jsonify({"active": False})
 
 
 @app.route("/api/taxameter/status")
 def api_taxameter_status():
+    vid = request.args.get("vehicle_id")
+    if vid:
+        taximeter.vehicle_id = vid
     return jsonify(taximeter.status())
 
 
