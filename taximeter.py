@@ -48,7 +48,8 @@ class Taximeter:
         start = self.start_time
         duration = end - start
         dist = self.distance
-        price = self.price
+        price = self._calc_price(dist)
+        breakdown = self._calc_breakdown(dist)
         self._save_ride(start, end, duration, dist, price)
         result = {
             "start_time": start,
@@ -56,8 +57,10 @@ class Taximeter:
             "duration": duration,
             "distance": dist,
             "price": price,
+            "breakdown": breakdown,
         }
         with self.lock:
+            self.price = price
             self.last_result = result
             self.thread = None
         return result
@@ -106,6 +109,36 @@ class Taximeter:
                             self.price = self._calc_price(self.distance)
                         last = point
             time.sleep(5)
+
+    def _calc_breakdown(self, km):
+        base = self.tariff.get("base", 4.40)
+        r12 = self.tariff.get("rate_1_2", 2.70)
+        r34 = self.tariff.get("rate_3_4", 2.60)
+        r5 = self.tariff.get("rate_5_plus", 2.40)
+
+        km1 = min(2.0, km)
+        km2 = min(2.0, max(0.0, km - km1))
+        km3 = max(0.0, km - km1 - km2)
+
+        cost1 = km1 * r12
+        cost2 = km2 * r34
+        cost3 = km3 * r5
+
+        total = round(base + cost1 + cost2 + cost3, 2)
+
+        return {
+            "base": round(base, 2),
+            "km_1_2": round(km1, 3),
+            "rate_1_2": round(r12, 2),
+            "cost_1_2": round(cost1, 2),
+            "km_3_4": round(km2, 3),
+            "rate_3_4": round(r34, 2),
+            "cost_3_4": round(cost2, 2),
+            "km_5_plus": round(km3, 3),
+            "rate_5_plus": round(r5, 2),
+            "cost_5_plus": round(cost3, 2),
+            "total": total,
+        }
 
     @staticmethod
     def _haversine(p1, p2):
