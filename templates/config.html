@@ -136,6 +136,31 @@
                 <input type="number" step="0.01" name="tariff_5" value="{{ config.get('taximeter_tariff', {}).get('rate_5_plus', 2.40) }}">
             </label>
         </div>
+        <h3>Nachttarif (22–6 Uhr)</h3>
+        <div>
+            <label>
+                Grundgebühr
+                <input type="number" step="0.01" name="night_base" value="{{ config.get('taximeter_tariff', {}).get('night_base', config.get('taximeter_tariff', {}).get('base', 4.40)) }}">
+            </label>
+        </div>
+        <div>
+            <label>
+                1.–2. km
+                <input type="number" step="0.01" name="night_12" value="{{ config.get('taximeter_tariff', {}).get('night_rate_1_2', config.get('taximeter_tariff', {}).get('rate_1_2', 2.70)) }}">
+            </label>
+        </div>
+        <div>
+            <label>
+                3.–4. km
+                <input type="number" step="0.01" name="night_34" value="{{ config.get('taximeter_tariff', {}).get('night_rate_3_4', config.get('taximeter_tariff', {}).get('rate_3_4', 2.60)) }}">
+            </label>
+        </div>
+        <div>
+            <label>
+                ab 5. km
+                <input type="number" step="0.01" name="night_5" value="{{ config.get('taximeter_tariff', {}).get('night_rate_5_plus', config.get('taximeter_tariff', {}).get('rate_5_plus', 2.40)) }}">
+            </label>
+        </div>
         <button type="submit">Speichern</button>
         <button type="submit" name="refresh_vehicle_list" value="1">Fahrzeugliste aktualisieren</button>
     </form>
