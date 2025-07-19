@@ -42,7 +42,7 @@ except ImportError:
 load_dotenv()
 app = Flask(__name__)
 __version__ = get_version()
-CURRENT_YEAR = datetime.now().year
+CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
 
 
@@ -399,6 +399,10 @@ def get_taximeter_tariff():
         "rate_1_2": 2.70,
         "rate_3_4": 2.60,
         "rate_5_plus": 2.40,
+        "night_base": 4.40,
+        "night_rate_1_2": 2.70,
+        "night_rate_3_4": 2.60,
+        "night_rate_5_plus": 2.40,
     }
     tariff = cfg.get("taximeter_tariff")
     if isinstance(tariff, dict):
@@ -412,26 +416,28 @@ def get_taxi_company():
     cfg = load_config()
     return cfg.get("taxi_company", "Taxi Schauer")
 
-def format_receipt(company, breakdown):
+def format_receipt(company, breakdown, distance=0.0):
     lines = []
     if company:
         lines.append(company)
+        lines.append("Wir lassen Sie nicht im Regen stehen.")
         lines.append("")
-    lines.append(f"Grundpreis: {breakdown['base']:.2f} €")
+    lines.append(f"Grundpreis:{breakdown['base']:>7.2f} €")
     if breakdown.get('km_1_2', 0) > 0:
         lines.append(
-            f"{breakdown['km_1_2']:.2f} km x {breakdown['rate_1_2']:.2f} € = {breakdown['cost_1_2']:.2f} €"
+            f"{breakdown['km_1_2']:.2f} km x {breakdown['rate_1_2']:.2f} € ={breakdown['cost_1_2']:>7.2f} €"
         )
     if breakdown.get('km_3_4', 0) > 0:
         lines.append(
-            f"{breakdown['km_3_4']:.2f} km x {breakdown['rate_3_4']:.2f} € = {breakdown['cost_3_4']:.2f} €"
+            f"{breakdown['km_3_4']:.2f} km x {breakdown['rate_3_4']:.2f} € ={breakdown['cost_3_4']:>7.2f} €"
         )
     if breakdown.get('km_5_plus', 0) > 0:
         lines.append(
-            f"{breakdown['km_5_plus']:.2f} km x {breakdown['rate_5_plus']:.2f} € = {breakdown['cost_5_plus']:.2f} €"
+            f"{breakdown['km_5_plus']:.2f} km x {breakdown['rate_5_plus']:.2f} € ={breakdown['cost_5_plus']:>7.2f} €"
         )
     lines.append("--------------------")
-    lines.append(f"Gesamt: {breakdown['total']:.2f} €")
+    lines.append(f"Fahrstrecke: {distance:.2f} km")
+    lines.append(f"Gesamt:{breakdown['total']:>9.2f} €")
     return "\n".join(lines)
 
 
@@ -1889,6 +1895,10 @@ def config_page():
         tariff_12 = request.form.get("tariff_12", "").replace(",", ".").strip()
         tariff_34 = request.form.get("tariff_34", "").replace(",", ".").strip()
         tariff_5 = request.form.get("tariff_5", "").replace(",", ".").strip()
+        night_base = request.form.get("night_base", "").replace(",", ".").strip()
+        night_12 = request.form.get("night_12", "").replace(",", ".").strip()
+        night_34 = request.form.get("night_34", "").replace(",", ".").strip()
+        night_5 = request.form.get("night_5", "").replace(",", ".").strip()
         if "refresh_vehicle_list" in request.form:
             tesla = get_tesla()
             if tesla is not None:
@@ -1958,6 +1968,18 @@ def config_page():
         v = _to_float(tariff_5)
         if v is not None:
             tariff_cfg["rate_5_plus"] = v
+        v = _to_float(night_base)
+        if v is not None:
+            tariff_cfg["night_base"] = v
+        v = _to_float(night_12)
+        if v is not None:
+            tariff_cfg["night_rate_1_2"] = v
+        v = _to_float(night_34)
+        if v is not None:
+            tariff_cfg["night_rate_3_4"] = v
+        v = _to_float(night_5)
+        if v is not None:
+            tariff_cfg["night_rate_5_plus"] = v
         if tariff_cfg:
             cfg["taximeter_tariff"] = tariff_cfg
         elif "taximeter_tariff" in cfg:
@@ -2136,7 +2158,7 @@ def api_taxameter_stop():
     result = taximeter.stop()
     if result:
         company = get_taxi_company()
-        text = format_receipt(company, result.get("breakdown", {}))
+        text = format_receipt(company, result.get("breakdown", {}), result.get("distance", 0.0))
         rdir = receipt_dir()
         ride_id = result.get("ride_id")
         if ride_id is not None:

@@ -2,6 +2,10 @@ import sqlite3
 import threading
 import time
 import math
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+LOCAL_TZ = ZoneInfo("Europe/Berlin")
 
 
 class Taximeter:
@@ -20,6 +24,10 @@ class Taximeter:
         self.thread = None
         self.tariff = {}
         self.last_result = None
+
+    def _is_night(self, timestamp):
+        hour = datetime.fromtimestamp(timestamp, LOCAL_TZ).hour
+        return hour >= 22 or hour < 6
 
     def start(self):
         with self.lock:
@@ -109,13 +117,19 @@ class Taximeter:
                             self.distance += self._haversine(last, point)
                             self.price = self._calc_price(self.distance)
                         last = point
-            time.sleep(5)
+            time.sleep(2)
 
     def _calc_breakdown(self, km):
         base = self.tariff.get("base", 4.40)
         r12 = self.tariff.get("rate_1_2", 2.70)
         r34 = self.tariff.get("rate_3_4", 2.60)
         r5 = self.tariff.get("rate_5_plus", 2.40)
+
+        if self.start_time and self._is_night(self.start_time):
+            base = self.tariff.get("night_base", base)
+            r12 = self.tariff.get("night_rate_1_2", r12)
+            r34 = self.tariff.get("night_rate_3_4", r34)
+            r5 = self.tariff.get("night_rate_5_plus", r5)
 
         km1 = min(2.0, km)
         km2 = min(2.0, max(0.0, km - km1))
@@ -139,6 +153,7 @@ class Taximeter:
             "rate_5_plus": round(r5, 2),
             "cost_5_plus": round(cost3, 2),
             "total": total,
+            "distance": round(km, 3),
         }
 
     @staticmethod
@@ -158,6 +173,12 @@ class Taximeter:
         r12 = self.tariff.get("rate_1_2", 2.70)
         r34 = self.tariff.get("rate_3_4", 2.60)
         r5 = self.tariff.get("rate_5_plus", 2.40)
+
+        if self.start_time and self._is_night(self.start_time):
+            base = self.tariff.get("night_base", base)
+            r12 = self.tariff.get("night_rate_1_2", r12)
+            r34 = self.tariff.get("night_rate_3_4", r34)
+            r5 = self.tariff.get("night_rate_5_plus", r5)
         price = base
         remaining = km
         step = min(2.0, remaining)
