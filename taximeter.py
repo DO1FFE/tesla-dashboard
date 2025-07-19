@@ -115,6 +115,8 @@ class Taximeter:
                             "distance": round(self.last_result["distance"], 3),
                             "price": round(self.last_result["price"], 2),
                             "duration": self.last_result["duration"],
+                            "breakdown": self.last_result.get("breakdown"),
+                            "ride_id": self.last_result.get("ride_id"),
                         }
                     )
                 return result

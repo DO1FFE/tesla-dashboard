@@ -16,6 +16,11 @@ $(function() {
                 $('#wait-icon').hide();
             }
 
+            if (!data.active && !data.paused && data.ride_id !== undefined) {
+                var qr = '/receipts/' + data.ride_id + '.png';
+                showReceipt(data.breakdown, TAXI_COMPANY, data.distance, qr);
+            }
+
             if (data.active) {
                 $('#start-btn').prop('disabled', true).removeClass('active-btn');
                 $('#pause-btn').prop('disabled', false);
