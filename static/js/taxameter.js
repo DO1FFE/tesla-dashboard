@@ -1,6 +1,6 @@
 $(function() {
     function update() {
-        $.getJSON('/api/taxameter/status', function(data) {
+        $.getJSON('/api/taxameter/status?vehicle_id=' + encodeURIComponent(VEHICLE_ID), function(data) {
             if (data.price !== undefined) {
                 $('#price').text(Number(data.price).toFixed(2));
             }
@@ -95,19 +95,19 @@ $(function() {
         $('#taximeter-receipt').hide();
         $('.active-btn').removeClass('active-btn');
         $(this).addClass('active-btn');
-        $.post('/api/taxameter/start', update, 'json');
+        $.post('/api/taxameter/start', {vehicle_id: VEHICLE_ID}, update, 'json');
     });
 
     $('#pause-btn').click(function() {
         $('.active-btn').removeClass('active-btn');
         $(this).addClass('active-btn');
-        $.post('/api/taxameter/pause', update, 'json');
+        $.post('/api/taxameter/pause', {vehicle_id: VEHICLE_ID}, update, 'json');
     });
 
     $('#stop-btn').click(function() {
         $('.active-btn').removeClass('active-btn');
         $(this).addClass('active-btn');
-        $.post('/api/taxameter/stop', function(data) {
+        $.post('/api/taxameter/stop', {vehicle_id: VEHICLE_ID}, function(data) {
             if (data.price !== undefined) {
                 $('#price').text(Number(data.price).toFixed(2));
                 $('#dist').text(Number(data.distance).toFixed(2));
@@ -120,7 +120,7 @@ $(function() {
 
     $('#reset-btn').click(function() {
         $('.active-btn').removeClass('active-btn');
-        $.post('/api/taxameter/reset', update);
+        $.post('/api/taxameter/reset', {vehicle_id: VEHICLE_ID}, update);
         $('#price').text('0.00');
         $('#dist').text('0.00');
         $('#time').text('0');
