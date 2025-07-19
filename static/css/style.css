@@ -1,5 +1,6 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
 
 :root {
   --bg-color: #121212;
@@ -995,15 +996,18 @@ select {
 #taximeter-display {
   background: #000;
   color: #0f0;
-  font-family: 'Courier New', monospace;
-  font-size: 2.5rem;
-  letter-spacing: 0.1rem;
-  text-shadow: 0 0 6px #0f0;
-  padding: 20px;
+  font-family: 'VT323', monospace;
+  font-size: 3rem;
+  letter-spacing: 0.15rem;
+  text-shadow:
+    0 0 4px #0f0,
+    0 0 8px #0f0,
+    0 0 12px #0f0;
+  padding: 20px 30px;
   border: 3px solid #444;
   border-radius: 8px;
   display: inline-block;
-  min-width: 200px;
+  min-width: 220px;
   margin-bottom: 10px;
 }
 
@@ -1017,22 +1021,31 @@ select {
 }
 
 .active-btn {
-  background: #444;
+  background: var(--accent-color);
   color: #fff;
+  border-color: var(--accent-color);
 }
 
 #taximeter-receipt {
   background: #000;
   color: #0f0;
-  font-family: 'Courier New', monospace;
+  font-family: 'VT323', monospace;
   padding: 10px;
   border: 2px solid #444;
   border-radius: 8px;
   display: inline-block;
   margin-top: 20px;
   text-align: left;
+  max-width: 240px;
 }
-#receipt-text {
+#receipt-table {
+  width: 100%;
+  margin: 0 auto;
+}
+#receipt-table td {
+  padding: 2px 4px;
+}
+#receipt-table td.num {
   text-align: right;
 }
 #receipt-company {

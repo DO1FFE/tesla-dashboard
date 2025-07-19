@@ -54,29 +54,29 @@ $(function() {
             return;
         }
         function fmt(value) {
-            return value.toFixed(2).padStart(7);
+            return value.toFixed(2);
         }
-        var lines = [];
-        lines.push('Grundpreis:' + fmt(breakdown.base) + ' €');
+        var html = '';
+        html += '<tr><td>Grundpreis:</td><td class="num">' + fmt(breakdown.base) + ' €</td></tr>';
         if (breakdown.km_1_2 > 0) {
-            lines.push(breakdown.km_1_2.toFixed(2) + ' km x ' +
-                breakdown.rate_1_2.toFixed(2) + ' € =' + fmt(breakdown.cost_1_2) + ' €');
+            html += '<tr><td>' + breakdown.km_1_2.toFixed(2) + ' km x ' +
+                breakdown.rate_1_2.toFixed(2) + ' €</td><td class="num">' + fmt(breakdown.cost_1_2) + ' €</td></tr>';
         }
         if (breakdown.km_3_4 > 0) {
-            lines.push(breakdown.km_3_4.toFixed(2) + ' km x ' +
-                breakdown.rate_3_4.toFixed(2) + ' € =' + fmt(breakdown.cost_3_4) + ' €');
+            html += '<tr><td>' + breakdown.km_3_4.toFixed(2) + ' km x ' +
+                breakdown.rate_3_4.toFixed(2) + ' €</td><td class="num">' + fmt(breakdown.cost_3_4) + ' €</td></tr>';
         }
         if (breakdown.km_5_plus > 0) {
-            lines.push(breakdown.km_5_plus.toFixed(2) + ' km x ' +
-                breakdown.rate_5_plus.toFixed(2) + ' € =' + fmt(breakdown.cost_5_plus) + ' €');
+            html += '<tr><td>' + breakdown.km_5_plus.toFixed(2) + ' km x ' +
+                breakdown.rate_5_plus.toFixed(2) + ' €</td><td class="num">' + fmt(breakdown.cost_5_plus) + ' €</td></tr>';
         }
         if (breakdown.wait_cost > 0) {
-            lines.push('Standzeit ' + Math.round(breakdown.wait_time) + 's =' + fmt(breakdown.wait_cost) + ' €');
+            html += '<tr><td>Standzeit ' + Math.round(breakdown.wait_time) + 's</td><td class="num">' + fmt(breakdown.wait_cost) + ' €</td></tr>';
         }
-        lines.push('--------------------');
-        lines.push('Gesamt:' + fmt(breakdown.total) + ' €');
-        lines.push('Fahrstrecke: ' + distance.toFixed(2) + ' km');
-        $('#receipt-text').text(lines.join('\n'));
+        html += '<tr><td colspan="2"><hr></td></tr>';
+        html += '<tr><td>Gesamt:</td><td class="num">' + fmt(breakdown.total) + ' €</td></tr>';
+        html += '<tr><td colspan="2" style="text-align:center">Fahrstrecke: ' + distance.toFixed(2) + ' km</td></tr>';
+        $('#receipt-table').html(html);
         $('#receipt-company').empty();
         if (company) {
             $('#receipt-company').append('<div class="company-name">' + company + '</div>');
