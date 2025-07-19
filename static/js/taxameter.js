@@ -10,14 +10,36 @@ $(function() {
             if (data.duration !== undefined) {
                 $('#time').text(Math.round(data.duration));
             }
-            if (!data.active) {
-                $('#start-btn').prop('disabled', false);
-                $('#stop-btn').prop('disabled', true);
-                $('#reset-btn').prop('disabled', !('price' in data));
+            if (data.waiting) {
+                $('#wait-icon').show();
             } else {
-                $('#start-btn').prop('disabled', true);
+                $('#wait-icon').hide();
+            }
+
+            if (data.active) {
+                $('#start-btn').prop('disabled', true).removeClass('active-btn');
+                $('#pause-btn').prop('disabled', false);
                 $('#stop-btn').prop('disabled', false);
                 $('#reset-btn').prop('disabled', true);
+                $('#start-btn').addClass('active-btn');
+                $('#pause-btn').removeClass('active-btn');
+                $('#stop-btn').removeClass('active-btn');
+            } else if (data.paused) {
+                $('#start-btn').prop('disabled', false);
+                $('#pause-btn').prop('disabled', true).removeClass('active-btn');
+                $('#stop-btn').prop('disabled', false);
+                $('#reset-btn').prop('disabled', true);
+                $('#pause-btn').addClass('active-btn');
+                $('#start-btn').removeClass('active-btn');
+                $('#stop-btn').removeClass('active-btn');
+            } else {
+                $('#start-btn').prop('disabled', false);
+                $('#pause-btn').prop('disabled', true).removeClass('active-btn');
+                $('#stop-btn').prop('disabled', true).removeClass('active-btn');
+                $('#reset-btn').prop('disabled', !('price' in data));
+                $('#start-btn').removeClass('active-btn');
+                $('#pause-btn').removeClass('active-btn');
+                $('#stop-btn').removeClass('active-btn');
             }
         });
     }
@@ -66,10 +88,20 @@ $(function() {
 
     $('#start-btn').click(function() {
         $('#taximeter-receipt').hide();
+        $('.active-btn').removeClass('active-btn');
+        $(this).addClass('active-btn');
         $.post('/api/taxameter/start', update, 'json');
     });
 
+    $('#pause-btn').click(function() {
+        $('.active-btn').removeClass('active-btn');
+        $(this).addClass('active-btn');
+        $.post('/api/taxameter/pause', update, 'json');
+    });
+
     $('#stop-btn').click(function() {
+        $('.active-btn').removeClass('active-btn');
+        $(this).addClass('active-btn');
         $.post('/api/taxameter/stop', function(data) {
             if (data.price !== undefined) {
                 $('#price').text(Number(data.price).toFixed(2));
@@ -82,6 +114,7 @@ $(function() {
     });
 
     $('#reset-btn').click(function() {
+        $('.active-btn').removeClass('active-btn');
         $.post('/api/taxameter/reset', update);
         $('#price').text('0.00');
         $('#dist').text('0.00');

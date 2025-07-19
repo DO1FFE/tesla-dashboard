@@ -2152,6 +2152,12 @@ def api_taxameter_start():
     return jsonify(taximeter.status())
 
 
+@app.route("/api/taxameter/pause", methods=["POST"])
+def api_taxameter_pause():
+    taximeter.pause()
+    return jsonify(taximeter.status())
+
+
 @app.route("/api/taxameter/stop", methods=["POST"])
 def api_taxameter_stop():
     result = taximeter.stop()
