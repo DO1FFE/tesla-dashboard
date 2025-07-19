@@ -22,29 +22,29 @@ $(function() {
             }
 
             if (data.active) {
-                $('#start-btn').prop('disabled', true).removeClass('active-btn');
+                $('#start-btn').prop('disabled', true);
                 $('#pause-btn').prop('disabled', false);
                 $('#stop-btn').prop('disabled', false);
                 $('#reset-btn').prop('disabled', true);
+                $('#taximeter-buttons button').removeClass('active-btn');
                 $('#start-btn').addClass('active-btn');
-                $('#pause-btn').removeClass('active-btn');
-                $('#stop-btn').removeClass('active-btn');
             } else if (data.paused) {
                 $('#start-btn').prop('disabled', false);
-                $('#pause-btn').prop('disabled', true).removeClass('active-btn');
+                $('#pause-btn').prop('disabled', true);
                 $('#stop-btn').prop('disabled', false);
                 $('#reset-btn').prop('disabled', true);
+                $('#taximeter-buttons button').removeClass('active-btn');
                 $('#pause-btn').addClass('active-btn');
-                $('#start-btn').removeClass('active-btn');
-                $('#stop-btn').removeClass('active-btn');
             } else {
                 $('#start-btn').prop('disabled', false);
-                $('#pause-btn').prop('disabled', true).removeClass('active-btn');
-                $('#stop-btn').prop('disabled', true).removeClass('active-btn');
-                $('#reset-btn').prop('disabled', !('price' in data));
-                $('#start-btn').removeClass('active-btn');
-                $('#pause-btn').removeClass('active-btn');
-                $('#stop-btn').removeClass('active-btn');
+                $('#pause-btn').prop('disabled', true);
+                var hasResult = ('price' in data);
+                $('#stop-btn').prop('disabled', !hasResult);
+                $('#reset-btn').prop('disabled', !hasResult);
+                $('#taximeter-buttons button').removeClass('active-btn');
+                if (hasResult) {
+                    $('#stop-btn').addClass('active-btn');
+                }
             }
         });
     }
@@ -125,6 +125,13 @@ $(function() {
         $('#dist').text('0.00');
         $('#time').text('0');
         $('#taximeter-receipt').hide();
+    });
+
+    $('#trip-receipt-btn').click(function() {
+        var file = $('#trip-select').val();
+        if (file) {
+            window.open('/taxameter/trip_receipt?file=' + encodeURIComponent(file), '_blank');
+        }
     });
 
     update();

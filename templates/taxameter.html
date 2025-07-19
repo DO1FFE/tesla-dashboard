@@ -29,6 +29,17 @@
             <table id="receipt-table"></table>
             <div id="receipt-qr"></div>
         </div>
+        {% if trips %}
+        <div id="trip-select-box">
+            <label for="trip-select">Vergangene Fahrt:</label>
+            <select id="trip-select">
+                {% for t in trips %}
+                <option value="{{ t }}">{{ t }}</option>
+                {% endfor %}
+            </select>
+            <button id="trip-receipt-btn" type="button">Quittung</button>
+        </div>
+        {% endif %}
     </div>
     <script>
         const TAXI_COMPANY = "{{ company }}";
