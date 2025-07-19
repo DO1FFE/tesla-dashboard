@@ -2171,9 +2171,19 @@ def api_taxameter_stop():
             txt_path = os.path.join(rdir, f"{ride_id}.txt")
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write(text)
-            url = url_for(
-                "taxameter_receipt", ride_id=ride_id, _external=True
-            )
+            data_path = os.path.join(rdir, f"{ride_id}.json")
+            with open(data_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "company": company,
+                        "slogan": slogan,
+                        "breakdown": result.get("breakdown", {}),
+                        "distance": result.get("distance", 0.0),
+                        "qr_code": f"/receipts/{ride_id}.png",
+                    },
+                    f,
+                )
+            url = url_for("taxameter_receipt", ride_id=ride_id, _external=True)
             img = qrcode.make(url)
             img_path = os.path.join(rdir, f"{ride_id}.png")
             img.save(img_path)
@@ -2197,7 +2207,16 @@ def api_taxameter_status():
 
 @app.route("/taxameter/receipt/<int:ride_id>")
 def taxameter_receipt(ride_id):
-    path = os.path.join(receipt_dir(), f"{ride_id}.txt")
+    rdir = receipt_dir()
+    json_path = os.path.join(rdir, f"{ride_id}.json")
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return render_template("taxameter_receipt.html", **data)
+        except Exception:
+            pass
+    path = os.path.join(rdir, f"{ride_id}.txt")
     try:
         with open(path, "r", encoding="utf-8") as f:
             text = f.read()
