@@ -1,6 +1,6 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DotGothic16&display=swap');
 
 :root {
   --bg-color: #121212;
@@ -996,7 +996,7 @@ select {
 #taximeter-display {
   background: #000;
   color: #0f0;
-  font-family: 'VT323', monospace;
+  font-family: 'DotGothic16', monospace;
   font-size: 3rem;
   letter-spacing: 0.15rem;
   text-shadow:
@@ -1029,7 +1029,7 @@ select {
 #taximeter-receipt {
   background: #000;
   color: #0f0;
-  font-family: 'VT323', monospace;
+  font-family: 'DotGothic16', monospace;
   padding: 10px;
   border: 2px solid #444;
   border-radius: 8px;
