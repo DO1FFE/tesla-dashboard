@@ -12,22 +12,26 @@ class Taximeter:
         self.vehicle_id = vehicle_id
         self.lock = threading.Lock()
         self.active = False
+        self.ready = True
         self.points = []
         self.distance = 0.0
         self.price = 0.0
         self.start_time = None
         self.thread = None
         self.tariff = {}
+        self.last_result = None
 
     def start(self):
         with self.lock:
-            if self.active:
+            if self.active or not self.ready:
                 return False
             self.tariff = self.tariff_func() or {}
             self.active = True
+            self.ready = False
+            self.last_result = None
             self.points = []
             self.distance = 0.0
-            self.price = 0.0
+            self.price = self._calc_price(0.0)
             self.start_time = time.time()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
@@ -46,18 +50,31 @@ class Taximeter:
         dist = self.distance
         price = self.price
         self._save_ride(start, end, duration, dist, price)
-        return {
+        result = {
             "start_time": start,
             "end_time": end,
             "duration": duration,
             "distance": dist,
             "price": price,
         }
+        with self.lock:
+            self.last_result = result
+            self.thread = None
+        return result
 
     def status(self):
         with self.lock:
             if not self.active:
-                return {"active": False}
+                result = {"active": False}
+                if self.last_result:
+                    result.update(
+                        {
+                            "distance": round(self.last_result["distance"], 3),
+                            "price": round(self.last_result["price"], 2),
+                            "duration": self.last_result["duration"],
+                        }
+                    )
+                return result
             duration = time.time() - self.start_time
             return {
                 "active": True,
@@ -132,3 +149,14 @@ class Taximeter:
         )
         con.commit()
         con.close()
+
+    def reset(self):
+        with self.lock:
+            self.active = False
+            self.ready = True
+            self.points = []
+            self.distance = 0.0
+            self.price = 0.0
+            self.start_time = None
+            self.thread = None
+            self.last_result = None

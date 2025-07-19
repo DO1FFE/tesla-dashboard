@@ -2076,18 +2076,22 @@ def taxameter_page():
 
 
 @app.route("/api/taxameter/start", methods=["POST"])
-@requires_auth
 def api_taxameter_start():
     _start_thread("default")
-    started = taximeter.start()
-    return jsonify({"active": started})
+    taximeter.start()
+    return jsonify(taximeter.status())
 
 
 @app.route("/api/taxameter/stop", methods=["POST"])
-@requires_auth
 def api_taxameter_stop():
     result = taximeter.stop()
     return jsonify(result or {"active": False})
+
+
+@app.route("/api/taxameter/reset", methods=["POST"])
+def api_taxameter_reset():
+    taximeter.reset()
+    return jsonify({"active": False})
 
 
 @app.route("/api/taxameter/status")
