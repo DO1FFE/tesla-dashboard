@@ -5,12 +5,13 @@ import threading
 import time
 import logging
 from logging.handlers import RotatingFileHandler
-from flask import Flask, render_template, jsonify, Response, request
+from flask import Flask, render_template, jsonify, Response, request, send_from_directory, abort
 from taximeter import Taximeter
 import requests
 from functools import wraps
 from dotenv import load_dotenv
 from version import get_version
+import qrcode
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -58,6 +59,12 @@ def vehicle_dir(vehicle_id):
 def trip_dir(vehicle_id):
     """Return directory holding trip CSV files for ``vehicle_id``."""
     path = os.path.join(vehicle_dir(vehicle_id), "trips")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+def receipt_dir():
+    """Directory for stored taximeter receipts."""
+    path = os.path.join(DATA_DIR, "receipts")
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -391,6 +398,32 @@ def get_taximeter_tariff():
             if isinstance(val, (int, float)):
                 default[key] = float(val)
     return default
+
+def get_taxi_company():
+    cfg = load_config()
+    return cfg.get("taxi_company", "Taxi Schauer")
+
+def format_receipt(company, breakdown):
+    lines = []
+    if company:
+        lines.append(company)
+        lines.append("")
+    lines.append(f"Grundpreis: {breakdown['base']:.2f} €")
+    if breakdown.get('km_1_2', 0) > 0:
+        lines.append(
+            f"{breakdown['km_1_2']:.2f} km x {breakdown['rate_1_2']:.2f} € = {breakdown['cost_1_2']:.2f} €"
+        )
+    if breakdown.get('km_3_4', 0) > 0:
+        lines.append(
+            f"{breakdown['km_3_4']:.2f} km x {breakdown['rate_3_4']:.2f} € = {breakdown['cost_3_4']:.2f} €"
+        )
+    if breakdown.get('km_5_plus', 0) > 0:
+        lines.append(
+            f"{breakdown['km_5_plus']:.2f} km x {breakdown['rate_5_plus']:.2f} € = {breakdown['cost_5_plus']:.2f} €"
+        )
+    lines.append("--------------------")
+    lines.append(f"Gesamt: {breakdown['total']:.2f} €")
+    return "\n".join(lines)
 
 
 def get_news_events_info():
@@ -1832,6 +1865,7 @@ def config_page():
         wx_enabled = "aprs_wx_enabled" in request.form
         aprs_comment = request.form.get("aprs_comment", "").strip()
         announcement = request.form.get("announcement", "").strip()
+        taxi_company = request.form.get("taxi_company", "").strip()
         phone_number = request.form.get("phone_number", "").strip()
         if phone_number:
             phone_number = _format_phone(phone_number) or phone_number
@@ -1871,6 +1905,10 @@ def config_page():
             cfg["announcement"] = announcement
         elif "announcement" in cfg:
             cfg.pop("announcement")
+        if taxi_company:
+            cfg["taxi_company"] = taxi_company
+        elif "taxi_company" in cfg:
+            cfg.pop("taxi_company")
         if phone_number:
             cfg["phone_number"] = phone_number
         elif "phone_number" in cfg:
@@ -2072,7 +2110,9 @@ def sms_log_page():
 
 @app.route("/taxameter")
 def taxameter_page():
-    return render_template("taxameter.html")
+    cfg = load_config()
+    company = cfg.get("taxi_company", "Taxi Schauer")
+    return render_template("taxameter.html", company=company)
 
 
 @app.route("/api/taxameter/start", methods=["POST"])
@@ -2085,6 +2125,22 @@ def api_taxameter_start():
 @app.route("/api/taxameter/stop", methods=["POST"])
 def api_taxameter_stop():
     result = taximeter.stop()
+    if result:
+        company = get_taxi_company()
+        text = format_receipt(company, result.get("breakdown", {}))
+        rdir = receipt_dir()
+        ride_id = result.get("ride_id")
+        if ride_id is not None:
+            txt_path = os.path.join(rdir, f"{ride_id}.txt")
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write(text)
+            url = f"/taxameter/receipt/{ride_id}"
+            img = qrcode.make(url)
+            img_path = os.path.join(rdir, f"{ride_id}.png")
+            img.save(img_path)
+            result["qr_code"] = f"/receipts/{ride_id}.png"
+            result["receipt_url"] = url
+        result["company"] = company
     return jsonify(result or {"active": False})
 
 
@@ -2097,6 +2153,22 @@ def api_taxameter_reset():
 @app.route("/api/taxameter/status")
 def api_taxameter_status():
     return jsonify(taximeter.status())
+
+
+@app.route("/taxameter/receipt/<int:ride_id>")
+def taxameter_receipt(ride_id):
+    path = os.path.join(receipt_dir(), f"{ride_id}.txt")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except Exception:
+        abort(404)
+    return Response(text, mimetype="text/plain")
+
+
+@app.route("/receipts/<path:filename>")
+def receipts_file(filename):
+    return send_from_directory(receipt_dir(), filename)
 
 
 @app.route("/debug")

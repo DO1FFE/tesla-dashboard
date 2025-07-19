@@ -50,7 +50,7 @@ class Taximeter:
         dist = self.distance
         price = self._calc_price(dist)
         breakdown = self._calc_breakdown(dist)
-        self._save_ride(start, end, duration, dist, price)
+        ride_id = self._save_ride(start, end, duration, dist, price)
         result = {
             "start_time": start,
             "end_time": end,
@@ -58,6 +58,7 @@ class Taximeter:
             "distance": dist,
             "price": price,
             "breakdown": breakdown,
+            "ride_id": ride_id,
         }
         with self.lock:
             self.price = price
@@ -180,8 +181,10 @@ class Taximeter:
             "INSERT INTO rides (start, end, duration, distance, price) VALUES (?, ?, ?, ?, ?)",
             (start, end, duration, distance, price),
         )
+        ride_id = cur.lastrowid
         con.commit()
         con.close()
+        return ride_id
 
     def reset(self):
         with self.lock:

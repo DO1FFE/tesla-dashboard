@@ -4,3 +4,4 @@ python-dotenv
 requests
 aprslib
 phonenumbers==9.0.9
+qrcode
