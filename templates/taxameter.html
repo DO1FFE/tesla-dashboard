@@ -10,14 +10,19 @@
 </head>
 <body>
     <h1>Taxameter</h1>
-    <div>
-        <button id="start-btn">Start</button>
-        <button id="stop-btn" disabled>Stop</button>
-    </div>
-    <div>
-        <p>Distanz: <span id="dist">0</span> km</p>
-        <p>Zeit: <span id="time">0</span> s</p>
-        <p>Preis: <span id="price">0</span> €</p>
+    <div id="taximeter">
+        <div id="taximeter-display">
+            <span id="price">0.00</span> €
+        </div>
+        <div id="taximeter-info">
+            <span id="dist">0.00</span> km |
+            <span id="time">0</span> s
+        </div>
+        <div id="taximeter-buttons">
+            <button id="start-btn">Start</button>
+            <button id="stop-btn" disabled>Stop</button>
+            <button id="reset-btn" disabled>Reset</button>
+        </div>
     </div>
     <script src="/static/js/taxameter.js"></script>
 </body>
