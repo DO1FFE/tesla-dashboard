@@ -6,6 +6,7 @@ import time
 import logging
 from logging.handlers import RotatingFileHandler
 from flask import Flask, render_template, jsonify, Response, request
+from taximeter import Taximeter
 import requests
 from functools import wraps
 from dotenv import load_dotenv
@@ -328,6 +329,7 @@ def log_api_data(endpoint, data):
 
 STAT_FILE = os.path.join(DATA_DIR, "statistics.json")
 PARKTIME_FILE = os.path.join(DATA_DIR, "parktime.json")
+TAXI_DB = os.path.join(DATA_DIR, "taximeter.db")
 
 # Elements on the dashboard that can be toggled via the config page
 CONFIG_ITEMS = [
@@ -372,6 +374,23 @@ def save_config(cfg):
             json.dump(cfg, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+
+
+def get_taximeter_tariff():
+    cfg = load_config()
+    default = {
+        "base": 4.40,
+        "rate_1_2": 2.70,
+        "rate_3_4": 2.60,
+        "rate_5_plus": 2.40,
+    }
+    tariff = cfg.get("taximeter_tariff")
+    if isinstance(tariff, dict):
+        for key in default:
+            val = tariff.get(key)
+            if isinstance(val, (int, float)):
+                default[key] = float(val)
+    return default
 
 
 def get_news_events_info():
@@ -1503,6 +1522,10 @@ def _start_thread(vehicle_id):
     t.start()
 
 
+# Taximeter instance using the existing fetch function and config-based tariff
+taximeter = Taximeter(TAXI_DB, _fetch_data_once, get_taximeter_tariff)
+
+
 @app.route("/")
 def index():
     cfg = load_config()
@@ -1819,6 +1842,10 @@ def config_page():
         sms_drive_only = "sms_drive_only" in request.form
         api_interval = request.form.get("api_interval", "").strip()
         api_interval_idle = request.form.get("api_interval_idle", "").strip()
+        tariff_base = request.form.get("tariff_base", "").replace(",", ".").strip()
+        tariff_12 = request.form.get("tariff_12", "").replace(",", ".").strip()
+        tariff_34 = request.form.get("tariff_34", "").replace(",", ".").strip()
+        tariff_5 = request.form.get("tariff_5", "").replace(",", ".").strip()
         if "refresh_vehicle_list" in request.form:
             tesla = get_tesla()
             if tesla is not None:
@@ -1862,6 +1889,33 @@ def config_page():
             cfg.pop("sms_sender_id")
         cfg["sms_enabled"] = sms_enabled
         cfg["sms_drive_only"] = sms_drive_only
+
+        def _to_float(val):
+            try:
+                return float(val)
+            except ValueError:
+                return None
+
+        tariff_cfg = cfg.get("taximeter_tariff", {})
+        if not isinstance(tariff_cfg, dict):
+            tariff_cfg = {}
+        v = _to_float(tariff_base)
+        if v is not None:
+            tariff_cfg["base"] = v
+        v = _to_float(tariff_12)
+        if v is not None:
+            tariff_cfg["rate_1_2"] = v
+        v = _to_float(tariff_34)
+        if v is not None:
+            tariff_cfg["rate_3_4"] = v
+        v = _to_float(tariff_5)
+        if v is not None:
+            tariff_cfg["rate_5_plus"] = v
+        if tariff_cfg:
+            cfg["taximeter_tariff"] = tariff_cfg
+        elif "taximeter_tariff" in cfg:
+            cfg.pop("taximeter_tariff")
+
         if api_interval.isdigit():
             cfg["api_interval"] = max(1, int(api_interval))
         elif "api_interval" in cfg:
@@ -2014,6 +2068,31 @@ def sms_log_page():
     except Exception:
         pass
     return render_template("sms.html", log_lines=log_lines)
+
+
+@app.route("/taxameter")
+def taxameter_page():
+    return render_template("taxameter.html")
+
+
+@app.route("/api/taxameter/start", methods=["POST"])
+@requires_auth
+def api_taxameter_start():
+    _start_thread("default")
+    started = taximeter.start()
+    return jsonify({"active": started})
+
+
+@app.route("/api/taxameter/stop", methods=["POST"])
+@requires_auth
+def api_taxameter_stop():
+    result = taximeter.stop()
+    return jsonify(result or {"active": False})
+
+
+@app.route("/api/taxameter/status")
+def api_taxameter_status():
+    return jsonify(taximeter.status())
 
 
 @app.route("/debug")
