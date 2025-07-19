@@ -16,6 +16,7 @@ class Taximeter:
         self.vehicle_id = vehicle_id
         self.lock = threading.Lock()
         self.active = False
+        self.paused = False
         self.ready = True
         self.points = []
         self.distance = 0.0
@@ -26,6 +27,7 @@ class Taximeter:
         self.last_result = None
         self.wait_time = 0.0
         self.wait_cost = 0.0
+        self.waiting = False
 
     def _is_night(self, timestamp):
         hour = datetime.fromtimestamp(timestamp, LOCAL_TZ).hour
@@ -33,20 +35,42 @@ class Taximeter:
 
     def start(self):
         with self.lock:
-            if self.active or not self.ready:
+            if self.active:
                 return False
-            self.tariff = self.tariff_func() or {}
-            self.active = True
-            self.ready = False
-            self.last_result = None
-            self.points = []
-            self.distance = 0.0
-            self.wait_time = 0.0
-            self.wait_cost = 0.0
-            self.price = self._round_price(self._calc_price(0.0))
-            self.start_time = time.time()
-        self.thread = threading.Thread(target=self._run, daemon=True)
-        self.thread.start()
+            if self.paused:
+                self.active = True
+                self.paused = False
+                self.waiting = False
+                thread_needed = True
+            elif not self.ready:
+                return False
+            else:
+                self.tariff = self.tariff_func() or {}
+                self.active = True
+                self.ready = False
+                self.last_result = None
+                self.points = []
+                self.distance = 0.0
+                self.wait_time = 0.0
+                self.wait_cost = 0.0
+                self.waiting = False
+                self.price = self._round_price(self._calc_price(0.0))
+                self.start_time = time.time()
+                thread_needed = True
+        if thread_needed:
+            self.thread = threading.Thread(target=self._run, daemon=True)
+            self.thread.start()
+        return True
+
+    def pause(self):
+        with self.lock:
+            if not self.active:
+                return False
+            self.active = False
+            self.paused = True
+        if self.thread:
+            self.thread.join()
+            self.thread = None
         return True
 
     def stop(self):
@@ -54,6 +78,8 @@ class Taximeter:
             if not self.active:
                 return None
             self.active = False
+            self.paused = False
+            self.waiting = False
         if self.thread:
             self.thread.join()
         end = time.time()
@@ -82,7 +108,7 @@ class Taximeter:
     def status(self):
         with self.lock:
             if not self.active:
-                result = {"active": False}
+                result = {"active": False, "paused": self.paused, "waiting": self.waiting}
                 if self.last_result:
                     result.update(
                         {
@@ -95,6 +121,8 @@ class Taximeter:
             duration = time.time() - self.start_time
             return {
                 "active": True,
+                "paused": False,
+                "waiting": self.waiting,
                 "distance": round(self.distance, 3),
                 "price": round(self.price, 2),
                 "duration": duration,
@@ -130,6 +158,7 @@ class Taximeter:
                             self.distance += self._haversine(last, point)
                         last = point
             with self.lock:
+                self.waiting = not moving
                 if not moving:
                     prev_units = int(self.wait_time // wait_interval)
                     self.wait_time += dt
@@ -231,6 +260,7 @@ class Taximeter:
     def reset(self):
         with self.lock:
             self.active = False
+            self.paused = False
             self.ready = True
             self.points = []
             self.distance = 0.0
@@ -240,3 +270,4 @@ class Taximeter:
             self.last_result = None
             self.wait_time = 0.0
             self.wait_cost = 0.0
+            self.waiting = False
