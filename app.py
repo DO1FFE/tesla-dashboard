@@ -2162,7 +2162,11 @@ def sms_log_page():
 def taxameter_page():
     cfg = load_config()
     company = cfg.get("taxi_company", "Taxi Schauer")
-    return render_template("taxameter.html", company=company, config=cfg)
+    files = [os.path.relpath(p, DATA_DIR) for p in _get_trip_files()]
+    recent = files[-10:]
+    return render_template(
+        "taxameter.html", company=company, config=cfg, trips=recent
+    )
 
 
 @app.route("/api/taxameter/start", methods=["POST"])

@@ -127,6 +127,13 @@ $(function() {
         $('#taximeter-receipt').hide();
     });
 
+    $('#trip-receipt-btn').click(function() {
+        var file = $('#trip-select').val();
+        if (file) {
+            window.open('/taxameter/trip_receipt?file=' + encodeURIComponent(file), '_blank');
+        }
+    });
+
     update();
     setInterval(update, 2000);
 });
