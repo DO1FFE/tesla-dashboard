@@ -24,6 +24,8 @@ class Taximeter:
         self.thread = None
         self.tariff = {}
         self.last_result = None
+        self.wait_time = 0.0
+        self.wait_cost = 0.0
 
     def _is_night(self, timestamp):
         hour = datetime.fromtimestamp(timestamp, LOCAL_TZ).hour
@@ -39,7 +41,9 @@ class Taximeter:
             self.last_result = None
             self.points = []
             self.distance = 0.0
-            self.price = self._calc_price(0.0)
+            self.wait_time = 0.0
+            self.wait_cost = 0.0
+            self.price = self._round_price(self._calc_price(0.0))
             self.start_time = time.time()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
@@ -56,7 +60,7 @@ class Taximeter:
         start = self.start_time
         duration = end - start
         dist = self.distance
-        price = self._calc_price(dist)
+        price = self._round_price(self._calc_price(dist) + self.wait_cost)
         breakdown = self._calc_breakdown(dist)
         ride_id = self._save_ride(start, end, duration, dist, price)
         result = {
@@ -67,6 +71,7 @@ class Taximeter:
             "price": price,
             "breakdown": breakdown,
             "ride_id": ride_id,
+            "wait_time": self.wait_time,
         }
         with self.lock:
             self.price = price
@@ -97,6 +102,8 @@ class Taximeter:
 
     def _run(self):
         last = None
+        last_ts = time.time()
+        wait_interval = 10.0
         while True:
             with self.lock:
                 if not self.active:
@@ -104,10 +111,16 @@ class Taximeter:
             data = self.fetch_func(self.vehicle_id)
             lat = None
             lon = None
+            speed = None
             if isinstance(data, dict):
                 drive = data.get("drive_state", {})
                 lat = drive.get("latitude")
                 lon = drive.get("longitude")
+                speed = drive.get("speed")
+            now = time.time()
+            dt = now - last_ts
+            last_ts = now
+            moving = speed is not None and speed >= 5
             if lat is not None and lon is not None:
                 point = (lat, lon)
                 with self.lock:
@@ -115,8 +128,18 @@ class Taximeter:
                         self.points.append(point)
                         if last is not None:
                             self.distance += self._haversine(last, point)
-                            self.price = self._calc_price(self.distance)
                         last = point
+            with self.lock:
+                if not moving:
+                    prev_units = int(self.wait_time // wait_interval)
+                    self.wait_time += dt
+                    units = int(self.wait_time // wait_interval)
+                    if units > prev_units:
+                        rate = self.tariff.get("wait_per_10s", 0.10)
+                        self.wait_cost = units * rate
+                self.price = self._round_price(
+                    self._calc_price(self.distance) + self.wait_cost
+                )
             time.sleep(2)
 
     def _calc_breakdown(self, km):
@@ -125,11 +148,7 @@ class Taximeter:
         r34 = self.tariff.get("rate_3_4", 2.60)
         r5 = self.tariff.get("rate_5_plus", 2.40)
 
-        if self.start_time and self._is_night(self.start_time):
-            base = self.tariff.get("night_base", base)
-            r12 = self.tariff.get("night_rate_1_2", r12)
-            r34 = self.tariff.get("night_rate_3_4", r34)
-            r5 = self.tariff.get("night_rate_5_plus", r5)
+        # Night tariff no longer applied
 
         km1 = min(2.0, km)
         km2 = min(2.0, max(0.0, km - km1))
@@ -138,8 +157,8 @@ class Taximeter:
         cost1 = km1 * r12
         cost2 = km2 * r34
         cost3 = km3 * r5
-
-        total = round(base + cost1 + cost2 + cost3, 2)
+        wait_cost = self.wait_cost
+        total = self._round_price(base + cost1 + cost2 + cost3 + wait_cost)
 
         return {
             "base": round(base, 2),
@@ -152,6 +171,8 @@ class Taximeter:
             "km_5_plus": round(km3, 3),
             "rate_5_plus": round(r5, 2),
             "cost_5_plus": round(cost3, 2),
+            "wait_time": round(self.wait_time, 1),
+            "wait_cost": round(wait_cost, 2),
             "total": total,
             "distance": round(km, 3),
         }
@@ -168,17 +189,17 @@ class Taximeter:
         a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
         return 2 * r * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
+    @staticmethod
+    def _round_price(value):
+        return round(round(value * 10) / 10, 2)
+
     def _calc_price(self, km):
         base = self.tariff.get("base", 4.40)
         r12 = self.tariff.get("rate_1_2", 2.70)
         r34 = self.tariff.get("rate_3_4", 2.60)
         r5 = self.tariff.get("rate_5_plus", 2.40)
 
-        if self.start_time and self._is_night(self.start_time):
-            base = self.tariff.get("night_base", base)
-            r12 = self.tariff.get("night_rate_1_2", r12)
-            r34 = self.tariff.get("night_rate_3_4", r34)
-            r5 = self.tariff.get("night_rate_5_plus", r5)
+        # Night tariff removed
         price = base
         remaining = km
         step = min(2.0, remaining)
@@ -190,7 +211,7 @@ class Taximeter:
             remaining -= step
         if remaining > 0:
             price += remaining * r5
-        return round(price, 2)
+        return price
 
     def _save_ride(self, start, end, duration, distance, price):
         con = sqlite3.connect(self.db_path)
@@ -217,3 +238,5 @@ class Taximeter:
             self.start_time = None
             self.thread = None
             self.last_result = None
+            self.wait_time = 0.0
+            self.wait_cost = 0.0
