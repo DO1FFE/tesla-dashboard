@@ -58,6 +58,9 @@
             {% endif %}
         </select>
     </form>
+    {% if selected %}
+    <a id="receipt-link" class="menu-button" href="/taxameter/trip_receipt?file={{ selected }}">Quittung</a>
+    {% endif %}
     <div id="map">
         <div id="slider-container">
             <div id="slider-row">

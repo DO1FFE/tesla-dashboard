@@ -994,6 +994,26 @@ def _trip_max_speed(filename):
             max_speed = speed
     return max_speed * MILES_TO_KM
 
+def _period_distance(prefix, key):
+    """Return distance in km for a week or month selection."""
+    dist = 0.0
+    for path in _get_trip_files():
+        fname = os.path.basename(path)
+        date_str = fname.split("_")[-1].split(".")[0]
+        try:
+            day = datetime.strptime(date_str, "%Y%m%d").date()
+        except Exception:
+            continue
+        iso_year, iso_week, _ = day.isocalendar()
+        week_key = f"{iso_year}-W{iso_week:02d}"
+        month_key = day.strftime("%Y-%m")
+        if prefix == "week" and week_key != key:
+            continue
+        if prefix == "month" and month_key != key:
+            continue
+        dist += _trip_distance(path)
+    return dist
+
 
 def _load_state_entries(filename=os.path.join(DATA_DIR, "state.log")):
     """Parse state log entries as (timestamp, state) tuples."""
@@ -2223,6 +2243,41 @@ def taxameter_receipt(ride_id):
     except Exception:
         abort(404)
     return Response(text, mimetype="text/plain")
+
+
+@app.route("/taxameter/trip_receipt")
+def taxameter_trip_receipt():
+    """Create a taximeter receipt for a recorded trip."""
+    selected = request.args.get("file")
+    if not selected:
+        abort(404)
+    if selected.startswith("week:"):
+        key = selected.split("week:", 1)[1]
+        dist = _period_distance("week", key)
+    elif selected.startswith("month:"):
+        key = selected.split("month:", 1)[1]
+        dist = _period_distance("month", key)
+    else:
+        if ".." in selected or not selected.endswith(".csv"):
+            abort(404)
+        path = os.path.join(DATA_DIR, selected)
+        if not os.path.exists(path):
+            abort(404)
+        dist = _trip_distance(path)
+    tariff = get_taximeter_tariff()
+    tm = Taximeter(TAXI_DB, lambda _vid: {}, get_taximeter_tariff)
+    tm.tariff = tariff
+    breakdown = tm._calc_breakdown(dist)
+    company = get_taxi_company()
+    slogan = get_taxi_slogan()
+    return render_template(
+        "taxameter_receipt.html",
+        company=company,
+        slogan=slogan,
+        breakdown=breakdown,
+        distance=dist,
+        qr_code=None,
+    )
 
 
 @app.route("/receipts/<path:filename>")
