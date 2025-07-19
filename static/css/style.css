@@ -1025,3 +1025,6 @@ select {
   margin-top: 20px;
   text-align: left;
 }
+#receipt-qr {
+  margin-top: 10px;
+}

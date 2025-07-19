@@ -22,30 +22,38 @@ $(function() {
         });
     }
 
-    function showReceipt(breakdown) {
+    function showReceipt(breakdown, company, qr_path) {
         if (!breakdown) {
             return;
         }
         var lines = [];
-        lines.push('Grundpreis: ' + breakdown.base.toFixed(2) + ' \xE2\x82\xAC');
+        if (company) {
+            lines.push(company);
+            lines.push('');
+        }
+        lines.push('Grundpreis: ' + breakdown.base.toFixed(2) + ' €');
         if (breakdown.km_1_2 > 0) {
             lines.push(breakdown.km_1_2.toFixed(2) + ' km x ' +
-                breakdown.rate_1_2.toFixed(2) + ' \xE2\x82\xAC = ' +
-                breakdown.cost_1_2.toFixed(2) + ' \xE2\x82\xAC');
+                breakdown.rate_1_2.toFixed(2) + ' € = ' +
+                breakdown.cost_1_2.toFixed(2) + ' €');
         }
         if (breakdown.km_3_4 > 0) {
             lines.push(breakdown.km_3_4.toFixed(2) + ' km x ' +
-                breakdown.rate_3_4.toFixed(2) + ' \xE2\x82\xAC = ' +
-                breakdown.cost_3_4.toFixed(2) + ' \xE2\x82\xAC');
+                breakdown.rate_3_4.toFixed(2) + ' € = ' +
+                breakdown.cost_3_4.toFixed(2) + ' €');
         }
         if (breakdown.km_5_plus > 0) {
             lines.push(breakdown.km_5_plus.toFixed(2) + ' km x ' +
-                breakdown.rate_5_plus.toFixed(2) + ' \xE2\x82\xAC = ' +
-                breakdown.cost_5_plus.toFixed(2) + ' \xE2\x82\xAC');
+                breakdown.rate_5_plus.toFixed(2) + ' € = ' +
+                breakdown.cost_5_plus.toFixed(2) + ' €');
         }
         lines.push('--------------------');
-        lines.push('Gesamt: ' + breakdown.total.toFixed(2) + ' \xE2\x82\xAC');
+        lines.push('Gesamt: ' + breakdown.total.toFixed(2) + ' €');
         $('#receipt-text').text(lines.join('\n'));
+        $('#receipt-qr').empty();
+        if (qr_path) {
+            $('#receipt-qr').append('<img src="' + qr_path + '" alt="QR">');
+        }
         $('#taximeter-receipt').show();
     }
 
@@ -60,7 +68,7 @@ $(function() {
                 $('#price').text(Number(data.price).toFixed(2));
                 $('#dist').text(Number(data.distance).toFixed(2));
                 $('#time').text(Math.round(data.duration));
-                showReceipt(data.breakdown);
+                showReceipt(data.breakdown, TAXI_COMPANY, data.qr_code);
             }
             update();
         }, 'json');
