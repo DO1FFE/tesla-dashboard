@@ -5,7 +5,16 @@ import threading
 import time
 import logging
 from logging.handlers import RotatingFileHandler
-from flask import Flask, render_template, jsonify, Response, request, send_from_directory, abort
+from flask import (
+    Flask,
+    render_template,
+    jsonify,
+    Response,
+    request,
+    send_from_directory,
+    abort,
+    url_for,
+)
 from taximeter import Taximeter
 import requests
 from functools import wraps
@@ -2134,7 +2143,9 @@ def api_taxameter_stop():
             txt_path = os.path.join(rdir, f"{ride_id}.txt")
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write(text)
-            url = f"/taxameter/receipt/{ride_id}"
+            url = url_for(
+                "taxameter_receipt", ride_id=ride_id, _external=True
+            )
             img = qrcode.make(url)
             img_path = os.path.join(rdir, f"{ride_id}.png")
             img.save(img_path)
