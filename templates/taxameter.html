@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Taxameter</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+    <script src="/static/js/jquery.min.js"></script>
+    {% include 'analytics.html' %}
+</head>
+<body>
+    <h1>Taxameter</h1>
+    <div>
+        <button id="start-btn">Start</button>
+        <button id="stop-btn" disabled>Stop</button>
+    </div>
+    <div>
+        <p>Distanz: <span id="dist">0</span> km</p>
+        <p>Zeit: <span id="time">0</span> s</p>
+        <p>Preis: <span id="price">0</span> €</p>
+    </div>
+    <script src="/static/js/taxameter.js"></script>
+</body>
+</html>
