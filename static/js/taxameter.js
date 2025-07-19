@@ -26,35 +26,40 @@ $(function() {
         if (!breakdown) {
             return;
         }
+        function fmt(value) {
+            return value.toFixed(2).padStart(7);
+        }
         var lines = [];
-        lines.push('Grundpreis: ' + breakdown.base.toFixed(2) + ' €');
+        lines.push('Grundpreis:' + fmt(breakdown.base) + ' €');
         if (breakdown.km_1_2 > 0) {
             lines.push(breakdown.km_1_2.toFixed(2) + ' km x ' +
-                breakdown.rate_1_2.toFixed(2) + ' € = ' +
-                breakdown.cost_1_2.toFixed(2) + ' €');
+                breakdown.rate_1_2.toFixed(2) + ' € =' + fmt(breakdown.cost_1_2) + ' €');
         }
         if (breakdown.km_3_4 > 0) {
             lines.push(breakdown.km_3_4.toFixed(2) + ' km x ' +
-                breakdown.rate_3_4.toFixed(2) + ' € = ' +
-                breakdown.cost_3_4.toFixed(2) + ' €');
+                breakdown.rate_3_4.toFixed(2) + ' € =' + fmt(breakdown.cost_3_4) + ' €');
         }
         if (breakdown.km_5_plus > 0) {
             lines.push(breakdown.km_5_plus.toFixed(2) + ' km x ' +
-                breakdown.rate_5_plus.toFixed(2) + ' € = ' +
-                breakdown.cost_5_plus.toFixed(2) + ' €');
+                breakdown.rate_5_plus.toFixed(2) + ' € =' + fmt(breakdown.cost_5_plus) + ' €');
+        }
+        if (breakdown.wait_cost > 0) {
+            lines.push('Standzeit ' + Math.round(breakdown.wait_time) + 's =' + fmt(breakdown.wait_cost) + ' €');
         }
         lines.push('--------------------');
+        lines.push('Gesamt:' + fmt(breakdown.total) + ' €');
         lines.push('Fahrstrecke: ' + distance.toFixed(2) + ' km');
-        lines.push('Gesamt: ' + breakdown.total.toFixed(2) + ' €');
         $('#receipt-text').text(lines.join('\n'));
         $('#receipt-company').empty();
         if (company) {
             $('#receipt-company').append('<div class="company-name">' + company + '</div>');
-            $('#receipt-company').append('<div class="company-slogan">Wir lassen Sie nicht im Regen stehen.</div>');
+            if (typeof TAXI_SLOGAN !== 'undefined' && TAXI_SLOGAN) {
+                $('#receipt-company').append('<div class="company-slogan">' + TAXI_SLOGAN + '</div>');
+            }
         }
         $('#receipt-qr').empty();
         if (qr_path) {
-            $('#receipt-qr').append('<img src="' + qr_path + '" alt="QR">');
+            $('#receipt-qr').append('<img src="' + qr_path + '" alt="QR" style="width:50%">');
         }
         $('#taximeter-receipt').show();
     }

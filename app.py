@@ -399,10 +399,7 @@ def get_taximeter_tariff():
         "rate_1_2": 2.70,
         "rate_3_4": 2.60,
         "rate_5_plus": 2.40,
-        "night_base": 4.40,
-        "night_rate_1_2": 2.70,
-        "night_rate_3_4": 2.60,
-        "night_rate_5_plus": 2.40,
+        "wait_per_10s": 0.10,
     }
     tariff = cfg.get("taximeter_tariff")
     if isinstance(tariff, dict):
@@ -416,11 +413,16 @@ def get_taxi_company():
     cfg = load_config()
     return cfg.get("taxi_company", "Taxi Schauer")
 
-def format_receipt(company, breakdown, distance=0.0):
+def get_taxi_slogan():
+    cfg = load_config()
+    return cfg.get("taxi_slogan", "Wir lassen Sie nicht im Regen stehen.")
+
+def format_receipt(company, breakdown, distance=0.0, slogan=""):
     lines = []
     if company:
         lines.append(company)
-        lines.append("Wir lassen Sie nicht im Regen stehen.")
+        if slogan:
+            lines.append(slogan)
         lines.append("")
     lines.append(f"Grundpreis:{breakdown['base']:>7.2f} €")
     if breakdown.get('km_1_2', 0) > 0:
@@ -435,9 +437,13 @@ def format_receipt(company, breakdown, distance=0.0):
         lines.append(
             f"{breakdown['km_5_plus']:.2f} km x {breakdown['rate_5_plus']:.2f} € ={breakdown['cost_5_plus']:>7.2f} €"
         )
+    if breakdown.get('wait_cost', 0) > 0:
+        lines.append(
+            f"Standzeit {int(breakdown['wait_time'])}s ={breakdown['wait_cost']:>7.2f} €"
+        )
     lines.append("--------------------")
-    lines.append(f"Fahrstrecke: {distance:.2f} km")
     lines.append(f"Gesamt:{breakdown['total']:>9.2f} €")
+    lines.append(f"Fahrstrecke: {distance:.2f} km")
     return "\n".join(lines)
 
 
@@ -1881,6 +1887,7 @@ def config_page():
         aprs_comment = request.form.get("aprs_comment", "").strip()
         announcement = request.form.get("announcement", "").strip()
         taxi_company = request.form.get("taxi_company", "").strip()
+        taxi_slogan = request.form.get("taxi_slogan", "").strip()
         phone_number = request.form.get("phone_number", "").strip()
         if phone_number:
             phone_number = _format_phone(phone_number) or phone_number
@@ -1895,10 +1902,7 @@ def config_page():
         tariff_12 = request.form.get("tariff_12", "").replace(",", ".").strip()
         tariff_34 = request.form.get("tariff_34", "").replace(",", ".").strip()
         tariff_5 = request.form.get("tariff_5", "").replace(",", ".").strip()
-        night_base = request.form.get("night_base", "").replace(",", ".").strip()
-        night_12 = request.form.get("night_12", "").replace(",", ".").strip()
-        night_34 = request.form.get("night_34", "").replace(",", ".").strip()
-        night_5 = request.form.get("night_5", "").replace(",", ".").strip()
+        wait_price = request.form.get("wait_price", "").replace(",", ".").strip()
         if "refresh_vehicle_list" in request.form:
             tesla = get_tesla()
             if tesla is not None:
@@ -1928,6 +1932,10 @@ def config_page():
             cfg["taxi_company"] = taxi_company
         elif "taxi_company" in cfg:
             cfg.pop("taxi_company")
+        if taxi_slogan:
+            cfg["taxi_slogan"] = taxi_slogan
+        elif "taxi_slogan" in cfg:
+            cfg.pop("taxi_slogan")
         if phone_number:
             cfg["phone_number"] = phone_number
         elif "phone_number" in cfg:
@@ -1968,18 +1976,9 @@ def config_page():
         v = _to_float(tariff_5)
         if v is not None:
             tariff_cfg["rate_5_plus"] = v
-        v = _to_float(night_base)
+        v = _to_float(wait_price)
         if v is not None:
-            tariff_cfg["night_base"] = v
-        v = _to_float(night_12)
-        if v is not None:
-            tariff_cfg["night_rate_1_2"] = v
-        v = _to_float(night_34)
-        if v is not None:
-            tariff_cfg["night_rate_3_4"] = v
-        v = _to_float(night_5)
-        if v is not None:
-            tariff_cfg["night_rate_5_plus"] = v
+            tariff_cfg["wait_per_10s"] = v
         if tariff_cfg:
             cfg["taximeter_tariff"] = tariff_cfg
         elif "taximeter_tariff" in cfg:
@@ -2143,7 +2142,7 @@ def sms_log_page():
 def taxameter_page():
     cfg = load_config()
     company = cfg.get("taxi_company", "Taxi Schauer")
-    return render_template("taxameter.html", company=company)
+    return render_template("taxameter.html", company=company, config=cfg)
 
 
 @app.route("/api/taxameter/start", methods=["POST"])
@@ -2158,7 +2157,8 @@ def api_taxameter_stop():
     result = taximeter.stop()
     if result:
         company = get_taxi_company()
-        text = format_receipt(company, result.get("breakdown", {}), result.get("distance", 0.0))
+        slogan = get_taxi_slogan()
+        text = format_receipt(company, result.get("breakdown", {}), result.get("distance", 0.0), slogan)
         rdir = receipt_dir()
         ride_id = result.get("ride_id")
         if ride_id is not None:
@@ -2174,6 +2174,7 @@ def api_taxameter_stop():
             result["qr_code"] = f"/receipts/{ride_id}.png"
             result["receipt_url"] = url
         result["company"] = company
+        result["slogan"] = slogan
     return jsonify(result or {"active": False})
 
 
