@@ -860,6 +860,8 @@ def _get_trip_files(vehicle_id=None):
     if vehicle_id is None:
         try:
             for name in os.listdir(DATA_DIR):
+                if not str(name).isdigit():
+                    continue
                 d = os.path.join(DATA_DIR, name, "trips")
                 if os.path.isdir(d):
                     dirs.append(d)
