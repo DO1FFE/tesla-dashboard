@@ -34,7 +34,7 @@
             <label for="trip-select">Vergangene Fahrt:</label>
             <select id="trip-select">
                 {% for t in trips %}
-                <option value="{{ t }}">{{ t }}</option>
+                <option value="{{ t.value }}">{{ t.label }}</option>
                 {% endfor %}
             </select>
             <button id="trip-receipt-btn" type="button">Quittung</button>
