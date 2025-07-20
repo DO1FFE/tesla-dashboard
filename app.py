@@ -613,6 +613,19 @@ def track_drive_path(vehicle_data):
     if shift in (None, "P"):
         if drive_pause_ms is None:
             drive_pause_ms = ts if ts is not None else int(time.time() * 1000)
+            if lat is not None and lon is not None and current_trip_file:
+                if ts is None:
+                    ts = int(time.time() * 1000)
+                _log_trip_point(
+                    ts,
+                    lat,
+                    lon,
+                    speed,
+                    power,
+                    heading,
+                    shift,
+                    current_trip_file,
+                )
         else:
             if ts is None:
                 ts = int(time.time() * 1000)
