@@ -1027,6 +1027,12 @@ select {
   border-color: var(--accent-color);
 }
 
+.active-btn:disabled {
+  background: var(--accent-color);
+  color: #fff;
+  border-color: var(--accent-color);
+}
+
 #taximeter-receipt {
   background: #000;
   color: #0f0;
@@ -1068,4 +1074,12 @@ select {
 #wait-icon {
   font-size: 1.2rem;
   margin-left: 4px;
+}
+
+#trip-select-box {
+  position: fixed;
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  text-align: center;
 }

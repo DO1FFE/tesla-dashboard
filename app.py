@@ -2179,10 +2179,19 @@ def taxameter_page():
     cfg = load_config()
     company = cfg.get("taxi_company", "Taxi Schauer")
     files = [os.path.relpath(p, DATA_DIR) for p in _get_trip_files()]
-    recent = files[-10:]
+    recent_files = files[-10:]
+    trips = []
+    for f in recent_files:
+        label = os.path.basename(f)
+        label = label.replace("trip_", "").split(".")[0]
+        try:
+            label = datetime.strptime(label, "%Y%m%d").strftime("%Y-%m-%d")
+        except Exception:
+            pass
+        trips.append({"value": f, "label": label})
     vehicle_id = default_vehicle_id()
     return render_template(
-        "taxameter.html", company=company, config=cfg, trips=recent, vehicle_id=vehicle_id
+        "taxameter.html", company=company, config=cfg, trips=trips, vehicle_id=vehicle_id
     )
 
 
