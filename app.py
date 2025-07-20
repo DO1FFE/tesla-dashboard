@@ -996,6 +996,52 @@ def _trip_max_speed(filename):
             max_speed = speed
     return max_speed * MILES_TO_KM
 
+def _split_trip_segments(filename):
+    """Split a trip CSV into individual rides based on the gear state."""
+    points = _load_trip(filename)
+    segments = []
+    current = []
+    for p in points:
+        gear = p[6]
+        if gear == "P":
+            if current:
+                segments.append(current)
+                current = []
+            continue
+        current.append(p)
+    if current:
+        segments.append(current)
+
+    result = []
+    for seg in segments:
+        if not seg:
+            continue
+        dist = 0.0
+        wait = 0.0
+        for i in range(1, len(seg)):
+            lat1, lon1 = seg[i - 1][:2]
+            lat2, lon2 = seg[i][:2]
+            dist += _haversine(lat1, lon1, lat2, lon2)
+            speed = seg[i - 1][2]
+            t1 = seg[i - 1][4]
+            t2 = seg[i][4]
+            if (
+                speed is not None
+                and speed < 5
+                and t1 is not None
+                and t2 is not None
+                and t2 > t1
+            ):
+                wait += (t2 - t1) / 1000.0
+        start_ts = seg[0][4]
+        end_ts = seg[-1][4]
+        if start_ts is not None and start_ts > 1e12:
+            start_ts /= 1000.0
+        if end_ts is not None and end_ts > 1e12:
+            end_ts /= 1000.0
+        result.append({"start": start_ts, "end": end_ts, "distance": dist, "wait": wait})
+    return result
+
 def _period_distance(prefix, key):
     """Return distance in km for a week or month selection."""
     dist = 0.0
@@ -2178,20 +2224,42 @@ def sms_log_page():
 def taxameter_page():
     cfg = load_config()
     company = cfg.get("taxi_company", "Taxi Schauer")
-    files = [os.path.relpath(p, DATA_DIR) for p in _get_trip_files()]
-    recent_files = files[-10:]
-    trips = []
+    file_paths = [os.path.relpath(p, DATA_DIR) for p in _get_trip_files()]
+    recent_files = file_paths[-10:]
+    file_opts = []
     for f in recent_files:
-        label = os.path.basename(f)
-        label = label.replace("trip_", "").split(".")[0]
+        label = os.path.basename(f).replace("trip_", "").split(".")[0]
         try:
             label = datetime.strptime(label, "%Y%m%d").strftime("%Y-%m-%d")
         except Exception:
             pass
-        trips.append({"value": f, "label": label})
+        file_opts.append({"value": f, "label": label})
+
+    selected = request.args.get("file")
+    if selected not in file_paths and file_opts:
+        selected = file_opts[-1]["value"]
+
+    trips = []
+    if selected:
+        segs = _split_trip_segments(os.path.join(DATA_DIR, selected))
+        for idx, seg in enumerate(segs, 1):
+            if seg["start"] is None:
+                continue
+            s_dt = datetime.fromtimestamp(seg["start"], LOCAL_TZ)
+            e_dt = datetime.fromtimestamp(seg["end"], LOCAL_TZ)
+            label = f"{s_dt.strftime('%Y-%m-%d %H:%M')} - {e_dt.strftime('%H:%M')}"
+            value = f"file={selected}&segment={idx}"
+            trips.append({"value": value, "label": label})
+
     vehicle_id = default_vehicle_id()
     return render_template(
-        "taxameter.html", company=company, config=cfg, trips=trips, vehicle_id=vehicle_id
+        "taxameter.html",
+        company=company,
+        config=cfg,
+        trips=trips,
+        trip_files=file_opts,
+        vehicle_id=vehicle_id,
+        selected_file=selected,
     )
 
 
@@ -2269,6 +2337,28 @@ def api_taxameter_status():
     return jsonify(taximeter.status())
 
 
+@app.route("/api/taxameter/trips")
+def api_taxameter_trips():
+    """Return individual trips for a recorded file."""
+    selected = request.args.get("file")
+    if not selected or ".." in selected or not selected.endswith(".csv"):
+        abort(404)
+    path = os.path.join(DATA_DIR, selected)
+    if not os.path.exists(path):
+        abort(404)
+    segments = _split_trip_segments(path)
+    result = []
+    for idx, seg in enumerate(segments, 1):
+        if seg["start"] is None:
+            continue
+        start_dt = datetime.fromtimestamp(seg["start"], LOCAL_TZ)
+        end_dt = datetime.fromtimestamp(seg["end"], LOCAL_TZ)
+        label = f"{start_dt.strftime('%Y-%m-%d %H:%M')} - {end_dt.strftime('%H:%M')}"
+        value = f"file={selected}&segment={idx}"
+        result.append({"value": value, "label": label})
+    return jsonify(result)
+
+
 @app.route("/taxameter/receipt/<int:ride_id>")
 def taxameter_receipt(ride_id):
     rdir = receipt_dir()
@@ -2293,24 +2383,42 @@ def taxameter_receipt(ride_id):
 def taxameter_trip_receipt():
     """Create a taximeter receipt for a recorded trip."""
     selected = request.args.get("file")
+    segment_idx = request.args.get("segment")
     if not selected:
         abort(404)
     if selected.startswith("week:"):
         key = selected.split("week:", 1)[1]
         dist = _period_distance("week", key)
+        wait_time = 0.0
     elif selected.startswith("month:"):
         key = selected.split("month:", 1)[1]
         dist = _period_distance("month", key)
+        wait_time = 0.0
     else:
         if ".." in selected or not selected.endswith(".csv"):
             abort(404)
         path = os.path.join(DATA_DIR, selected)
         if not os.path.exists(path):
             abort(404)
-        dist = _trip_distance(path)
+        if segment_idx is not None:
+            try:
+                idx = int(segment_idx)
+            except ValueError:
+                abort(404)
+            segments = _split_trip_segments(path)
+            if idx < 1 or idx > len(segments):
+                abort(404)
+            seg = segments[idx - 1]
+            dist = seg["distance"]
+            wait_time = seg["wait"]
+        else:
+            dist = _trip_distance(path)
+            wait_time = 0.0
     tariff = get_taximeter_tariff()
     tm = Taximeter(TAXI_DB, lambda _vid: {}, get_taximeter_tariff)
     tm.tariff = tariff
+    tm.wait_time = wait_time
+    tm.wait_cost = int(wait_time // 10) * tariff.get("wait_per_10s", 0.10)
     breakdown = tm._calc_breakdown(dist)
     company = get_taxi_company()
     slogan = get_taxi_slogan()
