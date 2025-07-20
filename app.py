@@ -689,12 +689,33 @@ def log_vehicle_state(vehicle_id, state):
         pass
 
 
+def _last_logged_energy(vehicle_id):
+    """Return the last logged energy value for ``vehicle_id`` or ``None``."""
+    try:
+        with open(os.path.join(DATA_DIR, "energy.log"), "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        for line in reversed(lines):
+            idx = line.find("{")
+            if idx != -1:
+                try:
+                    entry = json.loads(line[idx:])
+                    if entry.get("vehicle_id") == vehicle_id:
+                        return float(entry.get("added_energy", 0.0))
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return None
+
+
 def _log_energy(vehicle_id, amount):
     """Append added energy information to ``energy.log``."""
     try:
-        energy_logger.info(
-            json.dumps({"vehicle_id": vehicle_id, "added_energy": amount})
-        )
+        last = _last_logged_energy(vehicle_id)
+        if last is None or abs(last - amount) > 0.001:
+            energy_logger.info(
+                json.dumps({"vehicle_id": vehicle_id, "added_energy": amount})
+            )
     except Exception:
         pass
 
