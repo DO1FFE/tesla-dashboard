@@ -128,11 +128,29 @@ $(function() {
     });
 
     $('#trip-receipt-btn').click(function() {
-        var file = $('#trip-select').val();
-        if (file) {
-            window.open('/taxameter/trip_receipt?file=' + encodeURIComponent(file), '_blank');
+        var query = $('#trip-select').val();
+        if (query) {
+            window.open('/taxameter/trip_receipt?' + query, '_blank');
         }
     });
+
+    function loadTrips(file) {
+        if (!file) return;
+        $.getJSON('/api/taxameter/trips?file=' + encodeURIComponent(file), function(data) {
+            $('#trip-select').empty();
+            $.each(data, function(idx, t) {
+                $('#trip-select').append($('<option>').val(t.value).text(t.label));
+            });
+        });
+    }
+
+    $('#file-select').change(function() {
+        loadTrips($(this).val());
+    });
+
+    if ($('#file-select').length) {
+        loadTrips($('#file-select').val());
+    }
 
     update();
     setInterval(update, 2000);

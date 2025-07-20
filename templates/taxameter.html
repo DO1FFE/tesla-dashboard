@@ -29,9 +29,15 @@
             <table id="receipt-table"></table>
             <div id="receipt-qr"></div>
         </div>
-        {% if trips %}
+        {% if trip_files %}
         <div id="trip-select-box">
-            <label for="trip-select">Vergangene Fahrt:</label>
+            <label for="file-select">Trip-Datei:</label>
+            <select id="file-select">
+                {% for f in trip_files %}
+                <option value="{{ f.value }}"{% if selected_file==f.value %} selected{% endif %}>{{ f.label }}</option>
+                {% endfor %}
+            </select>
+            <label for="trip-select">Fahrt:</label>
             <select id="trip-select">
                 {% for t in trips %}
                 <option value="{{ t.value }}">{{ t.label }}</option>
