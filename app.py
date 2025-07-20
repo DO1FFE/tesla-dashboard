@@ -997,18 +997,26 @@ def _trip_max_speed(filename):
     return max_speed * MILES_TO_KM
 
 def _split_trip_segments(filename):
-    """Split a trip CSV into individual rides based on the gear state."""
+    """Split a trip CSV into individual rides based on gear transitions.
+
+    A new segment starts when shifting from P to R, N or D and ends when
+    returning to P from any of these gears.
+    """
     points = _load_trip(filename)
     segments = []
     current = []
+    prev_gear = None
     for p in points:
         gear = p[6]
-        if gear == "P":
-            if current:
+        if current:
+            current.append(p)
+            if gear == "P" and prev_gear in ("R", "N", "D"):
                 segments.append(current)
                 current = []
-            continue
-        current.append(p)
+        else:
+            if gear in ("R", "N", "D") and (prev_gear == "P" or prev_gear is None):
+                current.append(p)
+        prev_gear = gear
     if current:
         segments.append(current)
 
