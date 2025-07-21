@@ -81,6 +81,12 @@ select {
   color: var(--accent-color);
 }
 
+#address-error {
+  display: none;
+  color: var(--accent-color);
+  margin-top: 2px;
+}
+
 #map {
   position: relative;
   height: 400px;

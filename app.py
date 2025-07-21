@@ -1494,16 +1494,30 @@ def get_vehicle_list():
 def reverse_geocode(lat, lon, vehicle_id=None):
     """Return address information for given coordinates using OpenStreetMap."""
 
+    headers = {"User-Agent": "TeslaDashboard/1.0"}
     try:
         url = "https://nominatim.openstreetmap.org/reverse"
         params = {"lat": lat, "lon": lon, "format": "jsonv2"}
-        headers = {"User-Agent": "TeslaDashboard/1.0"}
         r = requests.get(url, params=params, headers=headers, timeout=5)
         r.raise_for_status()
         data = r.json()
         return {"address": data.get("display_name"), "raw": data}
     except Exception as exc:
         _log_api_error(exc)
+        try:
+            url = "https://photon.komoot.io/reverse"
+            params = {"lat": lat, "lon": lon}
+            r = requests.get(url, params=params, headers=headers, timeout=5)
+            r.raise_for_status()
+            data = r.json()
+            features = data.get("features")
+            if features:
+                props = features[0].get("properties", {})
+                label = props.get("label")
+                if label:
+                    return {"address": label, "raw": data}
+        except Exception as exc2:
+            _log_api_error(exc2)
         return {}
 
 
