@@ -1214,6 +1214,16 @@ function fetchAddress(lat, lon) {
             }
         }
         $('#address-text').text(addr || '');
+        if (!addr) {
+            $('#address-error')
+                .text('Adresse konnte nicht abgerufen werden')
+                .show();
+        } else {
+            $('#address-error').hide();
+        }
+    }).fail(function() {
+        $('#address-text').text('');
+        $('#address-error').text('Adresse konnte nicht abgerufen werden').show();
     });
 }
 
