@@ -1580,7 +1580,8 @@ def _fetch_data_once(vehicle_id="default"):
 
             last_val = val
 
-            if charge.get("charging_state") != "Charging":
+            end_state = charge.get("charging_state")
+            if end_state in ("Complete", "Disconnected"):
                 if start_val is not None:
                     added = last_val - start_val
                     if added > 0:
@@ -1588,7 +1589,7 @@ def _fetch_data_once(vehicle_id="default"):
                 _save_last_energy(cache_id, last_val)
                 saved_val = last_val
                 start_val = None
-        elif charge.get("charging_state") != "Charging" and last_val is not None:
+        elif charge.get("charging_state") in ("Complete", "Disconnected") and last_val is not None:
             if start_val is not None:
                 added = last_val - start_val
                 if added > 0:
