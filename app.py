@@ -1368,7 +1368,6 @@ def _refresh_state(vehicle, times=2):
 
 def get_vehicle_state(vehicle_id=None):
     """Return the current vehicle state without waking the car."""
-    global _default_vehicle_id
     vid = str(vehicle_id or _default_vehicle_id or "default")
     state = last_vehicle_state.get(vid)
 
@@ -1530,7 +1529,6 @@ def reverse_geocode(lat, lon, vehicle_id=None):
 
 def _fetch_data_once(vehicle_id="default"):
     """Return current data or cached values based on vehicle state."""
-    global _default_vehicle_id
     if vehicle_id in (None, "default"):
         vid = _default_vehicle_id
         cache_id = "default"
