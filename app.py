@@ -1169,6 +1169,7 @@ def _compute_state_stats(entries):
 def _compute_energy_stats(filename=os.path.join(DATA_DIR, "energy.log")):
     """Return per-day added energy in kWh based on ``energy.log``."""
     energy = {}
+    last_vals = {}
     try:
         with open(filename, "r", encoding="utf-8") as f:
             for line in f:
@@ -1186,9 +1187,15 @@ def _compute_energy_stats(filename=os.path.join(DATA_DIR, "energy.log")):
                 day = ts.date().isoformat()
                 try:
                     entry = json.loads(line[idx:])
+                    vid = entry.get("vehicle_id")
                     val = float(entry.get("added_energy", 0.0))
                 except Exception:
                     continue
+                if vid is not None:
+                    last = last_vals.get(vid)
+                    if last is not None and abs(last - val) < 0.001:
+                        continue
+                    last_vals[vid] = val
                 energy[day] = energy.get(day, 0.0) + val
     except Exception:
         pass
