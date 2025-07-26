@@ -29,7 +29,7 @@ Timestamps in this file are recorded in the Europe/Berlin timezone.
 
 All API calls are logged to `data/api.log` without storing request details. The log file uses rotation and will grow to at most 1&nbsp;MB.
 Vehicle state changes are written to `data/state.log`.
-Added charging energy is appended to `data/energy.log` once a charging session finishes. Timestamps in this file are recorded in the Europe/Berlin timezone.
+The file `data/energy.log` always holds only the most recently added energy once a charging session finishes. Its timestamp is recorded in the Europe/Berlin timezone.
 The latest successful API response is stored in `data/<vehicle_id>/cache.json`.
 This cache is always updated with the current vehicle state so the dashboard
 knows whether the car is online, asleep or offline even when no fresh data is
