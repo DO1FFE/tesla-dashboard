@@ -1105,6 +1105,16 @@ def _period_distance(prefix, key):
     return dist
 
 
+def _parse_log_time(ts_str):
+    """Return a timezone-aware datetime parsed from a log line."""
+    for fmt in ("%Y-%m-%d %H:%M:%S,%f", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(ts_str, fmt).replace(tzinfo=LOCAL_TZ)
+        except Exception:
+            continue
+    return None
+
+
 def _load_state_entries(filename=os.path.join(DATA_DIR, "state.log")):
     """Parse state log entries as (timestamp, state) tuples."""
     entries = []
@@ -1115,21 +1125,10 @@ def _load_state_entries(filename=os.path.join(DATA_DIR, "state.log")):
                 if idx == -1:
                     continue
                 ts_str = line[:idx].strip()
-                try:
-                    ts = (
-                        datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S,%f")
-                        .replace(tzinfo=LOCAL_TZ)
-                        .timestamp()
-                    )
-                except Exception:
-                    try:
-                        ts = (
-                            datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
-                            .replace(tzinfo=LOCAL_TZ)
-                            .timestamp()
-                        )
-                    except Exception:
-                        continue
+                ts_dt = _parse_log_time(ts_str)
+                if ts_dt is None:
+                    continue
+                ts = ts_dt.timestamp()
                 try:
                     data = json.loads(line[idx:])
                     state = data.get("state")
@@ -1177,14 +1176,10 @@ def _compute_energy_stats(filename=os.path.join(DATA_DIR, "energy.log")):
                 if idx == -1:
                     continue
                 ts_str = line[:idx].strip()
-                try:
-                    ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S,%f")
-                except Exception:
-                    try:
-                        ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
-                    except Exception:
-                        continue
-                day = ts.date().isoformat()
+                ts_dt = _parse_log_time(ts_str)
+                if ts_dt is None:
+                    continue
+                day = ts_dt.date().isoformat()
                 try:
                     entry = json.loads(line[idx:])
                     vid = entry.get("vehicle_id")
