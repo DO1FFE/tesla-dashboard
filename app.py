@@ -709,13 +709,15 @@ def _last_logged_energy(vehicle_id):
 
 
 def _log_energy(vehicle_id, amount):
-    """Append added energy information to ``energy.log``."""
+    """Store the last added energy in ``energy.log`` using local time."""
     try:
         last = _last_logged_energy(vehicle_id)
         if last is None or abs(last - amount) > 0.001:
-            energy_logger.info(
-                json.dumps({"vehicle_id": vehicle_id, "added_energy": amount})
-            )
+            entry = json.dumps({"vehicle_id": vehicle_id, "added_energy": amount})
+            ts = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")
+            path = os.path.join(DATA_DIR, "energy.log")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(f"{ts} {entry}\n")
     except Exception:
         pass
 
