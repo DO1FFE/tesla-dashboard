@@ -1173,9 +1173,9 @@ function fetchAnnouncement() {
 function fetchAddress(lat, lon) {
     if (lat == null || lon == null) return;
     if (lastAddressLat === lat && lastAddressLng === lon) return;
-    lastAddressLat = lat;
-    lastAddressLng = lon;
     $.getJSON('/api/reverse_geocode', {lat: lat, lon: lon}, function(resp) {
+        lastAddressLat = lat;
+        lastAddressLng = lon;
         var addr = null;
         if (resp.raw && resp.raw.address) {
             var a = resp.raw.address;
