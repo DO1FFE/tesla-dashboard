@@ -51,6 +51,7 @@ def inject_ga_id():
     """Add Google Analytics tracking ID to all templates."""
     return {"ga_id": GA_TRACKING_ID}
 
+
 # Ensure data paths are relative to this file regardless of the
 # current working directory.  This allows running the application
 # from any location while still finding the trip files and caches.
@@ -58,18 +59,21 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
+
 def vehicle_dir(vehicle_id):
     """Return directory for a specific vehicle."""
-    name = str(vehicle_id) if vehicle_id is not None else "default"
-    path = os.path.join(DATA_DIR, name)
+    dir_name = str(vehicle_id) if vehicle_id is not None else "default"
+    path = os.path.join(DATA_DIR, dir_name)
     os.makedirs(path, exist_ok=True)
     return path
+
 
 def trip_dir(vehicle_id):
     """Return directory holding trip CSV files for ``vehicle_id``."""
     path = os.path.join(vehicle_dir(vehicle_id), "trips")
     os.makedirs(path, exist_ok=True)
     return path
+
 
 def receipt_dir():
     """Directory for stored taximeter receipts."""
@@ -83,13 +87,13 @@ def migrate_legacy_files():
     try:
         for fname in os.listdir(DATA_DIR):
             if fname.startswith("cache_") and fname.endswith(".json"):
-                vid = fname[len("cache_") : -5]
+                vid = fname[len("cache_"):-5]
                 src = os.path.join(DATA_DIR, fname)
                 dst = os.path.join(vehicle_dir(vid), "cache.json")
                 if not os.path.exists(dst):
                     os.rename(src, dst)
             if fname.startswith("last_energy_") and fname.endswith(".txt"):
-                vid = fname[len("last_energy_") : -4]
+                vid = fname[len("last_energy_"):-4]
                 src = os.path.join(DATA_DIR, fname)
                 dst = os.path.join(vehicle_dir(vid), "last_energy.txt")
                 if not os.path.exists(dst):
@@ -108,6 +112,7 @@ def migrate_legacy_files():
                 pass
     except Exception:
         pass
+
 
 migrate_legacy_files()
 
@@ -308,7 +313,7 @@ def update_api_list(data, filename=os.path.join(DATA_DIR, "api-liste.txt")):
                 if insert_pos is None:
                     # fallback: before the next known key
                     insert_pos = len(lines)
-                    for next_k, _ in kv[idx + 1 :]:
+                    for next_k, _ in kv[idx + 1:]:
                         if next_k in existing_map:
                             insert_pos = existing_map[next_k]
                             break
@@ -342,6 +347,7 @@ def log_api_data(endpoint, data):
         update_api_list(data)
     except Exception:
         pass
+
 
 STAT_FILE = os.path.join(DATA_DIR, "statistics.json")
 PARKTIME_FILE = os.path.join(DATA_DIR, "parktime.json")
@@ -409,13 +415,16 @@ def get_taximeter_tariff():
                 default[key] = float(val)
     return default
 
+
 def get_taxi_company():
     cfg = load_config()
     return cfg.get("taxi_company", "Taxi Schauer")
 
+
 def get_taxi_slogan():
     cfg = load_config()
     return cfg.get("taxi_slogan", "Wir lassen Sie nicht im Regen stehen.")
+
 
 def format_receipt(company, breakdown, distance=0.0, slogan=""):
     lines = []
@@ -776,7 +785,6 @@ def _save_last_energy(vehicle_id, value):
         pass
 
 
-
 def send_aprs(vehicle_data):
     """Transmit a position packet via APRS-IS using aprslib."""
     if aprslib is None:
@@ -1032,6 +1040,7 @@ def _trip_max_speed(filename):
             max_speed = speed
     return max_speed * MILES_TO_KM
 
+
 def _split_trip_segments(filename):
     """Split a trip CSV into individual rides based on gear transitions.
 
@@ -1085,6 +1094,7 @@ def _split_trip_segments(filename):
             end_ts /= 1000.0
         result.append({"start": start_ts, "end": end_ts, "distance": dist, "wait": wait})
     return result
+
 
 def _period_distance(prefix, key):
     """Return distance in km for a week or month selection."""
@@ -1325,6 +1335,7 @@ def _cached_vehicle_list(tesla, ttl=86400):
                 _log_api_error(exc)
                 return []
         return _vehicle_list_cache
+
 
 def default_vehicle_id():
     """Return the first vehicle ID or None if unavailable."""
@@ -1944,9 +1955,6 @@ def _format_phone(phone, region="DE"):
         return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
     except Exception:
         return None
-
-
-
 
 
 @app.route("/api/sms", methods=["POST"])
