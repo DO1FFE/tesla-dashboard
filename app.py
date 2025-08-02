@@ -1527,7 +1527,24 @@ def reverse_geocode(lat, lon, vehicle_id=None):
             features = data.get("features")
             if features:
                 props = features[0].get("properties", {})
-                label = props.get("label")
+                parts = []
+                street = props.get("street")
+                if street:
+                    if props.get("housenumber"):
+                        street += f" {props['housenumber']}"
+                    parts.append(street)
+                city = props.get("city") or props.get("locality")
+                district = props.get("district")
+                if props.get("postcode") and city:
+                    city_text = city
+                    if district and district != city:
+                        city_text += f"-{district}"
+                    parts.append(f"{props['postcode']} {city_text}")
+                elif city:
+                    parts.append(city)
+                if not parts and props.get("name"):
+                    parts.append(props["name"])
+                label = ", ".join(parts)
                 if label:
                     return {"address": label, "raw": data}
         except Exception as exc2:
