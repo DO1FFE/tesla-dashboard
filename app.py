@@ -723,10 +723,7 @@ def _log_energy(vehicle_id, amount):
         last = _last_logged_energy(vehicle_id)
         if last is None or abs(last - amount) > 0.001:
             entry = json.dumps({"vehicle_id": vehicle_id, "added_energy": amount})
-            ts = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")
-            path = os.path.join(DATA_DIR, "energy.log")
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(f"{ts} {entry}\n")
+            energy_logger.info(entry)
     except Exception:
         pass
 
