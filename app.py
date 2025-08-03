@@ -13,18 +13,25 @@ from flask import (
     send_from_directory,
     abort,
     url_for,
+    redirect,
 )
 from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager
+from flask_login import (
+    LoginManager,
+    login_user,
+    logout_user,
+    login_required,
+    current_user,
+)
 from taximeter import Taximeter
 import requests
-from functools import wraps
 from dotenv import load_dotenv
 from version import get_version
 import qrcode
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import stripe
+import click
 
 try:
     import teslapy
@@ -46,6 +53,14 @@ app = Flask(__name__)
 app.config.from_object("config")
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
+login_manager.login_view = "login"
+
+from models import User  # noqa: E402  pylint: disable=wrong-import-position
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 __version__ = get_version()
 CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
@@ -373,31 +388,6 @@ def get_news_events_info():
     except Exception as exc:
         _log_api_error(exc)
     return ""
-
-
-def check_auth(username, password):
-    user = os.getenv("TESLA_EMAIL")
-    pw = os.getenv("TESLA_PASSWORD")
-    return username == user and password == pw
-
-
-def authenticate():
-    return Response(
-        "Authentication required",
-        401,
-        {"WWW-Authenticate": 'Basic realm="Login Required"'},
-    )
-
-
-def requires_auth(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth = request.authorization
-        if not auth or not check_auth(auth.username, auth.password):
-            return authenticate()
-        return f(*args, **kwargs)
-
-    return decorated
 
 
 def _load_parktime():
@@ -1571,6 +1561,49 @@ def _start_thread(vehicle_id):
 taximeter = Taximeter(TAXI_DB, _fetch_data_once, get_taximeter_tariff)
 
 
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        ham = bool(request.form.get("is_ham_operator"))
+        if not username or not email or not password:
+            return render_template("register.html", error="Alle Felder sind erforderlich")
+        existing = User.query.filter(
+            (User.email == email) | (User.username == username)
+        ).first()
+        if existing:
+            return render_template("register.html", error="Benutzer existiert bereits")
+        user = User(username=username, email=email, is_ham_operator=ham)
+        user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
+        login_user(user)
+        return redirect(url_for("index"))
+    return render_template("register.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        user = User.query.filter_by(email=email).first()
+        if user and user.check_password(password):
+            login_user(user)
+            return redirect(url_for("index"))
+        return render_template("login.html", error="Ungültige Zugangsdaten")
+    return render_template("login.html")
+
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for("index"))
+
+
 @app.route("/")
 def index():
     cfg = load_config()
@@ -1862,7 +1895,7 @@ def api_sms():
 
 
 @app.route("/config", methods=["GET", "POST"])
-@requires_auth
+@login_required
 def config_page():
     cfg = load_config()
     if request.method == "POST":
@@ -2364,6 +2397,27 @@ def debug_info():
     return render_template(
         "debug.html", env_info=env_info, log_lines=log_lines, latest=latest_data
     )
+
+
+@app.cli.command("ensure-admin")
+@click.argument("email")
+@click.argument("username")
+@click.password_option()
+def ensure_admin(email, username, password):
+    """Ensure that an admin user exists."""
+    user = User.query.filter(
+        (User.email == email) | (User.username == username)
+    ).first()
+    if not user:
+        user = User(email=email, username=username, role="admin")
+        user.set_password(password)
+        db.session.add(user)
+    else:
+        user.role = "admin"
+        if password:
+            user.set_password(password)
+    db.session.commit()
+    click.echo("Admin ensured")
 
 
 if __name__ == "__main__":
