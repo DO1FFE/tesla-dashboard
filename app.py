@@ -25,6 +25,8 @@ from flask_login import (
     login_required,
     current_user,
 )
+from flask_admin import Admin, AdminIndexView
+from flask_admin.contrib.sqla import ModelView
 from taximeter import Taximeter
 import requests
 from dotenv import load_dotenv
@@ -64,6 +66,43 @@ from models import (  # noqa: E402  pylint: disable=wrong-import-position
     Vehicle,
 )
 from functools import wraps
+
+class _AdminIndex(AdminIndexView):
+    def is_accessible(self):
+        return current_user.is_authenticated and current_user.role == "admin"
+
+    def inaccessible_callback(self, name, **kwargs):
+        abort(403)
+
+
+class _AdminModelView(ModelView):
+    def is_accessible(self):
+        return current_user.is_authenticated and current_user.role == "admin"
+
+    def inaccessible_callback(self, name, **kwargs):
+        abort(403)
+
+
+class UserAdmin(_AdminModelView):
+    column_list = ("email", "role", "subscription", "is_ham_operator")
+    form_columns = ("email", "role", "subscription", "is_ham_operator")
+    column_searchable_list = ("email", "role", "subscription")
+    can_view_details = True
+
+
+class VehicleAdmin(_AdminModelView):
+    pass
+
+
+admin_site = Admin(
+    app, index_view=_AdminIndex(url="/admin"), template_mode="bootstrap3"
+)
+admin_site.add_view(
+    UserAdmin(User, db.session, endpoint="users", url="/admin/users")
+)
+admin_site.add_view(
+    VehicleAdmin(Vehicle, db.session, endpoint="vehicles", url="/admin/vehicles")
+)
 
 
 @login_manager.user_loader

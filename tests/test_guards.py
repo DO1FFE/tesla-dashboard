@@ -84,3 +84,16 @@ def test_aprs_guard_and_registration(client):
     login(client, "ham@example.com")
     resp = client.get(f"/{ham_slug}/config")
     assert resp.status_code == 200
+
+
+def test_admin_users_list_access(client):
+    with app.app_context():
+        create_user("admin", role="admin")
+        create_user("user")
+    login(client, "user@example.com")
+    resp = client.get("/admin/users/")
+    assert resp.status_code == 403
+    logout(client)
+    login(client, "admin@example.com")
+    resp = client.get("/admin/users/")
+    assert resp.status_code == 200
