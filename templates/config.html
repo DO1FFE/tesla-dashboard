@@ -24,6 +24,7 @@
             {% endif %}
         </div>
         {% endfor %}
+        {% if current_user.role == 'admin' or current_user.is_ham_operator %}
         <div>
             <label>
                 APRS Rufzeichen
@@ -54,6 +55,7 @@
                 <input type="text" name="aprs_comment" value="{{ config.get('aprs_comment','') }}">
             </label>
         </div>
+        {% endif %}
         <div>
             <label>
                 API Intervall (Sekunden)
