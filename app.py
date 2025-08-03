@@ -14,6 +14,8 @@ from flask import (
     abort,
     url_for,
     redirect,
+    g,
+    Blueprint,
 )
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import (
@@ -1608,6 +1610,7 @@ def logout():
 def index():
     admin = User.query.filter_by(role="admin").first()
     cfg = load_config()
+    prefix = f"/{g.username_slug}" if hasattr(g, "username_slug") else ""
     return render_template(
         "index.html",
         version=__version__,
@@ -1615,13 +1618,15 @@ def index():
         config=cfg,
         show_banner=not current_user.is_authenticated,
         admin=admin,
+        prefix=prefix,
     )
 
 
 @app.route("/map")
 def map_only():
     """Display only the map without additional modules."""
-    return render_template("map.html", version=__version__)
+    prefix = f"/{g.username_slug}" if hasattr(g, "username_slug") else ""
+    return render_template("map.html", version=__version__, prefix=prefix)
 
 
 @app.route("/history")
@@ -1653,6 +1658,7 @@ def trip_history():
             heading = _bearing(path[0][:2], path[1][:2])
     weekly, monthly = compute_trip_summaries()
     cfg = load_config()
+    prefix = f"/{g.username_slug}" if hasattr(g, "username_slug") else ""
     return render_template(
         "history.html",
         path=path,
@@ -1664,17 +1670,20 @@ def trip_history():
         weekly=weekly,
         monthly=monthly,
         config=cfg,
+        prefix=prefix,
     )
 
 
 @app.route("/daten")
+@app.route("/data")
 def data_only():
     """Display live or cached vehicle data without extra UI."""
     _start_thread("default")
     data = latest_data.get("default")
     if data is None:
         data = _fetch_data_once("default")
-    return render_template("data.html", data=data)
+    prefix = f"/{g.username_slug}" if hasattr(g, "username_slug") else ""
+    return render_template("data.html", data=data, prefix=prefix)
 
 
 @app.route("/api/data")
@@ -1898,8 +1907,15 @@ def api_sms():
 
 
 @app.route("/config", methods=["GET", "POST"])
-@login_required
 def config_page():
+    if hasattr(g, "username_slug"):
+        if not current_user.is_authenticated or (
+            current_user.role != "admin" and current_user.username_slug != g.username_slug
+        ):
+            abort(403)
+    else:
+        if not current_user.is_authenticated:
+            return redirect(url_for("login"))
     cfg = load_config()
     if request.method == "POST":
         for item in CONFIG_ITEMS:
@@ -2017,7 +2033,8 @@ def config_page():
         elif "api_interval_idle" in cfg:
             cfg.pop("api_interval_idle")
         save_config(cfg)
-    return render_template("config.html", items=CONFIG_ITEMS, config=cfg)
+    prefix = f"/{g.username_slug}" if hasattr(g, "username_slug") else ""
+    return render_template("config.html", items=CONFIG_ITEMS, config=cfg, prefix=prefix)
 
 
 @app.route("/error")
@@ -2100,7 +2117,8 @@ def statistics_page():
 
     rows = monthly_rows + rows
     cfg = load_config()
-    return render_template("statistik.html", rows=rows, config=cfg)
+    prefix = f"/{g.username_slug}" if hasattr(g, "username_slug") else ""
+    return render_template("statistik.html", rows=rows, config=cfg, prefix=prefix)
 
 
 @app.route("/api/errors")
@@ -2194,6 +2212,7 @@ def taxameter_page():
             trips.append({"value": value, "label": label})
 
     vehicle_id = default_vehicle_id()
+    prefix = f"/{g.username_slug}" if hasattr(g, "username_slug") else ""
     return render_template(
         "taxameter.html",
         company=company,
@@ -2202,6 +2221,7 @@ def taxameter_page():
         trip_files=file_opts,
         vehicle_id=vehicle_id,
         selected_file=selected,
+        prefix=prefix,
     )
 
 
@@ -2400,6 +2420,71 @@ def debug_info():
     return render_template(
         "debug.html", env_info=env_info, log_lines=log_lines, latest=latest_data
     )
+
+
+# Blueprint for user-specific routes
+user_bp = Blueprint("user", __name__, url_prefix="/<username_slug>")
+
+
+@user_bp.before_request
+def _ensure_user():
+    slug = request.view_args.get("username_slug")
+    if not slug:
+        return
+    normalized = slug.lower()
+    if slug != normalized:
+        return redirect(request.url.replace(f"/{slug}", f"/{normalized}", 1))
+    User.query.filter_by(username_slug=normalized).first_or_404()
+    g.username_slug = normalized
+
+
+user_bp.add_url_rule("", view_func=index)
+user_bp.add_url_rule("/map", view_func=map_only)
+user_bp.add_url_rule("/history", view_func=trip_history)
+user_bp.add_url_rule("/statistik", view_func=statistics_page)
+user_bp.add_url_rule("/data", view_func=data_only)
+user_bp.add_url_rule("/config", view_func=config_page, methods=["GET", "POST"])
+user_bp.add_url_rule("/api/data", view_func=api_data)
+user_bp.add_url_rule("/api/data/<vehicle_id>", view_func=api_data_vehicle)
+user_bp.add_url_rule("/api/vehicles", view_func=api_vehicles)
+user_bp.add_url_rule("/api/state", view_func=api_state)
+user_bp.add_url_rule("/api/state/<vehicle_id>", view_func=api_state_vehicle)
+user_bp.add_url_rule("/api/version", view_func=api_version)
+user_bp.add_url_rule("/api/clients", view_func=api_clients)
+user_bp.add_url_rule("/api/reverse_geocode", view_func=api_reverse_geocode)
+user_bp.add_url_rule("/api/config", view_func=api_config)
+user_bp.add_url_rule("/api/announcement", view_func=api_announcement)
+user_bp.add_url_rule("/api/alarm_state", view_func=api_alarm_state)
+user_bp.add_url_rule("/api/alarm_state/<vehicle_id>", view_func=api_alarm_state_vehicle)
+user_bp.add_url_rule(
+    "/api/occupant", view_func=api_occupant, methods=["GET", "POST"]
+)
+user_bp.add_url_rule("/api/sms", view_func=api_sms, methods=["POST"])
+user_bp.add_url_rule("/api/errors", view_func=api_errors_route)
+user_bp.add_url_rule(
+    "/api/taxameter/start", view_func=api_taxameter_start, methods=["POST"]
+)
+user_bp.add_url_rule(
+    "/api/taxameter/pause", view_func=api_taxameter_pause, methods=["POST"]
+)
+user_bp.add_url_rule(
+    "/api/taxameter/stop", view_func=api_taxameter_stop, methods=["POST"]
+)
+user_bp.add_url_rule(
+    "/api/taxameter/reset", view_func=api_taxameter_reset, methods=["POST"]
+)
+user_bp.add_url_rule("/api/taxameter/status", view_func=api_taxameter_status)
+user_bp.add_url_rule("/api/taxameter/trips", view_func=api_taxameter_trips)
+user_bp.add_url_rule("/taxameter", view_func=taxameter_page)
+user_bp.add_url_rule(
+    "/taxameter/receipt/<int:ride_id>", view_func=taxameter_receipt
+)
+user_bp.add_url_rule(
+    "/taxameter/trip_receipt", view_func=taxameter_trip_receipt
+)
+user_bp.add_url_rule("/receipts/<path:filename>", view_func=receipts_file)
+
+app.register_blueprint(user_bp)
 
 
 @app.cli.command("ensure-admin")
