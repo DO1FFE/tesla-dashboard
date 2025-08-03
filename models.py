@@ -57,30 +57,102 @@ class Vehicle(db.Model):
 
 class VehicleState(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicle.id"), nullable=False)
     state = db.Column(db.String(32), nullable=False)
     created_at = db.Column(
         db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id", "vehicle_id", "created_at", "state", name="uix_vehicle_state"
+        ),
+    )
+
 
 class EnergyLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicle.id"), nullable=False)
     added_energy = db.Column(db.Float, nullable=False)
     created_at = db.Column(
         db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id", "vehicle_id", "created_at", name="uix_energy_log"
+        ),
+    )
+
 
 class TripEntry(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicle.id"), nullable=False)
     started_at = db.Column(
         db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     ended_at = db.Column(db.DateTime(timezone=True))
     distance_km = db.Column(db.Float, default=0.0)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id", "vehicle_id", "started_at", name="uix_trip_entry"
+        ),
+    )
+
+
+class SmsLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicle.id"))
+    message = db.Column(db.Text, nullable=False)
+    success = db.Column(db.Boolean, default=False)
+    created_at = db.Column(
+        db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id", "vehicle_id", "created_at", "message", name="uix_sms_log"
+        ),
+    )
+
+
+class ApiLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicle.id"))
+    endpoint = db.Column(db.String(120), nullable=False)
+    data = db.Column(db.Text)
+    created_at = db.Column(
+        db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id", "vehicle_id", "created_at", "endpoint", name="uix_api_log"
+        ),
+    )
+
+
+class StatisticsEntry(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicle.id"), nullable=False)
+    name = db.Column(db.String(80), nullable=False)
+    value = db.Column(db.Float, default=0.0)
+    created_at = db.Column(
+        db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id", "vehicle_id", "created_at", "name", name="uix_stat_entry"
+        ),
+    )
 
 
 class TaximeterRide(db.Model):
