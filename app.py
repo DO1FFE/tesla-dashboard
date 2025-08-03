@@ -65,6 +65,12 @@ from models import (  # noqa: E402  pylint: disable=wrong-import-position
     ConfigVisibility,
     Vehicle,
     TeslaToken,
+    VehicleState,
+    EnergyLog,
+    SmsLog,
+    ApiLog,
+    TripEntry,
+    StatisticsEntry,
 )
 from functools import wraps
 from views.auth import auth_bp
@@ -379,12 +385,21 @@ def update_api_list(data, filename=os.path.join(DATA_DIR, "api-liste.txt")):
     return
 
 def log_api_data(endpoint, data):
-    """Write API communication to the rotating log file."""
+    """Persist API communication to the database."""
     try:
-        api_logger.info(json.dumps({"endpoint": endpoint, "data": data}))
-        update_api_list(data)
+        veh_id = data.get("vehicle_id") or data.get("id") if isinstance(data, dict) else None
+        veh = Vehicle.query.filter_by(vehicle_id=str(veh_id)).first() if veh_id else None
+        if veh:
+            entry = ApiLog(
+                user_id=veh.user_id,
+                vehicle_id=veh.id,
+                endpoint=endpoint,
+                data=json.dumps(data),
+            )
+            db.session.add(entry)
+            db.session.commit()
     except Exception:
-        pass
+        db.session.rollback()
 
 
 STAT_FILE = os.path.join(DATA_DIR, "statistics.json")
@@ -666,54 +681,68 @@ def _log_api_error(exc):
 
 
 def log_vehicle_state(vehicle_id, state):
-    """Log vehicle state changes to ``state.log`` if changed."""
+    """Persist vehicle state changes in the database."""
     try:
         with state_lock:
             if last_vehicle_state.get(vehicle_id) != state:
                 last_vehicle_state[vehicle_id] = state
-                state_logger.info(
-                    json.dumps({"vehicle_id": vehicle_id, "state": state})
-                )
+                veh = Vehicle.query.filter_by(vehicle_id=str(vehicle_id)).first()
+                if veh:
+                    entry = VehicleState(
+                        user_id=veh.user_id, vehicle_id=veh.id, state=state
+                    )
+                    db.session.add(entry)
+                    db.session.commit()
     except Exception:
-        pass
+        db.session.rollback()
 
 
 def _last_logged_energy(vehicle_id):
     """Return the last logged energy value for ``vehicle_id`` or ``None``."""
-    try:
-        with open(os.path.join(DATA_DIR, "energy.log"), "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        for line in reversed(lines):
-            idx = line.find("{")
-            if idx != -1:
-                try:
-                    entry = json.loads(line[idx:])
-                    if entry.get("vehicle_id") == vehicle_id:
-                        return float(entry.get("added_energy", 0.0))
-                except Exception:
-                    continue
-    except Exception:
-        pass
-    return None
+    veh = Vehicle.query.filter_by(vehicle_id=str(vehicle_id)).first()
+    if not veh:
+        return None
+    entry = (
+        EnergyLog.query.filter_by(user_id=veh.user_id, vehicle_id=veh.id)
+        .order_by(EnergyLog.created_at.desc())
+        .first()
+    )
+    return float(entry.added_energy) if entry else None
 
 
 def _log_energy(vehicle_id, amount):
-    """Store the last added energy in ``energy.log`` using local time."""
+    """Store the last added energy value in the database."""
     try:
         last = _last_logged_energy(vehicle_id)
         if last is None or abs(last - amount) > 0.001:
-            entry = json.dumps({"vehicle_id": vehicle_id, "added_energy": amount})
-            energy_logger.info(entry)
+            veh = Vehicle.query.filter_by(vehicle_id=str(vehicle_id)).first()
+            if veh:
+                entry = EnergyLog(
+                    user_id=veh.user_id, vehicle_id=veh.id, added_energy=amount
+                )
+                db.session.add(entry)
+                db.session.commit()
     except Exception:
-        pass
+        db.session.rollback()
 
 
-def _log_sms(message, success):
-    """Append SMS information to ``sms.log``."""
+def _log_sms(message, success, vehicle_id=None):
+    """Append SMS information to the database."""
     try:
-        sms_logger.info(json.dumps({"message": message, "success": success}))
+        veh = None
+        if vehicle_id is not None:
+            veh = Vehicle.query.filter_by(vehicle_id=str(vehicle_id)).first()
+        if veh:
+            entry = SmsLog(
+                user_id=veh.user_id,
+                vehicle_id=veh.id,
+                message=message,
+                success=bool(success),
+            )
+            db.session.add(entry)
+            db.session.commit()
     except Exception:
-        pass
+        db.session.rollback()
 
 
 def _cache_file(vehicle_id):
@@ -1087,28 +1116,12 @@ def _parse_log_time(ts_str):
     return None
 
 
-def _load_state_entries(filename=os.path.join(DATA_DIR, "state.log")):
-    """Parse state log entries as (timestamp, state) tuples."""
+def _load_state_entries():
+    """Return log entries from the database as ``(timestamp, state)`` tuples."""
     entries = []
-    try:
-        with open(filename, "r", encoding="utf-8") as f:
-            for line in f:
-                idx = line.find("{")
-                if idx == -1:
-                    continue
-                ts_str = line[:idx].strip()
-                ts_dt = _parse_log_time(ts_str)
-                if ts_dt is None:
-                    continue
-                ts = ts_dt.timestamp()
-                try:
-                    data = json.loads(line[idx:])
-                    state = data.get("state")
-                    entries.append((ts, state))
-                except Exception:
-                    continue
-    except Exception:
-        pass
+    for e in VehicleState.query.order_by(VehicleState.created_at).all():
+        ts = e.created_at.replace(tzinfo=UTC).timestamp()
+        entries.append((ts, e.state))
     return entries
 
 
@@ -1137,54 +1150,29 @@ def _compute_state_stats(entries):
     return stats
 
 
-def _compute_energy_stats(filename=os.path.join(DATA_DIR, "energy.log")):
-    """Return per-day added energy in kWh based on ``energy.log``."""
+def _compute_energy_stats():
+    """Return per-day added energy in kWh based on ``EnergyLog`` entries."""
     energy = {}
     last_vals = {}
-    try:
-        with open(filename, "r", encoding="utf-8") as f:
-            for line in f:
-                idx = line.find("{")
-                if idx == -1:
-                    continue
-                ts_str = line[:idx].strip()
-                ts_dt = _parse_log_time(ts_str)
-                if ts_dt is None:
-                    continue
-                day = ts_dt.date().isoformat()
-                try:
-                    entry = json.loads(line[idx:])
-                    vid = entry.get("vehicle_id")
-                    val = float(entry.get("added_energy", 0.0))
-                except Exception:
-                    continue
-                if vid is not None:
-                    last = last_vals.get(vid)
-                    if last is not None and abs(last - val) < 0.001:
-                        continue
-                    last_vals[vid] = val
-                energy[day] = energy.get(day, 0.0) + val
-    except Exception:
-        pass
+    for e in EnergyLog.query.order_by(EnergyLog.created_at).all():
+        day = e.created_at.astimezone(LOCAL_TZ).date().isoformat()
+        last = last_vals.get(e.vehicle_id)
+        if last is not None and abs(last - e.added_energy) < 0.001:
+            continue
+        last_vals[e.vehicle_id] = e.added_energy
+        energy[day] = energy.get(day, 0.0) + float(e.added_energy)
     return energy
 
 
 def compute_statistics():
-    """Compute daily statistics (file storage disabled)."""
+    """Compute daily statistics using database entries."""
     stats = _compute_state_stats(_load_state_entries())
     energy = _compute_energy_stats()
-    for path in _get_trip_files():
-        fname = os.path.basename(path)
-        date_str = fname.split("_")[-1].split(".")[0]
-        try:
-            date_str = datetime.strptime(date_str, "%Y%m%d").date().isoformat()
-        except Exception:
-            pass
-        km = _trip_distance(path)
-        speed = _trip_max_speed(path)
-        stats.setdefault(date_str, {"online": 0.0, "offline": 0.0, "asleep": 0.0})
-        stats[date_str]["km"] = km
-        stats[date_str]["speed"] = speed
+    for trip in TripEntry.query.all():
+        day = trip.started_at.astimezone(LOCAL_TZ).date().isoformat()
+        stats.setdefault(day, {"online": 0.0, "offline": 0.0, "asleep": 0.0})
+        stats[day]["km"] = stats[day].get("km", 0.0) + float(trip.distance_km or 0.0)
+        stats[day].setdefault("speed", 0.0)
     for day, val in energy.items():
         stats.setdefault(day, {"online": 0.0, "offline": 0.0, "asleep": 0.0})
         stats[day]["energy"] = round(val, 2)
@@ -1204,17 +1192,12 @@ def compute_statistics():
     return stats
 
 def compute_trip_summaries():
-    """Return weekly and monthly distance summaries."""
+    """Return weekly and monthly distance summaries from ``TripEntry``."""
     weekly = {}
     monthly = {}
-    for path in _get_trip_files():
-        fname = os.path.basename(path)
-        date_str = fname.split("_")[-1].split(".")[0]
-        try:
-            day = datetime.strptime(date_str, "%Y%m%d").date()
-        except Exception:
-            continue
-        km = _trip_distance(path)
+    for trip in TripEntry.query.all():
+        day = trip.started_at.astimezone(LOCAL_TZ).date()
+        km = float(trip.distance_km or 0.0)
         iso_year, iso_week, _ = day.isocalendar()
         week_key = f"{iso_year}-W{iso_week:02d}"
         weekly[week_key] = round(weekly.get(week_key, 0.0) + km, 2)
@@ -2117,7 +2100,9 @@ def api_sms():
             timeout=10,
         )
         success = 200 <= resp.status_code < 300
-        _log_sms(message, success)
+        veh = Vehicle.query.filter_by(user_id=current_user.id).first()
+        ext_id = veh.vehicle_id if veh else None
+        _log_sms(message, success, ext_id)
         if success:
             return jsonify({"success": True})
         try:
@@ -2126,7 +2111,9 @@ def api_sms():
             error = resp.text
         return jsonify({"success": False, "error": error})
     except Exception as exc:
-        _log_sms(message, False)
+        veh = Vehicle.query.filter_by(user_id=current_user.id).first()
+        ext_id = veh.vehicle_id if veh else None
+        _log_sms(message, False, ext_id)
         return jsonify({"success": False, "error": str(exc)})
 
 
@@ -2385,16 +2372,17 @@ def api_errors_route():
 @app.route("/apiliste")
 def api_list_file():
     """Return the aggregated API key list as plain text."""
-    try:
-        with open(os.path.join(DATA_DIR, "api-liste.txt"), "r", encoding="utf-8") as f:
-            lines = [
-                line
-                for line in f
-                if not line.startswith("path[") and not line.startswith("path:")
-            ]
-            content = "".join(lines)
-    except Exception:
-        content = ""
+    lines = []
+    for entry in ApiLog.query.order_by(ApiLog.created_at).all():
+        if entry.endpoint.startswith("path[") or entry.endpoint.startswith("path:"):
+            continue
+        try:
+            data = json.loads(entry.data) if entry.data else None
+            line = json.dumps({"endpoint": entry.endpoint, "data": data})
+        except Exception:
+            line = entry.endpoint
+        lines.append(line + "\n")
+    content = "".join(lines)
     return Response(content, mimetype="text/plain")
 
 
@@ -2402,11 +2390,11 @@ def api_list_file():
 def state_log_page():
     """Display the vehicle state log."""
     log_lines = []
-    try:
-        with open(os.path.join(DATA_DIR, "state.log"), "r", encoding="utf-8") as f:
-            log_lines = f.readlines()
-    except Exception:
-        pass
+    for entry in VehicleState.query.order_by(VehicleState.created_at).all():
+        veh = Vehicle.query.get(entry.vehicle_id)
+        data = {"vehicle_id": veh.vehicle_id if veh else None, "state": entry.state}
+        ts = entry.created_at.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")
+        log_lines.append(f"{ts} {json.dumps(data)}\n")
     return render_template("state.html", log_lines=log_lines)
 
 
@@ -2414,11 +2402,14 @@ def state_log_page():
 def api_log_page():
     """Display the API log."""
     log_lines = []
-    try:
-        with open(os.path.join(DATA_DIR, "api.log"), "r", encoding="utf-8") as f:
-            log_lines = f.readlines()
-    except Exception:
-        pass
+    for entry in ApiLog.query.order_by(ApiLog.created_at).all():
+        try:
+            data = json.loads(entry.data) if entry.data else None
+        except Exception:
+            data = None
+        ts = entry.created_at.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")
+        line = json.dumps({"endpoint": entry.endpoint, "data": data})
+        log_lines.append(f"{ts} {line}\n")
     return render_template("apilog.html", log_lines=log_lines)
 
 
@@ -2427,11 +2418,11 @@ def api_log_page():
 def sms_log_page():
     """Display the SMS log."""
     log_lines = []
-    try:
-        with open(os.path.join(DATA_DIR, "sms.log"), "r", encoding="utf-8") as f:
-            log_lines = f.readlines()
-    except Exception:
-        pass
+    for entry in SmsLog.query.order_by(SmsLog.created_at).all():
+        veh = Vehicle.query.get(entry.vehicle_id)
+        data = {"vehicle_id": veh.vehicle_id if veh else None, "message": entry.message, "success": entry.success}
+        ts = entry.created_at.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")
+        log_lines.append(f"{ts} {json.dumps(data)}\n")
     return render_template("sms.html", log_lines=log_lines)
 
 
@@ -2704,11 +2695,17 @@ def debug_info():
     }
 
     log_lines = []
-    try:
-        with open(os.path.join(DATA_DIR, "api.log"), "r", encoding="utf-8") as f:
-            log_lines = f.readlines()[-50:]
-    except Exception:
-        pass
+    entries = (
+        ApiLog.query.order_by(ApiLog.created_at.desc()).limit(50).all()
+    )
+    for entry in reversed(entries):
+        try:
+            data = json.loads(entry.data) if entry.data else None
+        except Exception:
+            data = None
+        ts = entry.created_at.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")
+        line = json.dumps({"endpoint": entry.endpoint, "data": data})
+        log_lines.append(f"{ts} {line}\n")
 
     return render_template(
         "debug.html", env_info=env_info, log_lines=log_lines, latest=latest_data
@@ -2782,12 +2779,12 @@ def migrate_files_to_admin(admin_name, dry_run):
         StatisticsEntry,
     )
 
-    admin = User.query.filter(
-        ((User.username_slug == admin_name) | (User.email == admin_name))
-        & (User.role == "admin")
-    ).first()
-    if not admin:
+    admins = User.query.filter_by(username_slug=admin_name, role="admin").all()
+    if len(admins) == 0:
         raise click.ClickException("Admin user not found")
+    if len(admins) > 1:
+        raise click.ClickException("Multiple admin users found")
+    admin = admins[0]
 
     data_dir = Path(DATA_DIR)
     report = defaultdict(lambda: {"imported": 0, "skipped": 0, "errors": 0})
