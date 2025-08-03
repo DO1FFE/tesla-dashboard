@@ -1311,7 +1311,7 @@ def get_vehicle_list():
 def reverse_geocode(lat, lon):
     """Return address information for given coordinates using OpenStreetMap."""
 
-    headers = {"User-Agent": "TeslaDashboard/1.0"}
+    headers = {"User-Agent": "TeslaDashboard/2.0"}
     try:
         url = "https://nominatim.openstreetmap.org/reverse"
         params = {"lat": lat, "lon": lon, "format": "jsonv2"}

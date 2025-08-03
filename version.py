@@ -11,6 +11,6 @@ def get_version():
             .decode()
             .strip()
         )
-        return f"1.0.{count}"
+        return f"2.0.{count}"
     except Exception:
         return "0.0.0"

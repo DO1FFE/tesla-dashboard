@@ -101,7 +101,7 @@ Clients periodically fetch `/api/version` and reload the page when the version c
 so the browser always shows the latest release.
 The footer also includes a copyright notice:
 ```
-Tesla-Dashboard Version 1.0.X - © <current year> Erik Schauer, do1ffe@darc.de
+Tesla-Dashboard Version 2.0.X - © <current year> Erik Schauer, do1ffe@darc.de
 ```
 
 ## Reference
