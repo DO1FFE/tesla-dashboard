@@ -57,7 +57,12 @@ db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 
-from models import User  # noqa: E402  pylint: disable=wrong-import-position
+from models import (  # noqa: E402  pylint: disable=wrong-import-position
+    User,
+    ConfigOption,
+    ConfigVisibility,
+)
+from functools import wraps
 
 
 @login_manager.user_loader
@@ -67,6 +72,41 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 __version__ = get_version()
 CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
+
+SUBSCRIPTION_LEVELS = {"free": 0, "basic": 1, "pro": 2}
+
+
+def _get_visibility(key):
+    """Return visibility settings for a config option ``key``."""
+    return (
+        ConfigVisibility.query.join(ConfigOption)
+        .filter(ConfigOption.key == key)
+        .first()
+    )
+
+
+def requires_subscription(level):
+    """Ensure the current user has at least ``level`` subscription."""
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            visibility = _get_visibility(func.__name__)
+            if visibility and visibility.always_active:
+                return func(*args, **kwargs)
+            required = level
+            if visibility:
+                required = visibility.required_subscription or level
+            user_level = getattr(current_user, "subscription", "free")
+            if SUBSCRIPTION_LEVELS.get(user_level, 0) < SUBSCRIPTION_LEVELS.get(
+                required, 0
+            ):
+                abort(403)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 @app.context_processor
@@ -1884,6 +1924,16 @@ def config_page():
     cfg = load_config()
     if request.method == "POST":
         for item in CONFIG_ITEMS:
+            vis = _get_visibility(item["id"])
+            required = vis.required_subscription if vis else "free"
+            locked = False
+            if not (vis and vis.always_active):
+                user_level = getattr(current_user, "subscription", "free")
+                locked = SUBSCRIPTION_LEVELS.get(user_level, 0) < SUBSCRIPTION_LEVELS.get(
+                    required, 0
+                )
+            if locked:
+                continue
             cfg[item["id"]] = item["id"] in request.form
         callsign = request.form.get("aprs_callsign", "").strip()
         passcode = request.form.get("aprs_passcode", "").strip()
@@ -1999,7 +2049,20 @@ def config_page():
             cfg.pop("api_interval_idle")
         save_config(cfg)
     prefix = f"/{g.username_slug}" if hasattr(g, "username_slug") else ""
-    return render_template("config.html", items=CONFIG_ITEMS, config=cfg, prefix=prefix)
+    user_level = getattr(current_user, "subscription", "free")
+    items = []
+    for item in CONFIG_ITEMS:
+        vis = _get_visibility(item["id"])
+        required = vis.required_subscription if vis else "free"
+        always = vis.always_active if vis else False
+        locked = not always and SUBSCRIPTION_LEVELS.get(user_level, 0) < SUBSCRIPTION_LEVELS.get(
+            required, 0
+        )
+        item_copy = item.copy()
+        item_copy["required_subscription"] = required
+        item_copy["locked"] = locked
+        items.append(item_copy)
+    return render_template("config.html", items=items, config=cfg, prefix=prefix)
 
 
 @app.route("/error")
