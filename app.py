@@ -16,7 +16,7 @@ from flask import (
     g,
     Blueprint,
 )
-from flask_sqlalchemy import SQLAlchemy
+from extensions import db
 from flask_login import (
     LoginManager,
     login_user,
@@ -56,7 +56,7 @@ except ImportError:
 load_dotenv()
 app = Flask(__name__)
 app.config.from_object("config")
-db = SQLAlchemy(app)
+db.init_app(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 
