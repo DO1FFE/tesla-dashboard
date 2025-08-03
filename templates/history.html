@@ -29,12 +29,12 @@
     {% set show_hist = config.get('menu-history', True) %}
     {% if config.get('page-menu', True) and (show_dash or show_stat or show_hist) %}
     <nav id="page-menu">
-        {% if show_dash %}<a class="menu-button" href="/">Dashboard</a>{% endif %}
-        {% if show_stat %}<a class="menu-button" href="/statistik">Statistik</a>{% endif %}
-        {% if show_hist %}<a class="menu-button" href="/history">History</a>{% endif %}
+        {% if show_dash %}<a class="menu-button" href="{{ prefix }}/">Dashboard</a>{% endif %}
+        {% if show_stat %}<a class="menu-button" href="{{ prefix }}/statistik">Statistik</a>{% endif %}
+        {% if show_hist %}<a class="menu-button" href="{{ prefix }}/history">History</a>{% endif %}
     </nav>
     {% endif %}
-    <form id="trip-form" method="get" action="/history">
+    <form id="trip-form" method="get" action="{{ prefix }}/history">
         <label for="file">Fahrt auswählen:</label>
         <select id="file" name="file" onchange="document.getElementById('trip-form').submit();">
             <optgroup label="Tage">
@@ -59,7 +59,7 @@
         </select>
     </form>
     {% if selected %}
-    <a id="receipt-link" class="menu-button" href="/taxameter/trip_receipt?file={{ selected }}">Quittung</a>
+    <a id="receipt-link" class="menu-button" href="{{ prefix }}/taxameter/trip_receipt?file={{ selected }}">Quittung</a>
     {% endif %}
     <div id="map">
         <div id="slider-container">
@@ -99,6 +99,9 @@
     <script>
         var tripPath = {{ path|tojson }};
         var tripHeading = {{ heading|tojson }};
+    </script>
+    <script>
+        window.BASE_PATH = "{{ prefix }}";
     </script>
     <script src="/static/js/history.js"></script>
 </body>

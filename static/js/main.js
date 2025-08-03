@@ -1,5 +1,6 @@
 var currentVehicle = null;
 var APP_VERSION = window.APP_VERSION || null;
+var BASE_PATH = window.BASE_PATH || '';
 var MILES_TO_KM = 1.60934;
 var announcementRaw = '';
 var announcementList = [];
@@ -228,7 +229,7 @@ function updateHeader(data) {
 }
 
 function fetchVehicles() {
-    $.getJSON('/api/vehicles', function(resp) {
+    $.getJSON(BASE_PATH + '/api/vehicles', function(resp) {
         var vehicles = Array.isArray(resp) ? resp : [];
         var $select = $('#vehicle-select');
         var $label = $('label[for="vehicle-select"]');
@@ -1120,7 +1121,7 @@ function updateOfflineInfo(state, serviceMode, serviceModePlus) {
 }
 
 function updateClientCount() {
-    $.getJSON('/api/clients', function(resp) {
+    $.getJSON(BASE_PATH + '/api/clients', function(resp) {
         if (typeof resp.clients === 'number') {
             $('#client-count').text('Clients: ' + resp.clients);
         }
@@ -1158,7 +1159,7 @@ function updateAnnouncement() {
 }
 
 function fetchAnnouncement() {
-    $.getJSON('/api/announcement', function(resp) {
+    $.getJSON(BASE_PATH + '/api/announcement', function(resp) {
         if (typeof resp.announcement !== 'undefined') {
             if (resp.announcement !== announcementRaw) {
                 announcementRaw = resp.announcement;
@@ -1173,7 +1174,7 @@ function fetchAnnouncement() {
 function fetchAddress(lat, lon) {
     if (lat == null || lon == null) return;
     if (lastAddressLat === lat && lastAddressLng === lon) return;
-    $.getJSON('/api/reverse_geocode', {lat: lat, lon: lon}, function(resp) {
+    $.getJSON(BASE_PATH + '/api/reverse_geocode', {lat: lat, lon: lon}, function(resp) {
         var addr = null;
         if (resp.raw && resp.raw.address) {
             var a = resp.raw.address;
@@ -1263,11 +1264,11 @@ function startStream() {
             eventSource = null;
         }
         if (!currentVehicle) return;
-        $.getJSON('/api/state/' + currentVehicle, function(resp) {
+        $.getJSON(BASE_PATH + '/api/state/' + currentVehicle, function(resp) {
             var st = resp.state;
             updateVehicleState(st);
             updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
-            $.getJSON('/api/data/' + currentVehicle, function(data) {
+            $.getJSON(BASE_PATH + '/api/data/' + currentVehicle, function(data) {
                 if (data && !data.error) {
                     handleData(data);
                 }
@@ -1292,12 +1293,12 @@ function startStreamIfOnline() {
         return;
     }
     showLoading();
-    $.getJSON('/api/state/' + currentVehicle, function(resp) {
+    $.getJSON(BASE_PATH + '/api/state/' + currentVehicle, function(resp) {
         var st = resp.state;
         updateVehicleState(st);
         updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
         startStream();
-        $.getJSON('/api/data/' + currentVehicle, function(data) {
+        $.getJSON(BASE_PATH + '/api/data/' + currentVehicle, function(data) {
             if (data && !data.error) {
                 handleData(data);
             }
@@ -1305,7 +1306,7 @@ function startStreamIfOnline() {
     });
 }
 
-$.getJSON('/api/config', function(cfg) {
+$.getJSON(BASE_PATH + '/api/config', function(cfg) {
     applyConfig(cfg);
     lastConfigJSON = JSON.stringify(cfg || {});
     if (cfg) {
@@ -1316,7 +1317,7 @@ $.getJSON('/api/config', function(cfg) {
 });
 
 function fetchConfig() {
-    $.getJSON('/api/config', function(cfg) {
+    $.getJSON(BASE_PATH + '/api/config', function(cfg) {
         var json = JSON.stringify(cfg || {});
         if (json !== lastConfigJSON) {
             if (cfg && (cfg.api_interval !== lastApiInterval ||
@@ -1335,7 +1336,7 @@ function fetchConfig() {
 }
 
 function checkAppVersion() {
-    $.getJSON('/api/version', function(resp) {
+    $.getJSON(BASE_PATH + '/api/version', function(resp) {
         if (resp.version && APP_VERSION && resp.version !== APP_VERSION) {
             location.reload(true);
         }
@@ -1364,7 +1365,7 @@ $('#sms-send').on('click', function() {
     }
     $('#sms-status').text('Senden...');
     $.ajax({
-        url: '/api/sms',
+        url: BASE_PATH + '/api/sms',
         method: 'POST',
         contentType: 'application/json',
         data: JSON.stringify({message: msg, name: name}),
