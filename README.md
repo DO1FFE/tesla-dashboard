@@ -1,9 +1,8 @@
 # Tesla Dashboard
 
-This is a simple Flask application that displays real-time data from a Tesla vehicle using the [teslapy](https://github.com/tdorssers/TeslaPy) library.
+This is a simple Flask application that displays real-time data from a Tesla vehicle using the [TeslaPy](https://github.com/tdorssers/TeslaPy) library.
 
 ## Setup
-
 1. Install dependencies:
     ```bash
     pip install -r requirements.txt
@@ -113,3 +112,11 @@ The API reports doors, windows, trunk and frunk using numeric values. These
 values are `0` when the part is closed and `1` (or any non-zero value) when the
 part is open. The dashboard therefore treats any non-zero value as "open" to
 handle potential future variations.
+
+## Development
+
+Run the test suite with:
+
+```bash
+pytest -q
+```
