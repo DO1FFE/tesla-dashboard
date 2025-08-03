@@ -2766,8 +2766,10 @@ app.register_blueprint(auth_bp)
 def migrate_files_to_admin(admin_name, dry_run):
     """Import legacy data files into the database for the given admin user."""
     from pathlib import Path
-    import json
     from collections import defaultdict
+    import json
+    import csv
+    from sqlalchemy import or_
     from models import (
         User,
         Vehicle,
@@ -2779,15 +2781,17 @@ def migrate_files_to_admin(admin_name, dry_run):
         StatisticsEntry,
     )
 
-    admins = User.query.filter_by(username_slug=admin_name, role="admin").all()
-    if len(admins) == 0:
+    admin = (
+        User.query.filter(
+            or_(User.username_slug == admin_name, User.email == admin_name),
+            User.role == "admin",
+        ).one_or_none()
+    )
+    if not admin:
         raise click.ClickException("Admin user not found")
-    if len(admins) > 1:
-        raise click.ClickException("Multiple admin users found")
-    admin = admins[0]
 
     data_dir = Path(DATA_DIR)
-    report = defaultdict(lambda: {"imported": 0, "skipped": 0, "errors": 0})
+    report = defaultdict(lambda: {"imported": 0, "skipped": 0, "deleted": 0})
 
     def _resolve_vehicle(ext_id):
         veh = Vehicle.query.filter_by(vehicle_id=str(ext_id)).first()
@@ -2810,18 +2814,29 @@ def migrate_files_to_admin(admin_name, dry_run):
         dt = _parse_log_time(ts)
         return dt, data
 
+    def _vehicle_from_path(path):
+        rel = path.relative_to(data_dir)
+        if not rel.parts:
+            return None
+        ext_id = rel.parts[0]
+        if ext_id == "default":
+            return None
+        return _resolve_vehicle(ext_id)
+
     # state.log
     for path in data_dir.rglob("state.log"):
         stats = report["state.log"]
+        vid = _vehicle_from_path(path)
+        if vid is None:
+            stats["skipped"] += 1
+            continue
         entries = []
         try:
             with path.open("r", encoding="utf-8") as f:
                 for line in f:
                     try:
                         dt, data = _parse_line(line)
-                        vid = _resolve_vehicle(data.get("vehicle_id"))
-                        if vid is None or dt is None:
-                            stats["skipped"] += 1
+                        if dt is None:
                             continue
                         entries.append(
                             VehicleState(
@@ -2832,9 +2847,9 @@ def migrate_files_to_admin(admin_name, dry_run):
                             )
                         )
                     except Exception:
-                        stats["errors"] += 1
+                        pass
         except Exception:
-            stats["errors"] += 1
+            stats["skipped"] += 1
             continue
         if not dry_run:
             try:
@@ -2845,28 +2860,29 @@ def migrate_files_to_admin(admin_name, dry_run):
                         obj,
                     ):
                         stats["imported"] += 1
-                    else:
-                        stats["skipped"] += 1
                 db.session.commit()
                 path.unlink()
+                stats["deleted"] += 1
             except Exception:
                 db.session.rollback()
-                stats["errors"] += 1
+                stats["skipped"] += 1
         else:
             stats["imported"] += len(entries)
 
     # energy.log
     for path in data_dir.rglob("energy.log"):
         stats = report["energy.log"]
+        vid = _vehicle_from_path(path)
+        if vid is None:
+            stats["skipped"] += 1
+            continue
         entries = []
         try:
             with path.open("r", encoding="utf-8") as f:
                 for line in f:
                     try:
                         dt, data = _parse_line(line)
-                        vid = _resolve_vehicle(data.get("vehicle_id"))
-                        if vid is None or dt is None:
-                            stats["skipped"] += 1
+                        if dt is None:
                             continue
                         entries.append(
                             EnergyLog(
@@ -2877,9 +2893,9 @@ def migrate_files_to_admin(admin_name, dry_run):
                             )
                         )
                     except Exception:
-                        stats["errors"] += 1
+                        pass
         except Exception:
-            stats["errors"] += 1
+            stats["skipped"] += 1
             continue
         if not dry_run:
             try:
@@ -2890,28 +2906,29 @@ def migrate_files_to_admin(admin_name, dry_run):
                         obj,
                     ):
                         stats["imported"] += 1
-                    else:
-                        stats["skipped"] += 1
                 db.session.commit()
                 path.unlink()
+                stats["deleted"] += 1
             except Exception:
                 db.session.rollback()
-                stats["errors"] += 1
+                stats["skipped"] += 1
         else:
             stats["imported"] += len(entries)
 
     # sms.log
     for path in data_dir.rglob("sms.log"):
         stats = report["sms.log"]
+        vid = _vehicle_from_path(path)
+        if vid is None:
+            stats["skipped"] += 1
+            continue
         entries = []
         try:
             with path.open("r", encoding="utf-8") as f:
                 for line in f:
                     try:
                         dt, data = _parse_line(line)
-                        vid = _resolve_vehicle(data.get("vehicle_id"))
-                        if vid is None or dt is None:
-                            stats["skipped"] += 1
+                        if dt is None:
                             continue
                         entries.append(
                             SmsLog(
@@ -2923,9 +2940,9 @@ def migrate_files_to_admin(admin_name, dry_run):
                             )
                         )
                     except Exception:
-                        stats["errors"] += 1
+                        pass
         except Exception:
-            stats["errors"] += 1
+            stats["skipped"] += 1
             continue
         if not dry_run:
             try:
@@ -2936,19 +2953,22 @@ def migrate_files_to_admin(admin_name, dry_run):
                         obj,
                     ):
                         stats["imported"] += 1
-                    else:
-                        stats["skipped"] += 1
                 db.session.commit()
                 path.unlink()
+                stats["deleted"] += 1
             except Exception:
                 db.session.rollback()
-                stats["errors"] += 1
+                stats["skipped"] += 1
         else:
             stats["imported"] += len(entries)
 
     # api-liste.txt
     for path in data_dir.rglob("api-liste.txt"):
         stats = report["api-liste.txt"]
+        vid = _vehicle_from_path(path)
+        if vid is None:
+            stats["skipped"] += 1
+            continue
         entries = []
         try:
             with path.open("r", encoding="utf-8") as f:
@@ -2959,11 +2979,6 @@ def migrate_files_to_admin(admin_name, dry_run):
                     try:
                         data = json.loads(line)
                     except Exception:
-                        stats["skipped"] += 1
-                        continue
-                    vid = _resolve_vehicle(data.get("vehicle_id"))
-                    if vid is None:
-                        stats["skipped"] += 1
                         continue
                     entries.append(
                         ApiLog(
@@ -2974,7 +2989,7 @@ def migrate_files_to_admin(admin_name, dry_run):
                         )
                     )
         except Exception:
-            stats["errors"] += 1
+            stats["skipped"] += 1
             continue
         if not dry_run:
             try:
@@ -2985,46 +3000,42 @@ def migrate_files_to_admin(admin_name, dry_run):
                         obj,
                     ):
                         stats["imported"] += 1
-                    else:
-                        stats["skipped"] += 1
                 db.session.commit()
                 path.unlink()
+                stats["deleted"] += 1
             except Exception:
                 db.session.rollback()
-                stats["errors"] += 1
+                stats["skipped"] += 1
         else:
             stats["imported"] += len(entries)
 
     # trip files
-    for path in data_dir.rglob("trip_*.json"):
-        stats = report["trip_*.json"]
-        try:
-            data = json.loads(path.read_text("utf-8"))
-        except Exception:
-            stats["errors"] += 1
-            continue
-        rel = path.relative_to(data_dir)
-        vid = _resolve_vehicle(
-            data.get("vehicle_id") or (rel.parts[0] if rel.parts else None)
-        )
+    for path in data_dir.rglob("trips/trip_*.csv"):
+        stats = report["trips/trip_*.csv"]
+        vid = _vehicle_from_path(path)
         if vid is None:
             stats["skipped"] += 1
             continue
         try:
-            started = datetime.fromisoformat(str(data.get("started_at")))
+            with path.open("r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                row = next(reader, None)
+            if row is None:
+                stats["skipped"] += 1
+                continue
+            started = datetime.fromisoformat(row.get("started_at")) if row.get("started_at") else datetime.now(timezone.utc)
+            ended = datetime.fromisoformat(row.get("ended_at")) if row.get("ended_at") else None
+            distance = float(row.get("distance_km", 0.0))
+            obj = TripEntry(
+                user_id=admin.id,
+                vehicle_id=vid,
+                started_at=started,
+                ended_at=ended,
+                distance_km=distance,
+            )
         except Exception:
-            started = datetime.now(timezone.utc)
-        try:
-            ended = datetime.fromisoformat(str(data.get("ended_at"))) if data.get("ended_at") else None
-        except Exception:
-            ended = None
-        obj = TripEntry(
-            user_id=admin.id,
-            vehicle_id=vid,
-            started_at=started,
-            ended_at=ended,
-            distance_km=float(data.get("distance_km", 0.0)),
-        )
+            stats["skipped"] += 1
+            continue
         if not dry_run:
             try:
                 if _upsert(
@@ -3033,28 +3044,29 @@ def migrate_files_to_admin(admin_name, dry_run):
                     obj,
                 ):
                     stats["imported"] += 1
-                else:
-                    stats["skipped"] += 1
                 db.session.commit()
                 path.unlink()
+                stats["deleted"] += 1
             except Exception:
                 db.session.rollback()
-                stats["errors"] += 1
+                stats["skipped"] += 1
         else:
             stats["imported"] += 1
 
     # statistik.log
     for path in data_dir.rglob("statistik.log"):
         stats = report["statistik.log"]
+        vid = _vehicle_from_path(path)
+        if vid is None:
+            stats["skipped"] += 1
+            continue
         entries = []
         try:
             with path.open("r", encoding="utf-8") as f:
                 for line in f:
                     try:
                         dt, data = _parse_line(line)
-                        vid = _resolve_vehicle(data.get("vehicle_id"))
-                        if vid is None or dt is None:
-                            stats["skipped"] += 1
+                        if dt is None:
                             continue
                         entries.append(
                             StatisticsEntry(
@@ -3066,9 +3078,9 @@ def migrate_files_to_admin(admin_name, dry_run):
                             )
                         )
                     except Exception:
-                        stats["errors"] += 1
+                        pass
         except Exception:
-            stats["errors"] += 1
+            stats["skipped"] += 1
             continue
         if not dry_run:
             try:
@@ -3079,29 +3091,31 @@ def migrate_files_to_admin(admin_name, dry_run):
                         obj,
                     ):
                         stats["imported"] += 1
-                    else:
-                        stats["skipped"] += 1
                 db.session.commit()
                 path.unlink()
+                stats["deleted"] += 1
             except Exception:
                 db.session.rollback()
-                stats["errors"] += 1
+                stats["skipped"] += 1
         else:
             stats["imported"] += len(entries)
 
     # summary
-    total = {"imported": 0, "skipped": 0, "errors": 0}
+    total = {"imported": 0, "skipped": 0, "deleted": 0}
     for name, info in report.items():
         click.echo(
-            f"{name}: imported={info['imported']} skipped={info['skipped']} errors={info['errors']}"
+            f"{name}: imported={info['imported']} skipped={info['skipped']} deleted={info['deleted']}"
         )
         for k in total:
             total[k] += info[k]
     click.echo(
-        f"Total: imported={total['imported']} skipped={total['skipped']} errors={total['errors']}"
+        f"Total: imported={total['imported']} skipped={total['skipped']} deleted={total['deleted']}"
     )
-    if total["errors"]:
-        raise click.ClickException("Errors occurred during import")
+    if not dry_run:
+        # remove empty directories
+        for p in sorted(data_dir.rglob("*"), reverse=True):
+            if p.is_dir() and not any(p.iterdir()):
+                p.rmdir()
 
 
 @app.cli.command("ensure-admin")
