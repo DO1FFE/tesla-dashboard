@@ -1606,12 +1606,15 @@ def logout():
 
 @app.route("/")
 def index():
+    admin = User.query.filter_by(role="admin").first()
     cfg = load_config()
     return render_template(
         "index.html",
         version=__version__,
         year=CURRENT_YEAR,
         config=cfg,
+        show_banner=not current_user.is_authenticated,
+        admin=admin,
     )
 
 

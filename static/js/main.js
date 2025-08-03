@@ -1393,3 +1393,15 @@ $('#sms-send').on('click', function() {
 $('#alarm-close').on('click', function() {
     $('#alarm-popup').removeClass('show');
 });
+
+var shareBtn = document.getElementById('share-btn');
+if (shareBtn && navigator.clipboard) {
+    shareBtn.addEventListener('click', function() {
+        navigator.clipboard.writeText(window.location.href).then(function() {
+            shareBtn.textContent = 'Link kopiert!';
+            setTimeout(function() {
+                shareBtn.textContent = 'Teilen';
+            }, 2000);
+        });
+    });
+}

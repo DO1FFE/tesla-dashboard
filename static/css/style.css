@@ -1089,3 +1089,13 @@ select {
   right: 0;
   text-align: center;
 }
+
+#share-btn {
+  margin-left: 10px;
+}
+
+#public-banner {
+  text-align: center;
+  margin-top: 10px;
+  font-size: 0.9em;
+}
