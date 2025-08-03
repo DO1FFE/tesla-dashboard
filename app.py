@@ -2702,6 +2702,350 @@ user_bp.add_url_rule("/receipts/<path:filename>", view_func=receipts_file)
 app.register_blueprint(user_bp)
 
 
+@app.cli.command("migrate-files-to-admin")
+@click.option("--admin", "admin_name", required=True, help="Admin username or email")
+@click.option("--dry-run", is_flag=True, help="Do not write to the database or delete files")
+def migrate_files_to_admin(admin_name, dry_run):
+    """Import legacy data files into the database for the given admin user."""
+    from pathlib import Path
+    import json
+    from collections import defaultdict
+    from models import (
+        User,
+        Vehicle,
+        VehicleState,
+        EnergyLog,
+        SmsLog,
+        ApiLog,
+        TripEntry,
+        StatisticsEntry,
+    )
+
+    admin = User.query.filter(
+        ((User.username_slug == admin_name) | (User.email == admin_name))
+        & (User.role == "admin")
+    ).first()
+    if not admin:
+        raise click.ClickException("Admin user not found")
+
+    data_dir = Path(DATA_DIR)
+    report = defaultdict(lambda: {"imported": 0, "skipped": 0, "errors": 0})
+
+    def _resolve_vehicle(ext_id):
+        veh = Vehicle.query.filter_by(vehicle_id=str(ext_id)).first()
+        return veh.id if veh else None
+
+    def _upsert(model, unique_fields, obj):
+        filters = {k: getattr(obj, k) for k in unique_fields}
+        exists = model.query.filter_by(**filters).first()
+        if exists:
+            return False
+        db.session.add(obj)
+        return True
+
+    def _parse_line(line):
+        idx = line.find("{")
+        if idx == -1:
+            return None, None
+        ts = line[:idx].strip()
+        data = json.loads(line[idx:])
+        dt = _parse_log_time(ts)
+        return dt, data
+
+    # state.log
+    for path in data_dir.rglob("state.log"):
+        stats = report["state.log"]
+        entries = []
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        dt, data = _parse_line(line)
+                        vid = _resolve_vehicle(data.get("vehicle_id"))
+                        if vid is None or dt is None:
+                            stats["skipped"] += 1
+                            continue
+                        entries.append(
+                            VehicleState(
+                                user_id=admin.id,
+                                vehicle_id=vid,
+                                state=data.get("state"),
+                                created_at=dt,
+                            )
+                        )
+                    except Exception:
+                        stats["errors"] += 1
+        except Exception:
+            stats["errors"] += 1
+            continue
+        if not dry_run:
+            try:
+                for obj in entries:
+                    if _upsert(
+                        VehicleState,
+                        ("user_id", "vehicle_id", "created_at", "state"),
+                        obj,
+                    ):
+                        stats["imported"] += 1
+                    else:
+                        stats["skipped"] += 1
+                db.session.commit()
+                path.unlink()
+            except Exception:
+                db.session.rollback()
+                stats["errors"] += 1
+        else:
+            stats["imported"] += len(entries)
+
+    # energy.log
+    for path in data_dir.rglob("energy.log"):
+        stats = report["energy.log"]
+        entries = []
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        dt, data = _parse_line(line)
+                        vid = _resolve_vehicle(data.get("vehicle_id"))
+                        if vid is None or dt is None:
+                            stats["skipped"] += 1
+                            continue
+                        entries.append(
+                            EnergyLog(
+                                user_id=admin.id,
+                                vehicle_id=vid,
+                                added_energy=float(data.get("added_energy", 0.0)),
+                                created_at=dt,
+                            )
+                        )
+                    except Exception:
+                        stats["errors"] += 1
+        except Exception:
+            stats["errors"] += 1
+            continue
+        if not dry_run:
+            try:
+                for obj in entries:
+                    if _upsert(
+                        EnergyLog,
+                        ("user_id", "vehicle_id", "created_at"),
+                        obj,
+                    ):
+                        stats["imported"] += 1
+                    else:
+                        stats["skipped"] += 1
+                db.session.commit()
+                path.unlink()
+            except Exception:
+                db.session.rollback()
+                stats["errors"] += 1
+        else:
+            stats["imported"] += len(entries)
+
+    # sms.log
+    for path in data_dir.rglob("sms.log"):
+        stats = report["sms.log"]
+        entries = []
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        dt, data = _parse_line(line)
+                        vid = _resolve_vehicle(data.get("vehicle_id"))
+                        if vid is None or dt is None:
+                            stats["skipped"] += 1
+                            continue
+                        entries.append(
+                            SmsLog(
+                                user_id=admin.id,
+                                vehicle_id=vid,
+                                message=data.get("message", ""),
+                                success=bool(data.get("success")),
+                                created_at=dt,
+                            )
+                        )
+                    except Exception:
+                        stats["errors"] += 1
+        except Exception:
+            stats["errors"] += 1
+            continue
+        if not dry_run:
+            try:
+                for obj in entries:
+                    if _upsert(
+                        SmsLog,
+                        ("user_id", "vehicle_id", "created_at", "message"),
+                        obj,
+                    ):
+                        stats["imported"] += 1
+                    else:
+                        stats["skipped"] += 1
+                db.session.commit()
+                path.unlink()
+            except Exception:
+                db.session.rollback()
+                stats["errors"] += 1
+        else:
+            stats["imported"] += len(entries)
+
+    # api-liste.txt
+    for path in data_dir.rglob("api-liste.txt"):
+        stats = report["api-liste.txt"]
+        entries = []
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except Exception:
+                        stats["skipped"] += 1
+                        continue
+                    vid = _resolve_vehicle(data.get("vehicle_id"))
+                    if vid is None:
+                        stats["skipped"] += 1
+                        continue
+                    entries.append(
+                        ApiLog(
+                            user_id=admin.id,
+                            vehicle_id=vid,
+                            endpoint=data.get("endpoint", ""),
+                            data=json.dumps(data.get("data")),
+                        )
+                    )
+        except Exception:
+            stats["errors"] += 1
+            continue
+        if not dry_run:
+            try:
+                for obj in entries:
+                    if _upsert(
+                        ApiLog,
+                        ("user_id", "vehicle_id", "endpoint"),
+                        obj,
+                    ):
+                        stats["imported"] += 1
+                    else:
+                        stats["skipped"] += 1
+                db.session.commit()
+                path.unlink()
+            except Exception:
+                db.session.rollback()
+                stats["errors"] += 1
+        else:
+            stats["imported"] += len(entries)
+
+    # trip files
+    for path in data_dir.rglob("trip_*.json"):
+        stats = report["trip_*.json"]
+        try:
+            data = json.loads(path.read_text("utf-8"))
+        except Exception:
+            stats["errors"] += 1
+            continue
+        rel = path.relative_to(data_dir)
+        vid = _resolve_vehicle(
+            data.get("vehicle_id") or (rel.parts[0] if rel.parts else None)
+        )
+        if vid is None:
+            stats["skipped"] += 1
+            continue
+        try:
+            started = datetime.fromisoformat(str(data.get("started_at")))
+        except Exception:
+            started = datetime.now(timezone.utc)
+        try:
+            ended = datetime.fromisoformat(str(data.get("ended_at"))) if data.get("ended_at") else None
+        except Exception:
+            ended = None
+        obj = TripEntry(
+            user_id=admin.id,
+            vehicle_id=vid,
+            started_at=started,
+            ended_at=ended,
+            distance_km=float(data.get("distance_km", 0.0)),
+        )
+        if not dry_run:
+            try:
+                if _upsert(
+                    TripEntry,
+                    ("user_id", "vehicle_id", "started_at"),
+                    obj,
+                ):
+                    stats["imported"] += 1
+                else:
+                    stats["skipped"] += 1
+                db.session.commit()
+                path.unlink()
+            except Exception:
+                db.session.rollback()
+                stats["errors"] += 1
+        else:
+            stats["imported"] += 1
+
+    # statistik.log
+    for path in data_dir.rglob("statistik.log"):
+        stats = report["statistik.log"]
+        entries = []
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        dt, data = _parse_line(line)
+                        vid = _resolve_vehicle(data.get("vehicle_id"))
+                        if vid is None or dt is None:
+                            stats["skipped"] += 1
+                            continue
+                        entries.append(
+                            StatisticsEntry(
+                                user_id=admin.id,
+                                vehicle_id=vid,
+                                name=data.get("name", ""),
+                                value=float(data.get("value", 0.0)),
+                                created_at=dt,
+                            )
+                        )
+                    except Exception:
+                        stats["errors"] += 1
+        except Exception:
+            stats["errors"] += 1
+            continue
+        if not dry_run:
+            try:
+                for obj in entries:
+                    if _upsert(
+                        StatisticsEntry,
+                        ("user_id", "vehicle_id", "created_at", "name"),
+                        obj,
+                    ):
+                        stats["imported"] += 1
+                    else:
+                        stats["skipped"] += 1
+                db.session.commit()
+                path.unlink()
+            except Exception:
+                db.session.rollback()
+                stats["errors"] += 1
+        else:
+            stats["imported"] += len(entries)
+
+    # summary
+    total = {"imported": 0, "skipped": 0, "errors": 0}
+    for name, info in report.items():
+        click.echo(
+            f"{name}: imported={info['imported']} skipped={info['skipped']} errors={info['errors']}"
+        )
+        for k in total:
+            total[k] += info[k]
+    click.echo(
+        f"Total: imported={total['imported']} skipped={total['skipped']} errors={total['errors']}"
+    )
+    if total["errors"]:
+        raise click.ClickException("Errors occurred during import")
+
+
 @app.cli.command("ensure-admin")
 @click.argument("email")
 @click.argument("username")
