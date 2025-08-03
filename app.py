@@ -10,7 +10,6 @@ from flask import (
     jsonify,
     Response,
     request,
-    send_from_directory,
     abort,
     url_for,
     redirect,
@@ -32,6 +31,8 @@ import requests
 from dotenv import load_dotenv
 from version import get_version
 import qrcode
+from io import BytesIO
+import base64
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import stripe
@@ -71,6 +72,7 @@ from models import (  # noqa: E402  pylint: disable=wrong-import-position
     ApiLog,
     TripEntry,
     StatisticsEntry,
+    TaximeterRide,
 )
 from functools import wraps
 from views.auth import auth_bp
@@ -216,20 +218,6 @@ def vehicle_dir(vehicle_id):
     if vehicle_id is None:
         raise ValueError("vehicle_id required")
     path = os.path.join(DATA_DIR, str(vehicle_id))
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
-def trip_dir(vehicle_id):
-    """Return directory holding trip CSV files for ``vehicle_id``."""
-    path = os.path.join(vehicle_dir(vehicle_id), "trips")
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
-def receipt_dir():
-    """Directory for stored taximeter receipts."""
-    path = os.path.join(DATA_DIR, "receipts")
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -419,8 +407,6 @@ subscribers = {}
 # Variables tracking the current trip and parking status.  They are shared
 # between helper functions and therefore need module level defaults.
 trip_path = []
-current_trip_file = None
-current_trip_date = None
 drive_pause_ms = None
 park_start_ms = None
 last_shift_state = None
@@ -452,13 +438,7 @@ CONFIG_ITEMS = [
 
 
 def load_config():
-    try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-            if isinstance(cfg, dict):
-                return cfg
-    except Exception:
-        pass
+    """Load configuration (file access removed)."""
     return {}
 
 
@@ -542,12 +522,8 @@ def get_news_events_info():
 
 
 def _load_parktime():
-    """Load the last park timestamp from ``parktime.json``."""
-    try:
-        with open(PARKTIME_FILE, "r", encoding="utf-8") as f:
-            return int(json.load(f))
-    except Exception:
-        return None
+    """Load the last park timestamp (file access removed)."""
+    return None
 
 
 def _save_parktime(ts):
@@ -600,74 +576,41 @@ def _log_trip_point(
     return
 
 def track_drive_path(vehicle_data):
-    """Maintain the current trip path and log points when driving."""
-    global trip_path, current_trip_file, current_trip_date, drive_pause_ms
-    drive = (
-        vehicle_data.get("drive_state", {}) if isinstance(vehicle_data, dict) else {}
-    )
+    """Maintain the current trip path in memory."""
+    global trip_path, drive_pause_ms
+    drive = vehicle_data.get("drive_state", {}) if isinstance(vehicle_data, dict) else {}
     shift = drive.get("shift_state")
     lat = drive.get("latitude")
     lon = drive.get("longitude")
     ts = drive.get("timestamp") or drive.get("gps_as_of")
-    speed = drive.get("speed")
-    power = drive.get("power")
-    heading = drive.get("heading")
     if ts and ts < 1e12:
         ts = int(ts * 1000)
     if shift in (None, "P"):
         if drive_pause_ms is None:
             drive_pause_ms = ts if ts is not None else int(time.time() * 1000)
-            if lat is not None and lon is not None and current_trip_file:
-                if ts is None:
-                    ts = int(time.time() * 1000)
-                _log_trip_point(
-                    ts,
-                    lat,
-                    lon,
-                    speed,
-                    power,
-                    heading,
-                    shift,
-                    current_trip_file,
-                )
+            if lat is not None and lon is not None:
+                point = [lat, lon]
+                if not trip_path or trip_path[-1] != point:
+                    trip_path.append(point)
         else:
             if ts is None:
                 ts = int(time.time() * 1000)
             if ts - drive_pause_ms > 600000:
                 trip_path = []
-                current_trip_file = None
-                current_trip_date = None
+                drive_pause_ms = None
         return
     if drive_pause_ms is not None:
         if ts is None:
             ts = int(time.time() * 1000)
         if ts - drive_pause_ms > 600000:
             trip_path = []
-            current_trip_file = None
-            current_trip_date = None
         drive_pause_ms = None
     if lat is not None and lon is not None:
         if ts is None:
             ts = int(time.time() * 1000)
-        vid = vehicle_data.get("id_s") or vehicle_data.get("vehicle_id")
-        date_str = datetime.fromtimestamp(ts / 1000, LOCAL_TZ).strftime("%Y%m%d")
-        if current_trip_file is None or current_trip_date != date_str:
-            current_trip_file = os.path.join(trip_dir(vid), f"trip_{date_str}.csv")
-            current_trip_date = date_str
         point = [lat, lon]
         if not trip_path or trip_path[-1] != point:
             trip_path.append(point)
-            if ts is not None:
-                _log_trip_point(
-                    ts,
-                    lat,
-                    lon,
-                    speed,
-                    power,
-                    heading,
-                    shift,
-                    current_trip_file,
-                )
 
 
 def _log_api_error(exc):
@@ -888,43 +831,16 @@ def send_aprs(vehicle_data):
 
 
 def _get_trip_files(vehicle_id=None):
-    """Return a sorted list of available trip CSV paths."""
-    dirs = []
-    if vehicle_id is None:
-        try:
-            for name in os.listdir(DATA_DIR):
-                if not str(name).isdigit():
-                    continue
-                d = os.path.join(DATA_DIR, name, "trips")
-                if os.path.isdir(d):
-                    dirs.append(d)
-        except Exception:
-            pass
-    else:
-        dirs.append(trip_dir(vehicle_id))
-    files = []
-    for d in dirs:
-        try:
-            for f in os.listdir(d):
-                if f.endswith(".csv"):
-                    files.append(os.path.join(d, f))
-        except Exception:
-            continue
-    files.sort()
-    return files
+    """Return an empty list (legacy trip files removed)."""
+    return []
 
 
 def _get_trip_periods():
-    """Return sorted lists of available weeks and months."""
+    """Return sorted lists of available weeks and months from the database."""
     weeks = set()
     months = set()
-    for path in _get_trip_files():
-        fname = os.path.basename(path)
-        date_str = fname.split("_")[-1].split(".")[0]
-        try:
-            day = datetime.strptime(date_str, "%Y%m%d").date()
-        except Exception:
-            continue
+    for trip in TripEntry.query.all():
+        day = trip.started_at.astimezone(LOCAL_TZ).date()
         iso_year, iso_week, _ = day.isocalendar()
         weeks.add(f"{iso_year}-W{iso_week:02d}")
         months.add(day.strftime("%Y-%m"))
@@ -932,54 +848,13 @@ def _get_trip_periods():
 
 
 def _load_trip_period(prefix, key):
-    """Load all trip points for the given week or month key."""
-    points = []
-    for path in _get_trip_files():
-        fname = os.path.basename(path)
-        date_str = fname.split("_")[-1].split(".")[0]
-        try:
-            day = datetime.strptime(date_str, "%Y%m%d").date()
-        except Exception:
-            continue
-        iso_year, iso_week, _ = day.isocalendar()
-        week_key = f"{iso_year}-W{iso_week:02d}"
-        month_key = day.strftime("%Y-%m")
-        if prefix == "week" and week_key != key:
-            continue
-        if prefix == "month" and month_key != key:
-            continue
-        points.extend(_load_trip(path))
-    return points
+    """Load trip points for a given period (disabled)."""
+    return []
 
 
 def _load_trip(filename):
-    """Load all coordinates with optional speed and power from a trip CSV."""
-    points = []
-    try:
-        with open(filename, "r", encoding="utf-8") as f:
-            for line in f:
-                parts = line.strip().split(",")
-                if len(parts) < 3:
-                    continue
-                ts, lat, lon = parts[:3]
-                speed = parts[3] if len(parts) >= 4 and parts[3] else None
-                power = parts[4] if len(parts) >= 5 and parts[4] else None
-                heading = parts[5] if len(parts) >= 6 and parts[5] else None
-                gear = parts[6] if len(parts) >= 7 and parts[6] else None
-                try:
-                    ts = int(float(ts)) if ts else None
-                    lat = float(lat)
-                    lon = float(lon)
-                    speed = float(speed) if speed is not None else None
-                    power = float(power) if power is not None else None
-                    heading = float(heading) if heading is not None else None
-                    gear = gear if gear is not None else None
-                except Exception:
-                    continue
-                points.append([lat, lon, speed, power, ts, heading, gear])
-    except Exception:
-        pass
-    return points
+    """Load trip data (file access removed)."""
+    return []
 
 
 def _bearing(p1, p2):
@@ -1086,15 +961,10 @@ def _split_trip_segments(filename):
 
 
 def _period_distance(prefix, key):
-    """Return distance in km for a week or month selection."""
+    """Return distance in km for a week or month selection from ``TripEntry``."""
     dist = 0.0
-    for path in _get_trip_files():
-        fname = os.path.basename(path)
-        date_str = fname.split("_")[-1].split(".")[0]
-        try:
-            day = datetime.strptime(date_str, "%Y%m%d").date()
-        except Exception:
-            continue
+    for trip in TripEntry.query.all():
+        day = trip.started_at.astimezone(LOCAL_TZ).date()
         iso_year, iso_week, _ = day.isocalendar()
         week_key = f"{iso_year}-W{iso_week:02d}"
         month_key = day.strftime("%Y-%m")
@@ -1102,7 +972,7 @@ def _period_distance(prefix, key):
             continue
         if prefix == "month" and month_key != key:
             continue
-        dist += _trip_distance(path)
+        dist += float(trip.distance_km or 0.0)
     return dist
 
 
@@ -2434,32 +2304,9 @@ def taxameter_page():
         abort(400)
     cfg = load_config()
     company = cfg.get("taxi_company", "Taxi Schauer")
-    file_paths = [os.path.relpath(p, DATA_DIR) for p in _get_trip_files(vehicle_id)]
-    recent_files = file_paths[-10:]
     file_opts = []
-    for f in recent_files:
-        label = os.path.basename(f).replace("trip_", "").split(".")[0]
-        try:
-            label = datetime.strptime(label, "%Y%m%d").strftime("%Y-%m-%d")
-        except Exception:
-            pass
-        file_opts.append({"value": f, "label": label})
-
-    selected = request.args.get("file")
-    if selected not in file_paths and file_opts:
-        selected = file_opts[-1]["value"]
-
+    selected = None
     trips = []
-    if selected:
-        segs = _split_trip_segments(os.path.join(DATA_DIR, selected))
-        for idx, seg in enumerate(segs, 1):
-            if seg["start"] is None:
-                continue
-            s_dt = datetime.fromtimestamp(seg["start"], LOCAL_TZ)
-            e_dt = datetime.fromtimestamp(seg["end"], LOCAL_TZ)
-            label = f"{s_dt.strftime('%Y-%m-%d %H:%M')} - {e_dt.strftime('%H:%M')}"
-            value = f"file={selected}&segment={idx}"
-            trips.append({"value": value, "label": label})
 
     return render_template(
         "taxameter.html",
@@ -2521,31 +2368,26 @@ def api_taxameter_stop():
     if result:
         company = get_taxi_company()
         slogan = get_taxi_slogan()
-        text = format_receipt(company, result.get("breakdown", {}), result.get("distance", 0.0), slogan)
-        rdir = receipt_dir()
         ride_id = result.get("ride_id")
         if ride_id is not None:
-            txt_path = os.path.join(rdir, f"{ride_id}.txt")
-            with open(txt_path, "w", encoding="utf-8") as f:
-                f.write(text)
-            data_path = os.path.join(rdir, f"{ride_id}.json")
-            with open(data_path, "w", encoding="utf-8") as f:
-                json.dump(
-                    {
-                        "company": company,
-                        "slogan": slogan,
-                        "breakdown": result.get("breakdown", {}),
-                        "distance": result.get("distance", 0.0),
-                        "qr_code": f"/receipts/{ride_id}.png",
-                    },
-                    f,
-                )
+            receipt_data = {
+                "company": company,
+                "slogan": slogan,
+                "breakdown": result.get("breakdown", {}),
+                "distance": result.get("distance", 0.0),
+            }
             url = url_for("taxameter_receipt", ride_id=ride_id, _external=True)
             img = qrcode.make(url)
-            img_path = os.path.join(rdir, f"{ride_id}.png")
-            img.save(img_path)
-            result["qr_code"] = f"/receipts/{ride_id}.png"
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            qr_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            receipt_data["qr_code"] = f"data:image/png;base64,{qr_b64}"
+            result["qr_code"] = receipt_data["qr_code"]
             result["receipt_url"] = url
+            ride = TaximeterRide.query.get(ride_id)
+            if ride:
+                ride.receipt_json = json.dumps(receipt_data)
+                db.session.commit()
         result["company"] = company
         result["slogan"] = slogan
     return jsonify(result or {"active": False})
@@ -2607,29 +2449,20 @@ def api_taxameter_trips():
 
 @app.route("/taxameter/receipt/<int:ride_id>")
 def taxameter_receipt(ride_id):
-    rdir = receipt_dir()
-    json_path = os.path.join(rdir, f"{ride_id}.json")
-    if os.path.exists(json_path):
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return render_template("taxameter_receipt.html", **data)
-        except Exception:
-            pass
-    path = os.path.join(rdir, f"{ride_id}.txt")
+    ride = TaximeterRide.query.get_or_404(ride_id)
+    if not ride.receipt_json:
+        abort(404)
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            text = f.read()
+        data = json.loads(ride.receipt_json)
     except Exception:
         abort(404)
-    return Response(text, mimetype="text/plain")
+    return render_template("taxameter_receipt.html", **data)
 
 
 @app.route("/taxameter/trip_receipt")
 def taxameter_trip_receipt():
     """Create a taximeter receipt for a recorded trip."""
     selected = request.args.get("file")
-    segment_idx = request.args.get("segment")
     if not selected:
         abort(404)
     if selected.startswith("week:"):
@@ -2641,25 +2474,13 @@ def taxameter_trip_receipt():
         dist = _period_distance("month", key)
         wait_time = 0.0
     else:
-        if ".." in selected or not selected.endswith(".csv"):
+        try:
+            trip_id = int(selected)
+        except ValueError:
             abort(404)
-        path = os.path.join(DATA_DIR, selected)
-        if not os.path.exists(path):
-            abort(404)
-        if segment_idx is not None:
-            try:
-                idx = int(segment_idx)
-            except ValueError:
-                abort(404)
-            segments = _split_trip_segments(path)
-            if idx < 1 or idx > len(segments):
-                abort(404)
-            seg = segments[idx - 1]
-            dist = seg["distance"]
-            wait_time = seg["wait"]
-        else:
-            dist = _trip_distance(path)
-            wait_time = 0.0
+        trip = TripEntry.query.get_or_404(trip_id)
+        dist = float(trip.distance_km or 0.0)
+        wait_time = 0.0
     tariff = get_taximeter_tariff()
     tm = Taximeter(lambda _vid: {}, get_taximeter_tariff)
     tm.tariff = tariff
@@ -2676,11 +2497,6 @@ def taxameter_trip_receipt():
         distance=dist,
         qr_code=None,
     )
-
-
-@app.route("/receipts/<path:filename>")
-def receipts_file(filename):
-    return send_from_directory(receipt_dir(), filename)
 
 
 @app.route("/debug")
@@ -2748,7 +2564,6 @@ user_bp.add_url_rule(
     "/api/occupant", view_func=api_occupant, methods=["GET", "POST"]
 )
 user_bp.add_url_rule("/api/errors", view_func=api_errors_route)
-user_bp.add_url_rule("/receipts/<path:filename>", view_func=receipts_file)
 user_bp.add_url_rule("/stream/<vehicle_id>", view_func=stream_vehicle)
 user_bp.add_url_rule("/error", view_func=error_page)
 user_bp.add_url_rule("/debug", view_func=debug_info)
@@ -2763,12 +2578,14 @@ app.register_blueprint(auth_bp)
 @app.cli.command("migrate-files-to-admin")
 @click.option("--admin", "admin_name", required=True, help="Admin username or email")
 @click.option("--dry-run", is_flag=True, help="Do not write to the database or delete files")
-def migrate_files_to_admin(admin_name, dry_run):
+@click.option("--backup", is_flag=True, help="Create ZIP backup before deleting files")
+def migrate_files_to_admin(admin_name, dry_run, backup):
     """Import legacy data files into the database for the given admin user."""
     from pathlib import Path
     from collections import defaultdict
     import json
     import csv
+    from shutil import make_archive
     from sqlalchemy import or_
     from models import (
         User,
@@ -2791,6 +2608,8 @@ def migrate_files_to_admin(admin_name, dry_run):
         raise click.ClickException("Admin user not found")
 
     data_dir = Path(DATA_DIR)
+    if backup and not dry_run:
+        make_archive(str(data_dir) + "_backup", "zip", data_dir)
     report = defaultdict(lambda: {"imported": 0, "skipped": 0, "deleted": 0})
 
     def _resolve_vehicle(ext_id):
