@@ -40,6 +40,48 @@ class User(db.Model, UserMixin):
         return check_password_hash(self.password_hash, password)
 
 
+class Vehicle(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    vehicle_id = db.Column(db.String, nullable=False)
+    vin = db.Column(db.String)
+    model = db.Column(db.String)
+    display_name = db.Column(db.String)
+    active = db.Column(db.Boolean, default=True)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "vehicle_id", name="uix_user_vehicle"),
+    )
+
+
+class VehicleState(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicle.id"), nullable=False)
+    state = db.Column(db.String(32), nullable=False)
+    created_at = db.Column(
+        db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class EnergyLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicle.id"), nullable=False)
+    added_energy = db.Column(db.Float, nullable=False)
+    created_at = db.Column(
+        db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class TripEntry(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicle.id"), nullable=False)
+    started_at = db.Column(
+        db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    ended_at = db.Column(db.DateTime(timezone=True))
+    distance_km = db.Column(db.Float, default=0.0)
+
+
 class Payment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     amount = db.Column(db.Integer, nullable=False)
