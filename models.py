@@ -83,6 +83,41 @@ class TripEntry(db.Model):
     distance_km = db.Column(db.Float, default=0.0)
 
 
+class TaximeterRide(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    status = db.Column(db.String(16), nullable=False, default="ready")
+    started_at = db.Column(db.DateTime(timezone=True))
+    ended_at = db.Column(db.DateTime(timezone=True))
+    duration_s = db.Column(db.Float)
+    distance_m = db.Column(db.Float)
+    wait_time_s = db.Column(db.Float)
+    cost_base = db.Column(db.Float)
+    cost_distance = db.Column(db.Float)
+    cost_wait = db.Column(db.Float)
+    cost_total = db.Column(db.Float)
+    tariff_snapshot_json = db.Column(db.Text)
+    receipt_json = db.Column(db.Text)
+    created_at = db.Column(
+        db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicle.id"), nullable=False)
+    points = db.relationship("TaximeterPoint", backref="ride")
+
+
+class TaximeterPoint(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    ride_id = db.Column(db.Integer, db.ForeignKey("taximeter_ride.id"), nullable=False)
+    ts = db.Column(db.DateTime(timezone=True))
+    lat = db.Column(db.Float)
+    lon = db.Column(db.Float)
+    speed_kph = db.Column(db.Float)
+    heading_deg = db.Column(db.Float)
+    odo_m = db.Column(db.Float)
+    is_pause = db.Column(db.Boolean, default=False)
+    is_wait = db.Column(db.Boolean, default=False)
+
+
 class Payment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     amount = db.Column(db.Integer, nullable=False)

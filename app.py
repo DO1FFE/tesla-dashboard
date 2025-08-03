@@ -61,6 +61,7 @@ from models import (  # noqa: E402  pylint: disable=wrong-import-position
     User,
     ConfigOption,
     ConfigVisibility,
+    Vehicle,
 )
 from functools import wraps
 
@@ -336,7 +337,6 @@ def log_api_data(endpoint, data):
 
 STAT_FILE = os.path.join(DATA_DIR, "statistics.json")
 PARKTIME_FILE = os.path.join(DATA_DIR, "parktime.json")
-TAXI_DB = os.path.join(DATA_DIR, "taximeter.db")
 
 # Elements on the dashboard that can be toggled via the config page
 CONFIG_ITEMS = [
@@ -1606,7 +1606,7 @@ def _start_thread(vehicle_id):
 
 
 # Taximeter instance using the existing fetch function and config-based tariff
-taximeter = Taximeter(TAXI_DB, _fetch_data_once, get_taximeter_tariff)
+taximeter = Taximeter(_fetch_data_once, get_taximeter_tariff)
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -2342,8 +2342,12 @@ def sms_log_page():
     return render_template("sms.html", log_lines=log_lines)
 
 
-@app.route("/taxameter/<vehicle_id>")
-def taxameter_page(vehicle_id):
+@app.route("/taxameter")
+@admin_only
+def taxameter_page():
+    vehicle_id = request.args.get("vehicle_id")
+    if not vehicle_id:
+        abort(400)
     cfg = load_config()
     company = cfg.get("taxi_company", "Taxi Schauer")
     file_paths = [os.path.relpath(p, DATA_DIR) for p in _get_trip_files(vehicle_id)]
@@ -2373,7 +2377,6 @@ def taxameter_page(vehicle_id):
             value = f"file={selected}&segment={idx}"
             trips.append({"value": value, "label": label})
 
-    prefix = f"/{g.username_slug}" if hasattr(g, "username_slug") else ""
     return render_template(
         "taxameter.html",
         company=company,
@@ -2382,37 +2385,54 @@ def taxameter_page(vehicle_id):
         trip_files=file_opts,
         vehicle_id=vehicle_id,
         selected_file=selected,
-        prefix=prefix,
     )
 
 
 @app.route("/api/taxameter/start", methods=["POST"])
+@admin_only
 def api_taxameter_start():
     vid = request.form.get("vehicle_id")
     if not vid:
         return jsonify({"error": "vehicle_id required"}), 400
+    vehicle = Vehicle.query.filter_by(vehicle_id=vid).first()
+    if not vehicle:
+        return jsonify({"error": "vehicle not found"}), 404
     taximeter.vehicle_id = vid
+    taximeter.vehicle_db_id = vehicle.id
+    taximeter.user_id = current_user.id
     _start_thread(vid)
     taximeter.start()
     return jsonify(taximeter.status())
 
 
 @app.route("/api/taxameter/pause", methods=["POST"])
+@admin_only
 def api_taxameter_pause():
     vid = request.form.get("vehicle_id")
     if not vid:
         return jsonify({"error": "vehicle_id required"}), 400
+    vehicle = Vehicle.query.filter_by(vehicle_id=vid).first()
+    if not vehicle:
+        return jsonify({"error": "vehicle not found"}), 404
     taximeter.vehicle_id = vid
+    taximeter.vehicle_db_id = vehicle.id
+    taximeter.user_id = current_user.id
     taximeter.pause()
     return jsonify(taximeter.status())
 
 
 @app.route("/api/taxameter/stop", methods=["POST"])
+@admin_only
 def api_taxameter_stop():
     vid = request.form.get("vehicle_id")
     if not vid:
         return jsonify({"error": "vehicle_id required"}), 400
+    vehicle = Vehicle.query.filter_by(vehicle_id=vid).first()
+    if not vehicle:
+        return jsonify({"error": "vehicle not found"}), 404
     taximeter.vehicle_id = vid
+    taximeter.vehicle_db_id = vehicle.id
+    taximeter.user_id = current_user.id
     result = taximeter.stop()
     if result:
         company = get_taxi_company()
@@ -2448,25 +2468,38 @@ def api_taxameter_stop():
 
 
 @app.route("/api/taxameter/reset", methods=["POST"])
+@admin_only
 def api_taxameter_reset():
     vid = request.form.get("vehicle_id")
     if not vid:
         return jsonify({"error": "vehicle_id required"}), 400
+    vehicle = Vehicle.query.filter_by(vehicle_id=vid).first()
+    if not vehicle:
+        return jsonify({"error": "vehicle not found"}), 404
     taximeter.vehicle_id = vid
+    taximeter.vehicle_db_id = vehicle.id
+    taximeter.user_id = current_user.id
     taximeter.reset()
     return jsonify({"active": False})
 
 
 @app.route("/api/taxameter/status")
+@admin_only
 def api_taxameter_status():
     vid = request.args.get("vehicle_id")
     if not vid:
         return jsonify({"error": "vehicle_id required"}), 400
+    vehicle = Vehicle.query.filter_by(vehicle_id=vid).first()
+    if not vehicle:
+        return jsonify({"error": "vehicle not found"}), 404
     taximeter.vehicle_id = vid
+    taximeter.vehicle_db_id = vehicle.id
+    taximeter.user_id = current_user.id
     return jsonify(taximeter.status())
 
 
 @app.route("/api/taxameter/trips")
+@admin_only
 def api_taxameter_trips():
     """Return individual trips for a recorded file."""
     selected = request.args.get("file")
@@ -2544,7 +2577,7 @@ def taxameter_trip_receipt():
             dist = _trip_distance(path)
             wait_time = 0.0
     tariff = get_taximeter_tariff()
-    tm = Taximeter(TAXI_DB, lambda _vid: {}, get_taximeter_tariff)
+    tm = Taximeter(lambda _vid: {}, get_taximeter_tariff)
     tm.tariff = tariff
     tm.wait_time = wait_time
     tm.wait_cost = int(wait_time // 10) * tariff.get("wait_per_10s", 0.10)
@@ -2625,27 +2658,6 @@ user_bp.add_url_rule(
     "/api/occupant", view_func=api_occupant, methods=["GET", "POST"]
 )
 user_bp.add_url_rule("/api/errors", view_func=api_errors_route)
-user_bp.add_url_rule(
-    "/api/taxameter/start", view_func=api_taxameter_start, methods=["POST"]
-)
-user_bp.add_url_rule(
-    "/api/taxameter/pause", view_func=api_taxameter_pause, methods=["POST"]
-)
-user_bp.add_url_rule(
-    "/api/taxameter/stop", view_func=api_taxameter_stop, methods=["POST"]
-)
-user_bp.add_url_rule(
-    "/api/taxameter/reset", view_func=api_taxameter_reset, methods=["POST"]
-)
-user_bp.add_url_rule("/api/taxameter/status", view_func=api_taxameter_status)
-user_bp.add_url_rule("/api/taxameter/trips", view_func=api_taxameter_trips)
-user_bp.add_url_rule("/taxameter/<vehicle_id>", view_func=taxameter_page)
-user_bp.add_url_rule(
-    "/taxameter/receipt/<int:ride_id>", view_func=taxameter_receipt
-)
-user_bp.add_url_rule(
-    "/taxameter/trip_receipt", view_func=taxameter_trip_receipt
-)
 user_bp.add_url_rule("/receipts/<path:filename>", view_func=receipts_file)
 
 app.register_blueprint(user_bp)
