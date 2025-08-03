@@ -2578,14 +2578,12 @@ app.register_blueprint(auth_bp)
 @app.cli.command("migrate-files-to-admin")
 @click.option("--admin", "admin_name", required=True, help="Admin username or email")
 @click.option("--dry-run", is_flag=True, help="Do not write to the database or delete files")
-@click.option("--backup", is_flag=True, help="Create ZIP backup before deleting files")
-def migrate_files_to_admin(admin_name, dry_run, backup):
+def migrate_files_to_admin(admin_name, dry_run):
     """Import legacy data files into the database for the given admin user."""
     from pathlib import Path
     from collections import defaultdict
     import json
     import csv
-    from shutil import make_archive
     from sqlalchemy import or_
     from models import (
         User,
@@ -2607,9 +2605,7 @@ def migrate_files_to_admin(admin_name, dry_run, backup):
     if not admin:
         raise click.ClickException("Admin user not found")
 
-    data_dir = Path(DATA_DIR)
-    if backup and not dry_run:
-        make_archive(str(data_dir) + "_backup", "zip", data_dir)
+    data_dir = Path(app.static_folder) / "data"
     report = defaultdict(lambda: {"imported": 0, "skipped": 0, "deleted": 0})
 
     def _resolve_vehicle(ext_id):
