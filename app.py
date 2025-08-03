@@ -113,6 +113,31 @@ def requires_subscription(level):
     return decorator
 
 
+def admin_only(func):
+    """Allow access only to logged-in admin users."""
+    @wraps(func)
+    @login_required
+    def wrapper(*args, **kwargs):
+        if current_user.role != "admin":
+            abort(403)
+        return func(*args, **kwargs)
+    return wrapper
+
+
+def ham_only(func):
+    """Restrict access to ham operators or the root dashboard."""
+    @wraps(func)
+    @login_required
+    def wrapper(*args, **kwargs):
+        kwargs.pop("username_slug", None)
+        if hasattr(g, "username_slug") and not (
+            current_user.role == "admin" or current_user.is_ham_operator
+        ):
+            abort(403, description="APRS only available to ham operators")
+        return func(*args, **kwargs)
+    return wrapper
+
+
 @app.context_processor
 def inject_ga_id():
     """Add Google Analytics tracking ID to all templates."""
@@ -1590,7 +1615,6 @@ def register():
         username = request.form.get("username", "").strip()
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
-        ham = bool(request.form.get("is_ham_operator"))
         if not username or not email or not password:
             return render_template("register.html", error="Alle Felder sind erforderlich")
         existing = User.query.filter(
@@ -1598,7 +1622,7 @@ def register():
         ).first()
         if existing:
             return render_template("register.html", error="Benutzer existiert bereits")
-        user = User(username=username, email=email, is_ham_operator=ham)
+        user = User(username=username, email=email)
         user.set_password(password)
         db.session.add(user)
         db.session.commit()
@@ -1948,6 +1972,7 @@ def _format_phone(phone, region="DE"):
 
 
 @app.route("/api/sms", methods=["POST"])
+@admin_only
 def api_sms():
     """Send a short text message using the configured phone number."""
     cfg = load_config()
@@ -2013,15 +2038,11 @@ def api_sms():
 
 
 @app.route("/config", methods=["GET", "POST"])
+@ham_only
 def config_page():
     if hasattr(g, "username_slug"):
-        if not current_user.is_authenticated or (
-            current_user.role != "admin" and current_user.username_slug != g.username_slug
-        ):
+        if current_user.role != "admin" and current_user.username_slug != g.username_slug:
             abort(403)
-    else:
-        if not current_user.is_authenticated:
-            return redirect(url_for("login"))
     cfg = load_config()
     if request.method == "POST":
         for item in CONFIG_ITEMS:
@@ -2041,6 +2062,17 @@ def config_page():
         wx_callsign = request.form.get("aprs_wx_callsign", "").strip()
         wx_enabled = "aprs_wx_enabled" in request.form
         aprs_comment = request.form.get("aprs_comment", "").strip()
+        if current_user.role != "admin" and not (
+            hasattr(g, "username_slug") and current_user.is_ham_operator
+        ):
+            if (
+                callsign
+                or passcode
+                or wx_callsign
+                or aprs_comment
+                or "aprs_wx_enabled" in request.form
+            ):
+                abort(403, description="APRS configuration requires admin")
         announcement = request.form.get("announcement", "").strip()
         taxi_company = request.form.get("taxi_company", "").strip()
         taxi_slogan = request.form.get("taxi_slogan", "").strip()
@@ -2298,6 +2330,7 @@ def api_log_page():
 
 
 @app.route("/sms")
+@admin_only
 def sms_log_page():
     """Display the SMS log."""
     log_lines = []
@@ -2591,7 +2624,6 @@ user_bp.add_url_rule("/api/alarm_state/<vehicle_id>", view_func=api_alarm_state)
 user_bp.add_url_rule(
     "/api/occupant", view_func=api_occupant, methods=["GET", "POST"]
 )
-user_bp.add_url_rule("/api/sms", view_func=api_sms, methods=["POST"])
 user_bp.add_url_rule("/api/errors", view_func=api_errors_route)
 user_bp.add_url_rule(
     "/api/taxameter/start", view_func=api_taxameter_start, methods=["POST"]

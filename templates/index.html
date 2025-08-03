@@ -201,7 +201,7 @@
         </div>
     </div>
     <div id="offline-msg"></div>
-    {% if config.get('phone_number') and config.get('sms_enabled', True) %}
+    {% if not prefix and current_user.is_authenticated and current_user.role == 'admin' and config.get('phone_number') and config.get('sms_enabled', True) %}
     <div id="sms-form" style="display:none;">
         <input id="sms-name" type="text" placeholder="Ihr Name">
         <input id="sms-text" type="text" maxlength="160" placeholder="Nachricht">
