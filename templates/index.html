@@ -19,6 +19,7 @@
     <h2>Tesla-Dashboard V{{ version }}
         <span id="header-right">
             <span id="vehicle-info"></span>&nbsp;&nbsp;&nbsp;<span id="vehicle-status"></span>
+            <button id="share-btn" type="button">Teilen</button>
         </span>
     </h2>
     {% set show_dash = config.get('menu-dashboard', True) %}
@@ -221,6 +222,11 @@
         <span id="data-age"></span>
         <span>Tesla-Dashboard V{{ version }} - © {{ year }} Erik Schauer, do1ffe@darc.de</span>
     </footer>
+    {% if show_banner %}
+    <div id="public-banner">
+        Dein eigenes Dashboard? Jetzt <a href="/register">registrieren</a> / <a href="/login">einloggen</a>.
+    </div>
+    {% endif %}
 
     <script>
         window.APP_VERSION = "{{ version }}";
