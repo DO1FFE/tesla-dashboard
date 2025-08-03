@@ -88,5 +88,47 @@ class Payment(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class ConfigOption(db.Model):
+    """Configurable option that may depend on a subscription level."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(80), unique=True, nullable=False)
+    label = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.Text)
+
+
+class ConfigVisibility(db.Model):
+    """Visibility rules for a configuration option."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    config_option_id = db.Column(
+        db.Integer, db.ForeignKey("config_option.id"), nullable=False
+    )
+    required_subscription = db.Column(db.String(16), default="free")
+    always_active = db.Column(db.Boolean, default=False)
+
+    config_option = db.relationship(
+        "ConfigOption", backref=db.backref("visibility", uselist=False)
+    )
+
+
+class UserConfig(db.Model):
+    """User specific value for a configuration option."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    config_option_id = db.Column(
+        db.Integer, db.ForeignKey("config_option.id"), nullable=False
+    )
+    value = db.Column(db.String)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "config_option_id", name="uix_user_config"),
+    )
+
+    user = db.relationship("User", backref="configs")
+    config_option = db.relationship("ConfigOption")
+
+
 def init_db():
     db.create_all()
