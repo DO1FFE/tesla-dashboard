@@ -64,9 +64,22 @@ from models import (  # noqa: E402  pylint: disable=wrong-import-position
     ConfigOption,
     ConfigVisibility,
     Vehicle,
+    TeslaToken,
 )
 from functools import wraps
+from views.auth import auth_bp
 
+
+def tesla_token_required(func):
+    @wraps(func)
+    @login_required
+    def wrapper(*args, **kwargs):
+        token = TeslaToken.query.filter_by(user_id=current_user.id).first()
+        if token is None:
+            return redirect(url_for("auth.oauth_start"))
+        return func(*args, **kwargs)
+
+    return wrapper
 class _AdminIndex(AdminIndexView):
     def is_accessible(self):
         return current_user.is_authenticated and current_user.role == "admin"
@@ -1211,31 +1224,47 @@ def compute_trip_summaries():
 
 
 def get_tesla():
-    """Authenticate and return a Tesla object or None."""
-    if teslapy is None:
+    """Return an authenticated Tesla object for the current user."""
+    if teslapy is None or not current_user.is_authenticated:
         return None
 
-    email = os.getenv("TESLA_EMAIL")
-    password = os.getenv("TESLA_PASSWORD")
-    access_token = os.getenv("TESLA_ACCESS_TOKEN")
-    refresh_token = os.getenv("TESLA_REFRESH_TOKEN")
-
-    tokens_provided = access_token and refresh_token
-    if not tokens_provided and not (email and password):
+    token = TeslaToken.query.filter_by(user_id=current_user.id).first()
+    if token is None:
         return None
 
-    tesla = teslapy.Tesla(email, app_user_agent="Tesla-Dashboard")
+    if token.expires_at <= datetime.utcnow():
+        try:
+            resp = requests.post(
+                "https://auth.tesla.com/oauth2/v3/token",
+                json={
+                    "grant_type": "refresh_token",
+                    "refresh_token": token.refresh_token,
+                    "client_id": app.config["TESLA_CLIENT_ID"],
+                },
+                headers={"User-Agent": app.config["TESLA_USER_AGENT"]},
+                timeout=10,
+            )
+            data = resp.json()
+            token.access_token = data.get("access_token", token.access_token)
+            token.refresh_token = data.get("refresh_token", token.refresh_token)
+            token.expires_at = datetime.utcnow() + timedelta(
+                seconds=data.get("expires_in", 0)
+            )
+            db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+            _log_api_error(exc)
+            return None
+
+    tesla = teslapy.Tesla(
+        current_user.email, app_user_agent=app.config.get("TESLA_USER_AGENT", "Tesla-Dashboard")
+    )
+    tesla.sso_token = {
+        "access_token": token.access_token,
+        "refresh_token": token.refresh_token,
+    }
     try:
-        if tokens_provided:
-            tesla.sso_token = {
-                "access_token": access_token,
-                "refresh_token": refresh_token,
-            }
-            tesla.refresh_token()
-        elif access_token:
-            tesla.refresh_token({"access_token": access_token})
-        else:
-            tesla.fetch_token(password=password)
+        tesla.refresh_token()
     except Exception as exc:
         _log_api_error(exc)
         return None
@@ -1888,6 +1917,7 @@ def data_only(vehicle_id):
 
 
 @app.route("/api/data/<vehicle_id>")
+@tesla_token_required
 def api_data_vehicle(vehicle_id):
     _start_thread(vehicle_id)
     data = latest_data.get(vehicle_id)
@@ -1897,6 +1927,7 @@ def api_data_vehicle(vehicle_id):
 
 
 @app.route("/stream/<vehicle_id>")
+@tesla_token_required
 def stream_vehicle(vehicle_id):
     """Stream vehicle data to the client using Server-Sent Events."""
     if not vehicle_id:
@@ -1931,12 +1962,14 @@ def stream_vehicle(vehicle_id):
 
 
 @app.route("/api/vehicles")
+@tesla_token_required
 def api_vehicles():
     vehicles = get_vehicle_list()
     return jsonify(vehicles)
 
 
 @app.route("/api/state/<vehicle_id>")
+@tesla_token_required
 def api_state(vehicle_id):
     """Return the last known state of the vehicle."""
     state_info = get_vehicle_state(vehicle_id)
@@ -1986,6 +2019,7 @@ def api_announcement():
 
 
 @app.route("/api/alarm_state/<vehicle_id>")
+@tesla_token_required
 def api_alarm_state(vehicle_id):
     """Return the current alarm state."""
     _start_thread(vehicle_id)
@@ -2726,6 +2760,7 @@ user_bp.add_url_rule("/state", view_func=state_log_page)
 user_bp.add_url_rule("/apilog", view_func=api_log_page)
 
 app.register_blueprint(user_bp)
+app.register_blueprint(auth_bp)
 
 
 @app.cli.command("migrate-files-to-admin")

@@ -10,3 +10,4 @@ phonenumbers==9.0.9
 qrcode
 pytest
 flask-admin
+pkce

@@ -13,6 +13,7 @@ This is a simple Flask application that displays real-time data from a Tesla veh
 2. Copy `.env.example` to `.env` and fill in your Tesla credentials:
     - `TESLA_EMAIL` and `TESLA_PASSWORD` **or**
     - `TESLA_ACCESS_TOKEN` and `TESLA_REFRESH_TOKEN`
+    - for OAuth login set `TESLA_CLIENT_ID`, `TESLA_REDIRECT_URI` and `TESLA_USER_AGENT`
 
 3. Run the server:
     ```bash
@@ -20,9 +21,10 @@ This is a simple Flask application that displays real-time data from a Tesla veh
     ```
 
 4. Open `http://localhost:8013` in your browser (the server listens on `0.0.0.0:8013`).
-5. On the configuration page (`/config`) you can set your APRS call sign, passcode and an optional comment to transmit position packets via an EU APRS-IS server. You may also enable an additional WX packet using a separate call sign. Temperatures are included in Celsius within the comment. Positions are sent at most every 30 seconds while driving and at least every 10 minutes even without changes. WX packets obey the same limits and are only transmitted when the outside temperature changes or after ten minutes without an update. The page also lets you adjust the Tesla API polling interval and disable the announcement text.
-6. You can also enter the driver's phone number in international format (for example `+491701234567`), your Infobip API key and an optional sender ID here. Leave the sender field empty if the account does not support custom senders. SMS messages to the driver can be enabled or disabled and you may choose whether they are only allowed while driving or at any time. When restricted to driving mode, messages are still allowed for five minutes after parking.
-7. When sending a text message the sender's name is requested as well. The entire message including the name must not exceed 160 characters.
+5. After logging in, start the Tesla OAuth flow at `/oauth/start` to link your account.
+6. On the configuration page (`/config`) you can set your APRS call sign, passcode and an optional comment to transmit position packets via an EU APRS-IS server. You may also enable an additional WX packet using a separate call sign. Temperatures are included in Celsius within the comment. Positions are sent at most every 30 seconds while driving and at least every 10 minutes even without changes. WX packets obey the same limits and are only transmitted when the outside temperature changes or after ten minutes without an update. The page also lets you adjust the Tesla API polling interval and disable the announcement text.
+7. You can also enter the driver's phone number in international format (for example `+491701234567`), your Infobip API key and an optional sender ID here. Leave the sender field empty if the account does not support custom senders. SMS messages to the driver can be enabled or disabled and you may choose whether they are only allowed while driving or at any time. When restricted to driving mode, messages are still allowed for five minutes after parking.
+8. When sending a text message the sender's name is requested as well. The entire message including the name must not exceed 160 characters.
 
 All sent text messages are written to `data/sms.log` and can be viewed on the `/sms` page.
 Timestamps in this file are recorded in the Europe/Berlin timezone.
