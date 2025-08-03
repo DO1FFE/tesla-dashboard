@@ -377,6 +377,26 @@ def log_api_data(endpoint, data):
 STAT_FILE = os.path.join(DATA_DIR, "statistics.json")
 PARKTIME_FILE = os.path.join(DATA_DIR, "parktime.json")
 
+# In-memory state used across requests. These variables were previously
+# referenced without being initialised which caused ``NameError`` at runtime
+# as soon as the respective helper functions were invoked.  Initialising them
+# here keeps the application start-up simple while avoiding those errors.
+api_errors = []
+api_errors_lock = threading.Lock()
+state_lock = threading.Lock()
+last_vehicle_state = {}
+latest_data = {}
+subscribers = {}
+
+# Variables tracking the current trip and parking status.  They are shared
+# between helper functions and therefore need module level defaults.
+trip_path = []
+current_trip_file = None
+current_trip_date = None
+drive_pause_ms = None
+park_start_ms = None
+last_shift_state = None
+
 # Elements on the dashboard that can be toggled via the config page
 CONFIG_ITEMS = [
     {"id": "map", "desc": "Karte"},
@@ -2698,6 +2718,12 @@ user_bp.add_url_rule(
 )
 user_bp.add_url_rule("/api/errors", view_func=api_errors_route)
 user_bp.add_url_rule("/receipts/<path:filename>", view_func=receipts_file)
+user_bp.add_url_rule("/stream/<vehicle_id>", view_func=stream_vehicle)
+user_bp.add_url_rule("/error", view_func=error_page)
+user_bp.add_url_rule("/debug", view_func=debug_info)
+user_bp.add_url_rule("/apiliste", view_func=api_list_file)
+user_bp.add_url_rule("/state", view_func=state_log_page)
+user_bp.add_url_rule("/apilog", view_func=api_log_page)
 
 app.register_blueprint(user_bp)
 
