@@ -22,6 +22,7 @@
             <button id="share-btn" type="button">Teilen</button>
         </span>
     </h2>
+    {% if inactive %}<p style="color:red;">Kein aktives Abonnement</p>{% endif %}
     {% set show_dash = config.get('menu-dashboard', True) %}
     {% set show_stat = config.get('menu-statistik', True) %}
     {% set show_hist = config.get('menu-history', True) %}

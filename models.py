@@ -19,6 +19,7 @@ class User(db.Model, UserMixin):
     password_hash = db.Column(db.String(128), nullable=False)
     role = db.Column(db.String(16), default="user")
     subscription = db.Column(db.String(16), default="free")
+    stripe_subscription_id = db.Column(db.String(64))
     is_ham_operator = db.Column(db.Boolean, default=False)
     created_at = db.Column(
         db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
