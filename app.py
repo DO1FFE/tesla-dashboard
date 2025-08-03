@@ -74,6 +74,10 @@ CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
 
 SUBSCRIPTION_LEVELS = {"free": 0, "basic": 1, "pro": 2}
+PLAN_PRICES = {
+    os.getenv("STRIPE_BASIC_PRICE_ID", ""): "basic",
+    os.getenv("STRIPE_PRO_PRICE_ID", ""): "pro",
+}
 
 
 def _get_visibility(key):
@@ -1611,9 +1615,12 @@ def login():
         user = User.query.filter_by(email=email).first()
         if user and user.check_password(password):
             login_user(user)
-            return redirect(url_for("index"))
+            args = {}
+            if user.subscription == "free":
+                args["inactive"] = 1
+            return redirect(url_for("index", **args))
         return render_template("login.html", error="Ungültige Zugangsdaten")
-    return render_template("login.html")
+    return render_template("login.html", inactive=request.args.get("inactive"))
 
 
 @app.route("/logout")
@@ -1623,11 +1630,104 @@ def logout():
     return redirect(url_for("index"))
 
 
+@app.route("/abo/checkout", methods=["POST"])
+@login_required
+def subscription_checkout():
+    data = request.get_json() or {}
+    plan = data.get("plan", "").lower()
+    price_id = {
+        "basic": os.getenv("STRIPE_BASIC_PRICE_ID"),
+        "pro": os.getenv("STRIPE_PRO_PRICE_ID"),
+    }.get(plan)
+    if not price_id:
+        return jsonify({"error": "invalid plan"}), 400
+    session = stripe.checkout.Session.create(
+        mode="subscription",
+        line_items=[{"price": price_id, "quantity": 1}],
+        success_url=url_for("index", _external=True),
+        cancel_url=url_for("index", _external=True),
+        customer_email=current_user.email,
+        metadata={"user_id": current_user.id},
+        subscription_data={"metadata": {"user_id": current_user.id}},
+    )
+    return jsonify({"checkout_url": session.url})
+
+
+@app.route("/stripe/webhook", methods=["POST"])
+def stripe_webhook():
+    payload = request.data
+    sig_header = request.headers.get("Stripe-Signature")
+    secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, secret)
+    except Exception:
+        return "", 400
+    event_type = event.get("type")
+    data = event["data"]["object"]
+    metadata = data.get("metadata", {})
+    user_id = metadata.get("user_id")
+    if not user_id and data.get("subscription"):
+        try:
+            subscription = stripe.Subscription.retrieve(data["subscription"])
+            user_id = subscription.get("metadata", {}).get("user_id")
+            data = subscription
+            event_type = "customer.subscription.updated"
+        except Exception:
+            return "", 200
+    if not user_id:
+        return "", 200
+    user = User.query.get(int(user_id))
+    if not user:
+        return "", 200
+    if event_type == "invoice.payment_succeeded":
+        lines = event["data"]["object"].get("lines", {}).get("data", [])
+        price_id = lines[0].get("price", {}).get("id") if lines else None
+        user.stripe_subscription_id = event["data"]["object"].get("subscription")
+        level = PLAN_PRICES.get(price_id)
+        if level:
+            user.subscription = level
+    elif event_type in ("customer.subscription.updated", "customer.subscription.deleted"):
+        items = data.get("items", {}).get("data", [])
+        price_id = items[0].get("price", {}).get("id") if items else None
+        level = PLAN_PRICES.get(price_id)
+        if event_type == "customer.subscription.deleted" or data.get("status") == "canceled":
+            user.subscription = "free"
+            user.stripe_subscription_id = None
+        else:
+            if level:
+                user.subscription = level
+            user.stripe_subscription_id = data.get("id")
+    db.session.commit()
+    return "", 200
+
+
+@app.route("/account/delete", methods=["POST"])
+@login_required
+def delete_account():
+    cancel_now = bool((request.get_json() or {}).get("immediately"))
+    sub_id = current_user.stripe_subscription_id
+    if sub_id:
+        try:
+            if cancel_now:
+                stripe.Subscription.delete(sub_id)
+            else:
+                stripe.Subscription.modify(sub_id, cancel_at_period_end=True)
+        except Exception:
+            pass
+    db.session.delete(current_user)
+    db.session.commit()
+    logout_user()
+    return jsonify({"status": "deleted"})
+
+
 @app.route("/")
 def index():
     admin = User.query.filter_by(role="admin").first()
     cfg = load_config()
     prefix = f"/{g.username_slug}" if hasattr(g, "username_slug") else ""
+    inactive = bool(request.args.get("inactive"))
+    if current_user.is_authenticated and current_user.subscription == "free":
+        inactive = True
     return render_template(
         "index.html",
         version=__version__,
@@ -1636,6 +1736,7 @@ def index():
         show_banner=not current_user.is_authenticated,
         admin=admin,
         prefix=prefix,
+        inactive=inactive,
     )
 
 
