@@ -9,7 +9,7 @@ LOCAL_TZ = ZoneInfo("Europe/Berlin")
 
 
 class Taximeter:
-    def __init__(self, db_path, fetch_func, tariff_func, vehicle_id="default"):
+    def __init__(self, db_path, fetch_func, tariff_func, vehicle_id=None):
         self.db_path = db_path
         self.fetch_func = fetch_func
         self.tariff_func = tariff_func
@@ -34,6 +34,8 @@ class Taximeter:
         return hour >= 22 or hour < 6
 
     def start(self):
+        if not self.vehicle_id:
+            raise ValueError("vehicle_id required")
         with self.lock:
             if self.active:
                 return False
@@ -63,6 +65,8 @@ class Taximeter:
         return True
 
     def pause(self):
+        if not self.vehicle_id:
+            raise ValueError("vehicle_id required")
         with self.lock:
             if not self.active:
                 return False
@@ -74,6 +78,8 @@ class Taximeter:
         return True
 
     def stop(self):
+        if not self.vehicle_id:
+            raise ValueError("vehicle_id required")
         with self.lock:
             if not self.active:
                 return None
@@ -106,6 +112,8 @@ class Taximeter:
         return result
 
     def status(self):
+        if not self.vehicle_id:
+            raise ValueError("vehicle_id required")
         with self.lock:
             if not self.active:
                 result = {"active": False, "paused": self.paused, "waiting": self.waiting}
@@ -260,6 +268,8 @@ class Taximeter:
         return ride_id
 
     def reset(self):
+        if not self.vehicle_id:
+            raise ValueError("vehicle_id required")
         with self.lock:
             self.active = False
             self.paused = False
