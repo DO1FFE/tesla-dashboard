@@ -1,4 +1,7 @@
 flask
+flask-login
+flask-sqlalchemy
+stripe
 teslapy
 python-dotenv
 requests

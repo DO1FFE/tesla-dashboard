@@ -4,7 +4,6 @@ import queue
 import threading
 import time
 import logging
-from logging.handlers import RotatingFileHandler
 from flask import (
     Flask,
     render_template,
@@ -15,14 +14,17 @@ from flask import (
     abort,
     url_for,
 )
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager
 from taximeter import Taximeter
 import requests
 from functools import wraps
 from dotenv import load_dotenv
 from version import get_version
 import qrcode
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+import stripe
 
 try:
     import teslapy
@@ -41,6 +43,10 @@ except ImportError:
 
 load_dotenv()
 app = Flask(__name__)
+app.config.from_object("config")
+db = SQLAlchemy(app)
+login_manager = LoginManager(app)
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 __version__ = get_version()
 CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
@@ -120,33 +126,28 @@ CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 APRS_HOST = "euro.aprs2.net"
 APRS_PORT = 14580
 LOCAL_TZ = ZoneInfo("Europe/Berlin")
+UTC = ZoneInfo("UTC")
 MILES_TO_KM = 1.60934
 api_logger = logging.getLogger("api_logger")
 if not api_logger.handlers:
-    handler = RotatingFileHandler(
-        os.path.join(DATA_DIR, "api.log"), maxBytes=1_000_000, backupCount=1
-    )
+    handler = logging.StreamHandler()
     formatter = logging.Formatter("%(asctime)s %(message)s")
     handler.setFormatter(formatter)
     api_logger.addHandler(handler)
     api_logger.setLevel(logging.INFO)
-    # Forward detailed library logs to the same file
     for name in ("teslapy", "urllib3"):
         lib_logger = logging.getLogger(name)
         lib_logger.addHandler(handler)
         lib_logger.setLevel(logging.DEBUG)
     try:
         import http.client as http_client
-
         http_client.HTTPConnection.debuglevel = 1
     except Exception:
         pass
 
 state_logger = logging.getLogger("state_logger")
 if not state_logger.handlers:
-    handler = RotatingFileHandler(
-        os.path.join(DATA_DIR, "state.log"), maxBytes=100_000, backupCount=1
-    )
+    handler = logging.StreamHandler()
     formatter = logging.Formatter("%(asctime)s %(message)s")
     formatter.converter = lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
     handler.setFormatter(formatter)
@@ -155,9 +156,7 @@ if not state_logger.handlers:
 
 energy_logger = logging.getLogger("energy_logger")
 if not energy_logger.handlers:
-    handler = RotatingFileHandler(
-        os.path.join(DATA_DIR, "energy.log"), maxBytes=100_000, backupCount=1
-    )
+    handler = logging.StreamHandler()
     formatter = logging.Formatter("%(asctime)s %(message)s")
     formatter.converter = lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
     handler.setFormatter(formatter)
@@ -166,35 +165,23 @@ if not energy_logger.handlers:
 
 sms_logger = logging.getLogger("sms_logger")
 if not sms_logger.handlers:
-    handler = RotatingFileHandler(
-        os.path.join(DATA_DIR, "sms.log"), maxBytes=100_000, backupCount=1
-    )
+    handler = logging.StreamHandler()
     formatter = logging.Formatter("%(asctime)s %(message)s")
     formatter.converter = lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
     handler.setFormatter(formatter)
     sms_logger.addHandler(handler)
     sms_logger.setLevel(logging.INFO)
 
+import models
+with app.app_context():
+    models.init_db()
 
 def _load_last_state(filename=os.path.join(DATA_DIR, "state.log")):
-    """Load the last logged state for each vehicle from ``state.log``."""
-    result = {}
-    try:
-        with open(filename, "r", encoding="utf-8") as f:
-            for line in f:
-                idx = line.find("{")
-                if idx != -1:
-                    try:
-                        entry = json.loads(line[idx:])
-                        vid = entry.get("vehicle_id")
-                        state = entry.get("state")
-                        if vid is not None and state is not None:
-                            result[vid] = state
-                    except Exception:
-                        pass
-    except Exception:
-        pass
-    return result
+    """Load the last logged state for each vehicle.
+
+    File access is disabled; always return an empty dict."""
+    return {}
+
 
 
 # Tools to build an aggregated list of API keys ------------------------------
@@ -252,93 +239,12 @@ def _merge_data(existing, new):
 
 
 def _update_api_json(data, filename=os.path.join(DATA_DIR, "api-liste.json")):
-    """Update ``api-liste.json`` while preserving existing keys."""
-    try:
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        if os.path.exists(filename):
-            with open(filename, "r", encoding="utf-8") as f:
-                try:
-                    current = json.load(f)
-                except Exception:
-                    current = {}
-        else:
-            current = {}
-
-        # drop the dynamic drive path to keep the file small
-        filtered = data.copy() if isinstance(data, dict) else data
-        if isinstance(filtered, dict):
-            filtered.pop("path", None)
-        merged = _merge_data(current, filtered)
-
-        with open(filename, "w", encoding="utf-8") as f:
-            json.dump(merged, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
+    """Update ``api-liste.json`` while preserving existing keys (disabled)."""
+    return
 
 def update_api_list(data, filename=os.path.join(DATA_DIR, "api-liste.txt")):
-    """Update ``api-liste.txt`` with key/value pairs in API order."""
-    try:
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-
-        existing_lines = []
-        if os.path.exists(filename):
-            with open(filename, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.rstrip("\n")
-                    if ": " in line:
-                        k, v = line.split(": ", 1)
-                    else:
-                        k, v = line, ""
-                    existing_lines.append((k, v))
-
-        existing_map = {k: i for i, (k, _v) in enumerate(existing_lines)}
-        kv = _collect_key_values(data)
-        kv = [(k, v) for k, v in kv if not k.startswith("path[") and k != "path"]
-
-        lines = existing_lines[:]
-        for idx, (k, v) in enumerate(kv):
-            value = json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v
-            if k in existing_map:
-                pos = existing_map[k]
-                lines[pos] = (k, value)
-            else:
-                # try to place the key after the nearest previous known key
-                insert_pos = None
-                for prev_idx in range(idx - 1, -1, -1):
-                    prev_k = kv[prev_idx][0]
-                    if prev_k in existing_map:
-                        insert_pos = existing_map[prev_k] + 1
-                        break
-                if insert_pos is None:
-                    # fallback: before the next known key
-                    insert_pos = len(lines)
-                    for next_k, _ in kv[idx + 1:]:
-                        if next_k in existing_map:
-                            insert_pos = existing_map[next_k]
-                            break
-                lines.insert(insert_pos, (k, value))
-                existing_map = {key: i for i, (key, _v) in enumerate(lines)}
-
-        content = "\n".join(f"{k}: {v}" for k, v in lines) + "\n"
-
-        current = ""
-        if os.path.exists(filename):
-            with open(filename, "r", encoding="utf-8") as f:
-                current = f.read()
-
-        if content != current:
-            with open(filename, "w", encoding="utf-8") as f:
-                f.write(content)
-        _update_api_json(data)
-    except Exception:
-        pass
-
-
-# Communication with the Tesla API is logged via ``log_api_data`` and the
-# ``teslapy``/``urllib3`` loggers. Requests to this web application are not
-# recorded in ``api.log``.
-
+    """Update ``api-liste.txt`` with key/value pairs in API order (disabled)."""
+    return
 
 def log_api_data(endpoint, data):
     """Write API communication to the rotating log file."""
@@ -391,12 +297,8 @@ def load_config():
 
 
 def save_config(cfg):
-    try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
+    """Persist configuration (disabled)."""
+    return
 
 def get_taximeter_tariff():
     cfg = load_config()
@@ -508,43 +410,12 @@ def _load_parktime():
 
 
 def _save_parktime(ts):
-    """Persist the park timestamp to ``parktime.json``."""
-    try:
-        with open(PARKTIME_FILE, "w", encoding="utf-8") as f:
-            json.dump(int(ts), f)
-    except Exception:
-        pass
-
+    """Persist the park timestamp (disabled)."""
+    return
 
 def _delete_parktime():
-    """Remove the stored park timestamp if present."""
-    try:
-        os.remove(PARKTIME_FILE)
-    except Exception:
-        pass
-
-
-park_start_ms = _load_parktime()
-last_shift_state = None
-trip_path = []
-current_trip_file = None
-current_trip_date = None
-drive_pause_ms = None
-latest_data = {}
-subscribers = {}
-threads = {}
-_vehicle_list_cache = []
-_vehicle_list_cache_ts = 0.0
-_vehicle_list_lock = threading.Lock()
-api_errors = []
-api_errors_lock = threading.Lock()
-state_lock = threading.Lock()
-last_vehicle_state = _load_last_state()
-occupant_present = False
-_default_vehicle_id = None
-_last_aprs_info = {}
-_last_wx_info = {}
-
+    """Remove the stored park timestamp (disabled)."""
+    return
 
 def track_park_time(vehicle_data):
     """Track when the vehicle was first seen parked."""
@@ -584,25 +455,8 @@ def park_duration_string(start_ms):
 def _log_trip_point(
     ts, lat, lon, speed=None, power=None, heading=None, gear=None, filename=None
 ):
-    """Append a GPS point to a trip history CSV."""
-    if filename is None:
-        filename = os.path.join(DATA_DIR, "trip_history.csv")
-    try:
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        with open(filename, "a", encoding="utf-8") as f:
-            row = [
-                ts,
-                lat,
-                lon,
-                "" if speed is None else speed,
-                "" if power is None else power,
-                "" if heading is None else heading,
-                "" if gear is None else gear,
-            ]
-            f.write(",".join(str(v) for v in row) + "\n")
-    except Exception:
-        pass
-
+    """Append a GPS point to a trip history CSV (disabled)."""
+    return
 
 def track_drive_path(vehicle_data):
     """Maintain the current trip path and log points when driving."""
@@ -742,22 +596,12 @@ def _cache_file(vehicle_id):
 
 
 def _load_cached(vehicle_id):
-    """Load cached vehicle data from disk."""
-    try:
-        with open(_cache_file(vehicle_id), "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
-
+    """Load cached vehicle data (disabled)."""
+    return None
 
 def _save_cached(vehicle_id, data):
-    """Write vehicle data cache to disk."""
-    try:
-        with open(_cache_file(vehicle_id), "w", encoding="utf-8") as f:
-            json.dump(data, f)
-    except Exception:
-        pass
-
+    """Write vehicle data cache (disabled)."""
+    return
 
 def _last_energy_file(vehicle_id):
     """Return filename for the last added energy of a vehicle."""
@@ -765,22 +609,12 @@ def _last_energy_file(vehicle_id):
 
 
 def _load_last_energy(vehicle_id):
-    """Load the last added energy value from disk."""
-    try:
-        with open(_last_energy_file(vehicle_id), "r", encoding="utf-8") as f:
-            return float(f.read().strip())
-    except Exception:
-        return None
-
+    """Load the last added energy value (disabled)."""
+    return None
 
 def _save_last_energy(vehicle_id, value):
-    """Persist the last added energy value for a vehicle."""
-    try:
-        with open(_last_energy_file(vehicle_id), "w", encoding="utf-8") as f:
-            f.write(str(value))
-    except Exception:
-        pass
-
+    """Persist the last added energy value for a vehicle (disabled)."""
+    return
 
 def send_aprs(vehicle_data):
     """Transmit a position packet via APRS-IS using aprslib."""
@@ -1207,7 +1041,7 @@ def _compute_energy_stats(filename=os.path.join(DATA_DIR, "energy.log")):
 
 
 def compute_statistics():
-    """Compute daily statistics and save them to ``STAT_FILE``."""
+    """Compute daily statistics (file storage disabled)."""
     stats = _compute_state_stats(_load_state_entries())
     energy = _compute_energy_stats()
     for path in _get_trip_files():
@@ -1219,9 +1053,7 @@ def compute_statistics():
             pass
         km = _trip_distance(path)
         speed = _trip_max_speed(path)
-        stats.setdefault(
-            date_str, {"online": 0.0, "offline": 0.0, "asleep": 0.0}
-        )
+        stats.setdefault(date_str, {"online": 0.0, "offline": 0.0, "asleep": 0.0})
         stats[date_str]["km"] = km
         stats[date_str]["speed"] = speed
     for day, val in energy.items():
@@ -1240,14 +1072,7 @@ def compute_statistics():
         val.setdefault("km", 0.0)
         val.setdefault("speed", 0.0)
         val.setdefault("energy", 0.0)
-    try:
-        os.makedirs(os.path.dirname(STAT_FILE), exist_ok=True)
-        with open(STAT_FILE, "w", encoding="utf-8") as f:
-            json.dump(stats, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
     return stats
-
 
 def compute_trip_summaries():
     """Return weekly and monthly distance summaries."""
