@@ -6,8 +6,7 @@ under `static/`.  Documentation and example files are located in `docs/`.
 
 ## General workflow
 
-- Run `pytest -q` after every change. The project currently has no tests so the
-  command should report `no tests ran`.
+- Run `pytest -q` after every change to ensure the test suite passes.
 - Avoid automatic code formatters like `black` or `isort` unless explicitly
   requested. Follow PEP 8 conventions manually.
 - Keep commit messages short and in English, describing what the change does.
