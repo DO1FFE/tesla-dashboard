@@ -1596,10 +1596,8 @@ def _fetch_data_once(vehicle_id="default"):
 
     if isinstance(data, dict):
         last_val = None
-        start_val = None
         if isinstance(cached, dict):
             last_val = cached.get("last_charge_energy_added")
-            start_val = cached.get("charging_start_energy")
         if last_val is None:
             last_val = _load_last_energy(cache_id)
 
@@ -1610,42 +1608,26 @@ def _fetch_data_once(vehicle_id="default"):
         if val is not None:
             if last_val is not None and val < last_val:
                 # Finish previous session before counter resets
-                if start_val is not None:
-                    added = last_val - start_val
-                    if added > 0:
-                        _log_energy(cache_id, added)
+                if last_val > 0:
+                    _log_energy(cache_id, last_val)
                 _save_last_energy(cache_id, last_val)
                 saved_val = last_val
-                start_val = val
-            if charge.get("charging_state") == "Charging" and start_val is None:
-                start_val = val
-
             last_val = val
 
             end_state = charge.get("charging_state")
             if end_state in ("Complete", "Disconnected"):
-                if start_val is not None:
-                    added = last_val - start_val
-                    if added > 0:
-                        _log_energy(cache_id, added)
-                _save_last_energy(cache_id, last_val)
-                saved_val = last_val
-                start_val = None
+                if val > 0:
+                    _log_energy(cache_id, val)
+                _save_last_energy(cache_id, val)
+                saved_val = val
         elif charge.get("charging_state") in ("Complete", "Disconnected") and last_val is not None:
-            if start_val is not None:
-                added = last_val - start_val
-                if added > 0:
-                    _log_energy(cache_id, added)
+            if last_val > 0:
+                _log_energy(cache_id, last_val)
             _save_last_energy(cache_id, last_val)
             saved_val = last_val
-            start_val = None
 
         if saved_val is not None:
             data["last_charge_energy_added"] = saved_val
-        if start_val is not None:
-            data["charging_start_energy"] = start_val
-        else:
-            data.pop("charging_start_energy", None)
 
         drive = data.get("drive_state", {})
         lat = drive.get("latitude")
