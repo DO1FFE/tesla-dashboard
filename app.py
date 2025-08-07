@@ -1506,6 +1506,29 @@ def get_vehicle_list():
 def reverse_geocode(lat, lon, vehicle_id=None):
     """Return address ``Straße Hausnummer, PLZ Ort-Stadtteil`` for coordinates."""
 
+    def _compose_label(street, house_number, postcode, city, district):
+        parts = []
+
+        street_part = " ".join(
+            [p for p in [street, house_number] if p]
+        ).strip()
+        if street_part:
+            parts.append(street_part)
+
+        city_text = ""
+        if city:
+            city_text = city
+            if district and district != city:
+                city_text += f"-{district}"
+        elif district:
+            city_text = district
+
+        second_part = " ".join([p for p in [postcode, city_text] if p]).strip()
+        if second_part:
+            parts.append(second_part)
+
+        return ", ".join(parts) if parts else None
+
     headers = {"User-Agent": "TeslaDashboard/1.0"}
     try:
         url = "https://nominatim.openstreetmap.org/reverse"
@@ -1534,11 +1557,8 @@ def reverse_geocode(lat, lon, vehicle_id=None):
         )
         postcode = addr.get("postcode")
 
-        if street and house_number and postcode and city:
-            city_text = city
-            if district and district != city:
-                city_text += f"-{district}"
-            label = f"{street} {house_number}, {postcode} {city_text}"
+        label = _compose_label(street, house_number, postcode, city, district)
+        if label:
             return {"address": label, "raw": data}
     except Exception as exc:
         _log_api_error(exc)
@@ -1559,11 +1579,8 @@ def reverse_geocode(lat, lon, vehicle_id=None):
             city = props.get("city") or props.get("locality")
             district = props.get("district")
 
-            if street and house_number and postcode and city:
-                city_text = city
-                if district and district != city:
-                    city_text += f"-{district}"
-                label = f"{street} {house_number}, {postcode} {city_text}"
+            label = _compose_label(street, house_number, postcode, city, district)
+            if label:
                 return {"address": label, "raw": data}
     except Exception as exc2:
         _log_api_error(exc2)
