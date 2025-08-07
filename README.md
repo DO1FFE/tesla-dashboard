@@ -44,10 +44,9 @@ All required JavaScript and CSS libraries are bundled under `static/` so the das
 
 The backend continuously polls the Tesla API and pushes new data to clients using Server-Sent Events (SSE). The frontend never talks to the Tesla API directly. It only requests data from the backend using the `/api/...` endpoints so tokens remain secure on the server.
 The frontend first checks `/api/state` to make sure the car is online before
-opening the streaming connection.  When the vehicle is reported as `offline` or
-`asleep` no further API requests are made, preventing the car from waking up
-unexpectedly.  Only when occupant presence is reported via `/api/occupant` will
-the application wake the vehicle and query live data.
+opening the streaming connection. When the vehicle is reported as `offline` or
+`asleep` no further API requests are made so the car remains in its current
+state. The dashboard never wakes the vehicle automatically.
 
 ## Features
 
@@ -87,9 +86,9 @@ The same information is also stored as hierarchical JSON in `data/api-liste.json
 * `/api/version` – return the current dashboard version as JSON
 * `/api/clients` – number of connected clients as JSON
 * `/api/occupant` – get or set occupant presence flag
-* `/api/announcement` – return the current announcement text as JSON
     * Use `POST` with a JSON body like `{ "present": true }` or `{ "present": false }`
-      to keep the vehicle awake only when someone is inside.
+      to notify the dashboard whether someone is inside.
+* `/api/announcement` – return the current announcement text as JSON
 * `/stream/<vehicle_id>` – Server-Sent Events endpoint used by the frontend
 
 ## Version

@@ -1374,14 +1374,6 @@ def _refresh_state(vehicle, times=2):
         if state == "online":
             return state
 
-    if state == "asleep":
-        try:
-            vehicle.sync_wake_up(timeout=10)
-            state = vehicle.get("state") or vehicle["state"]
-            log_vehicle_state(vehicle["id_s"], state)
-            log_api_data("wake_up_retry", {"state": state})
-        except Exception:
-            pass
     return state
 
 
@@ -1451,19 +1443,7 @@ def get_vehicle_data(vehicle_id=None, state=None):
             return {"error": "Vehicle unavailable", "state": "offline"}
 
     if state != "online":
-        if occupant_present and state in ("asleep", "offline"):
-            try:
-                vehicle.sync_wake_up()
-                state = vehicle.get("state") or vehicle["state"]
-                log_vehicle_state(vehicle["id_s"], state)
-                log_api_data("wake_up", {"state": state})
-            except Exception as exc:
-                _log_api_error(exc)
-                return {"error": str(exc), "state": state}
-            if state != "online":
-                return {"state": state}
-        else:
-            return {"state": state}
+        return {"state": state}
 
     try:
         vehicle_data = vehicle.get_vehicle_data()
