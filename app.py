@@ -1719,6 +1719,7 @@ def _fetch_loop(vehicle_id, interval=3):
     """Continuously fetch data for a vehicle and notify subscribers."""
     idle_interval = 30
     while True:
+        start = time.time()
         cfg = load_config()
         try:
             interval = int(cfg.get("api_interval", interval))
@@ -1772,9 +1773,12 @@ def _fetch_loop(vehicle_id, interval=3):
             or unlocked
             or charging
         ):
-            time.sleep(interval)
+            remaining = interval - (time.time() - start)
+            if remaining > 0:
+                time.sleep(remaining)
         else:
-            _sleep_idle(idle_interval)
+            remaining = idle_interval - (time.time() - start)
+            _sleep_idle(max(0, remaining))
 
 
 def _start_thread(vehicle_id):
