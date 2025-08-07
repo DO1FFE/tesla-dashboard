@@ -155,8 +155,8 @@ if not state_logger.handlers:
 
 energy_logger = logging.getLogger("energy_logger")
 if not energy_logger.handlers:
-    handler = RotatingFileHandler(
-        os.path.join(DATA_DIR, "energy.log"), maxBytes=100_000, backupCount=1
+    handler = logging.FileHandler(
+        os.path.join(DATA_DIR, "energy.log"), encoding="utf-8"
     )
     formatter = logging.Formatter("%(asctime)s %(message)s")
     formatter.converter = lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
@@ -531,6 +531,7 @@ current_trip_file = None
 current_trip_date = None
 drive_pause_ms = None
 latest_data = {}
+address_cache = {}
 subscribers = {}
 threads = {}
 _vehicle_list_cache = []
@@ -1645,6 +1646,37 @@ def _fetch_data_once(vehicle_id="default"):
             data["charging_start_energy"] = start_val
         else:
             data.pop("charging_start_energy", None)
+
+        drive = data.get("drive_state", {})
+        lat = drive.get("latitude")
+        lon = drive.get("longitude")
+        if lat is not None and lon is not None:
+            entry = address_cache.get(cache_id)
+            now = time.time()
+            needs_update = (
+                entry is None
+                or now - entry.get("ts", 0) >= 5
+                or abs(entry.get("lat") - lat) > 1e-4
+                or abs(entry.get("lon") - lon) > 1e-4
+            )
+            if needs_update:
+                result = reverse_geocode(lat, lon, vehicle_id)
+                addr = result.get("address")
+                if addr:
+                    address_cache[cache_id] = {
+                        "lat": lat,
+                        "lon": lon,
+                        "address": addr,
+                        "ts": now,
+                    }
+            entry = address_cache.get(cache_id)
+            if entry and entry.get("address"):
+                data["location_address"] = entry["address"]
+            else:
+                data.pop("location_address", None)
+        else:
+            address_cache.pop(cache_id, None)
+            data.pop("location_address", None)
 
     if isinstance(data, dict):
         data["_live"] = live
