@@ -1304,11 +1304,24 @@ def get_tesla():
 
 def sanitize(data):
     """Remove personally identifiable fields from the vehicle data."""
+    sensitive = {
+        "id",
+        "user_id",
+        "vehicle_id",
+        "vin",
+        "tokens",
+        "token",
+        "access_token",
+        "refresh_token",
+        "backseat_token",
+        "backseat_token_updated_at",
+    }
     if isinstance(data, dict):
-        if "vin" in data:
-            data.pop("vin", None)
-        for value in data.values():
-            sanitize(value)
+        for key in list(data.keys()):
+            if key in sensitive or "token" in key:
+                data.pop(key, None)
+            else:
+                sanitize(data[key])
     elif isinstance(data, list):
         for item in data:
             sanitize(item)
@@ -1960,8 +1973,14 @@ def api_reverse_geocode():
 
 @app.route("/api/config")
 def api_config():
-    """Return visibility configuration as JSON."""
-    return jsonify(load_config())
+    """Return visibility configuration without sensitive fields."""
+    cfg = load_config()
+    if "phone_number" in cfg:
+        cfg["phone_number"] = True
+    if "infobip_api_key" in cfg:
+        cfg["infobip_api_key"] = True
+    cfg.pop("infobip_base_url", None)
+    return jsonify(cfg)
 
 
 @app.route("/api/announcement")
