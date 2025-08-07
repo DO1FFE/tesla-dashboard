@@ -1504,50 +1504,70 @@ def get_vehicle_list():
 
 
 def reverse_geocode(lat, lon, vehicle_id=None):
-    """Return address information for given coordinates using OpenStreetMap."""
+    """Return address ``Straße Hausnummer, PLZ Ort-Stadtteil`` for coordinates."""
 
     headers = {"User-Agent": "TeslaDashboard/1.0"}
     try:
         url = "https://nominatim.openstreetmap.org/reverse"
-        params = {"lat": lat, "lon": lon, "format": "jsonv2"}
+        params = {
+            "lat": lat,
+            "lon": lon,
+            "format": "jsonv2",
+            "addressdetails": 1,
+        }
         r = requests.get(url, params=params, headers=headers, timeout=5)
         r.raise_for_status()
         data = r.json()
-        return {"address": data.get("display_name"), "raw": data}
+        addr = data.get("address", {})
+
+        street = (
+            addr.get("road")
+            or addr.get("pedestrian")
+            or addr.get("footway")
+        )
+        house_number = addr.get("house_number")
+        city = addr.get("city") or addr.get("town") or addr.get("village")
+        district = (
+            addr.get("suburb")
+            or addr.get("city_district")
+            or addr.get("district")
+        )
+        postcode = addr.get("postcode")
+
+        if street and house_number and postcode and city:
+            city_text = city
+            if district and district != city:
+                city_text += f"-{district}"
+            label = f"{street} {house_number}, {postcode} {city_text}"
+            return {"address": label, "raw": data}
     except Exception as exc:
         _log_api_error(exc)
-        try:
-            url = "https://photon.komoot.io/reverse"
-            params = {"lat": lat, "lon": lon}
-            r = requests.get(url, params=params, headers=headers, timeout=5)
-            r.raise_for_status()
-            data = r.json()
-            features = data.get("features")
-            if features:
-                props = features[0].get("properties", {})
-                parts = []
-                street = props.get("street")
-                if street:
-                    if props.get("housenumber"):
-                        street += f" {props['housenumber']}"
-                    parts.append(street)
-                city = props.get("city") or props.get("locality")
-                district = props.get("district")
-                if props.get("postcode") and city:
-                    city_text = city
-                    if district and district != city:
-                        city_text += f"-{district}"
-                    parts.append(f"{props['postcode']} {city_text}")
-                elif city:
-                    parts.append(city)
-                if not parts and props.get("name"):
-                    parts.append(props["name"])
-                label = ", ".join(parts)
-                if label:
-                    return {"address": label, "raw": data}
-        except Exception as exc2:
-            _log_api_error(exc2)
-        return {}
+
+    try:
+        url = "https://photon.komoot.io/reverse"
+        params = {"lat": lat, "lon": lon}
+        r = requests.get(url, params=params, headers=headers, timeout=5)
+        r.raise_for_status()
+        data = r.json()
+        features = data.get("features")
+        if features:
+            props = features[0].get("properties", {})
+
+            street = props.get("street")
+            house_number = props.get("housenumber")
+            postcode = props.get("postcode")
+            city = props.get("city") or props.get("locality")
+            district = props.get("district")
+
+            if street and house_number and postcode and city:
+                city_text = city
+                if district and district != city:
+                    city_text += f"-{district}"
+                label = f"{street} {house_number}, {postcode} {city_text}"
+                return {"address": label, "raw": data}
+    except Exception as exc2:
+        _log_api_error(exc2)
+    return {}
 
 
 def _fetch_data_once(vehicle_id="default"):
