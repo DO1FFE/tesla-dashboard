@@ -534,6 +534,28 @@ def _delete_parktime():
     """Remove the stored park timestamp (disabled)."""
     return
 
+park_start_ms = _load_parktime()
+last_shift_state = None
+trip_path = []
+current_trip_file = None
+current_trip_date = None
+drive_pause_ms = None
+latest_data = {}
+address_cache = {}
+subscribers = {}
+threads = {}
+_vehicle_list_cache = []
+_vehicle_list_cache_ts = 0.0
+_vehicle_list_lock = threading.Lock()
+api_errors = []
+api_errors_lock = threading.Lock()
+state_lock = threading.Lock()
+last_vehicle_state = _load_last_state()
+occupant_present = False
+_default_vehicle_id = None
+_last_aprs_info = {}
+_last_wx_info = {}
+
 def track_park_time(vehicle_data):
     """Track when the vehicle was first seen parked."""
     global park_start_ms, last_shift_state
@@ -1126,11 +1148,24 @@ def get_tesla():
 
 def sanitize(data):
     """Remove personally identifiable fields from the vehicle data."""
+    sensitive = {
+        "id",
+        "user_id",
+        "vehicle_id",
+        "vin",
+        "tokens",
+        "token",
+        "access_token",
+        "refresh_token",
+        "backseat_token",
+        "backseat_token_updated_at",
+    }
     if isinstance(data, dict):
-        if "vin" in data:
-            data.pop("vin", None)
-        for value in data.values():
-            sanitize(value)
+        for key in list(data.keys()):
+            if key in sensitive or "token" in key:
+                data.pop(key, None)
+            else:
+                sanitize(data[key])
     elif isinstance(data, list):
         for item in data:
             sanitize(item)
@@ -1166,14 +1201,6 @@ def _refresh_state(vehicle, times=2):
         if state == "online":
             return state
 
-    if state == "asleep":
-        try:
-            vehicle.sync_wake_up(timeout=10)
-            state = vehicle.get("state") or vehicle["state"]
-            log_vehicle_state(vehicle["id_s"], state)
-            log_api_data("wake_up_retry", {"state": state})
-        except Exception:
-            pass
     return state
 
 
@@ -1243,19 +1270,7 @@ def get_vehicle_data(vehicle_id=None, state=None):
             return {"error": "Vehicle unavailable", "state": "offline"}
 
     if state != "online":
-        if occupant_present and state in ("asleep", "offline"):
-            try:
-                vehicle.sync_wake_up()
-                state = vehicle.get("state") or vehicle["state"]
-                log_vehicle_state(vehicle["id_s"], state)
-                log_api_data("wake_up", {"state": state})
-            except Exception as exc:
-                _log_api_error(exc)
-                return {"error": str(exc), "state": state}
-            if state != "online":
-                return {"state": state}
-        else:
-            return {"state": state}
+        return {"state": state}
 
     try:
         vehicle_data = vehicle.get_vehicle_data()
@@ -1308,51 +1323,88 @@ def get_vehicle_list():
     return sanitized
 
 
-def reverse_geocode(lat, lon):
-    """Return address information for given coordinates using OpenStreetMap."""
+def reverse_geocode(lat, lon, vehicle_id=None):
+    """Return address ``Straße Hausnummer, PLZ Ort-Stadtteil`` for coordinates."""
+
+    def _compose_label(street, house_number, postcode, city, district):
+        parts = []
+
+        street_part = " ".join(
+            [p for p in [street, house_number] if p]
+        ).strip()
+        if street_part:
+            parts.append(street_part)
+
+        city_text = ""
+        if city:
+            city_text = city
+            if district and district != city:
+                city_text += f"-{district}"
+        elif district:
+            city_text = district
+
+        second_part = " ".join([p for p in [postcode, city_text] if p]).strip()
+        if second_part:
+            parts.append(second_part)
+
+        return ", ".join(parts) if parts else None
 
     headers = {"User-Agent": "TeslaDashboard/2.0"}
     try:
         url = "https://nominatim.openstreetmap.org/reverse"
-        params = {"lat": lat, "lon": lon, "format": "jsonv2"}
+        params = {
+            "lat": lat,
+            "lon": lon,
+            "format": "jsonv2",
+            "addressdetails": 1,
+        }
         r = requests.get(url, params=params, headers=headers, timeout=5)
         r.raise_for_status()
         data = r.json()
-        return {"address": data.get("display_name"), "raw": data}
+        addr = data.get("address", {})
+
+        street = (
+            addr.get("road")
+            or addr.get("pedestrian")
+            or addr.get("footway")
+        )
+        house_number = addr.get("house_number")
+        city = addr.get("city") or addr.get("town") or addr.get("village")
+        district = (
+            addr.get("suburb")
+            or addr.get("city_district")
+            or addr.get("district")
+        )
+        postcode = addr.get("postcode")
+
+        label = _compose_label(street, house_number, postcode, city, district)
+        if label:
+            return {"address": label, "raw": data}
     except Exception as exc:
         _log_api_error(exc)
-        try:
-            url = "https://photon.komoot.io/reverse"
-            params = {"lat": lat, "lon": lon}
-            r = requests.get(url, params=params, headers=headers, timeout=5)
-            r.raise_for_status()
-            data = r.json()
-            features = data.get("features")
-            if features:
-                props = features[0].get("properties", {})
-                parts = []
-                street = props.get("street")
-                if street:
-                    if props.get("housenumber"):
-                        street += f" {props['housenumber']}"
-                    parts.append(street)
-                city = props.get("city") or props.get("locality")
-                district = props.get("district")
-                if props.get("postcode") and city:
-                    city_text = city
-                    if district and district != city:
-                        city_text += f"-{district}"
-                    parts.append(f"{props['postcode']} {city_text}")
-                elif city:
-                    parts.append(city)
-                if not parts and props.get("name"):
-                    parts.append(props["name"])
-                label = ", ".join(parts)
-                if label:
-                    return {"address": label, "raw": data}
-        except Exception as exc2:
-            _log_api_error(exc2)
-        return {}
+
+    try:
+        url = "https://photon.komoot.io/reverse"
+        params = {"lat": lat, "lon": lon}
+        r = requests.get(url, params=params, headers=headers, timeout=5)
+        r.raise_for_status()
+        data = r.json()
+        features = data.get("features")
+        if features:
+            props = features[0].get("properties", {})
+
+            street = props.get("street")
+            house_number = props.get("housenumber")
+            postcode = props.get("postcode")
+            city = props.get("city") or props.get("locality")
+            district = props.get("district")
+
+            label = _compose_label(street, house_number, postcode, city, district)
+            if label:
+                return {"address": label, "raw": data}
+    except Exception as exc2:
+        _log_api_error(exc2)
+    return {}
 
 
 def _fetch_data_once(vehicle_id):
@@ -1399,10 +1451,8 @@ def _fetch_data_once(vehicle_id):
 
     if isinstance(data, dict):
         last_val = None
-        start_val = None
         if isinstance(cached, dict):
             last_val = cached.get("last_charge_energy_added")
-            start_val = cached.get("charging_start_energy")
         if last_val is None:
             last_val = _load_last_energy(cache_id)
 
@@ -1413,42 +1463,57 @@ def _fetch_data_once(vehicle_id):
         if val is not None:
             if last_val is not None and val < last_val:
                 # Finish previous session before counter resets
-                if start_val is not None:
-                    added = last_val - start_val
-                    if added > 0:
-                        _log_energy(cache_id, added)
+                if last_val > 0:
+                    _log_energy(cache_id, last_val)
                 _save_last_energy(cache_id, last_val)
                 saved_val = last_val
-                start_val = val
-            if charge.get("charging_state") == "Charging" and start_val is None:
-                start_val = val
-
             last_val = val
 
             end_state = charge.get("charging_state")
             if end_state in ("Complete", "Disconnected"):
-                if start_val is not None:
-                    added = last_val - start_val
-                    if added > 0:
-                        _log_energy(cache_id, added)
-                _save_last_energy(cache_id, last_val)
-                saved_val = last_val
-                start_val = None
+                if val > 0:
+                    _log_energy(cache_id, val)
+                _save_last_energy(cache_id, val)
+                saved_val = val
         elif charge.get("charging_state") in ("Complete", "Disconnected") and last_val is not None:
-            if start_val is not None:
-                added = last_val - start_val
-                if added > 0:
-                    _log_energy(cache_id, added)
+            if last_val > 0:
+                _log_energy(cache_id, last_val)
             _save_last_energy(cache_id, last_val)
             saved_val = last_val
-            start_val = None
 
         if saved_val is not None:
             data["last_charge_energy_added"] = saved_val
-        if start_val is not None:
-            data["charging_start_energy"] = start_val
+
+        drive = data.get("drive_state", {})
+        lat = drive.get("latitude")
+        lon = drive.get("longitude")
+        if lat is not None and lon is not None:
+            entry = address_cache.get(cache_id)
+            now = time.time()
+            needs_update = (
+                entry is None
+                or now - entry.get("ts", 0) >= 5
+                or abs(entry.get("lat") - lat) > 1e-4
+                or abs(entry.get("lon") - lon) > 1e-4
+            )
+            if needs_update:
+                result = reverse_geocode(lat, lon, vehicle_id)
+                addr = result.get("address")
+                if addr:
+                    address_cache[cache_id] = {
+                        "lat": lat,
+                        "lon": lon,
+                        "address": addr,
+                        "ts": now,
+                    }
+            entry = address_cache.get(cache_id)
+            if entry and entry.get("address"):
+                data["location_address"] = entry["address"]
+            else:
+                data.pop("location_address", None)
         else:
-            data.pop("charging_start_energy", None)
+            address_cache.pop(cache_id, None)
+            data.pop("location_address", None)
 
     if isinstance(data, dict):
         data["_live"] = live
@@ -1479,6 +1544,7 @@ def _fetch_loop(vehicle_id, interval=3):
     """Continuously fetch data for a vehicle and notify subscribers."""
     idle_interval = 30
     while True:
+        start = time.time()
         cfg = load_config()
         try:
             interval = int(cfg.get("api_interval", interval))
@@ -1532,9 +1598,12 @@ def _fetch_loop(vehicle_id, interval=3):
             or unlocked
             or charging
         ):
-            time.sleep(interval)
+            remaining = interval - (time.time() - start)
+            if remaining > 0:
+                time.sleep(remaining)
         else:
-            _sleep_idle(idle_interval)
+            remaining = idle_interval - (time.time() - start)
+            _sleep_idle(max(0, remaining))
 
 
 def _start_thread(vehicle_id):
@@ -1850,14 +1919,21 @@ def api_reverse_geocode():
         lon = float(request.args.get("lon"))
     except (TypeError, ValueError):
         return jsonify({"error": "Missing coordinates"}), 400
-    result = reverse_geocode(lat, lon)
+    vehicle_id = request.args.get("vehicle_id")
+    result = reverse_geocode(lat, lon, vehicle_id)
     return jsonify(result)
 
 
 @app.route("/api/config")
 def api_config():
-    """Return visibility configuration as JSON."""
-    return jsonify(load_config())
+    """Return visibility configuration without sensitive fields."""
+    cfg = load_config()
+    if "phone_number" in cfg:
+        cfg["phone_number"] = True
+    if "infobip_api_key" in cfg:
+        cfg["infobip_api_key"] = True
+    cfg.pop("infobip_base_url", None)
+    return jsonify(cfg)
 
 
 @app.route("/api/announcement")

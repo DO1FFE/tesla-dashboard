@@ -59,8 +59,6 @@ map.on('zoomend', function() {
 var polyline = null;
 var pendingPath = null;
 var lastDataTimestamp = null;
-var lastAddressLat = null;
-var lastAddressLng = null;
 var CONFIG = {};
 var HIGHLIGHT_BLUE = false;
 var OFFLINE_TEXT = 'Das Fahrzeug ist offline und schläft - Bitte nicht wecken! - Die Daten sind die zuletzt bekannten und somit nicht aktuell!';
@@ -335,7 +333,6 @@ function handleData(data) {
         if (typeof drive.heading === 'number') {
             marker.setRotationAngle(drive.heading);
         }
-        fetchAddress(lat, lng);
     } else {
         // Fall back to Essen if no coordinates are available
         var zoom = DEFAULT_ZOOM;
@@ -345,7 +342,15 @@ function handleData(data) {
         zoomSetByApp = true;
         map.setView(DEFAULT_POS, zoom);
         updateZoomDisplay();
+    }
+
+    var addr = data.location_address;
+    if (addr) {
+        $('#address-text').text(addr);
+        $('#address-error').hide();
+    } else {
         $('#address-text').text('');
+        $('#address-error').hide();
     }
 
     // Show destination flag and route line if navigation is active
@@ -1170,65 +1175,6 @@ function fetchAnnouncement() {
         }
     });
 }
-
-function fetchAddress(lat, lon) {
-    if (lat == null || lon == null) return;
-    if (lastAddressLat === lat && lastAddressLng === lon) return;
-    $.getJSON(BASE_PATH + '/api/reverse_geocode', {lat: lat, lon: lon}, function(resp) {
-        var addr = null;
-        if (resp.raw && resp.raw.address) {
-            var a = resp.raw.address;
-            var line1 = '';
-            if (a.road) {
-                line1 += a.road;
-                if (a.house_number) {
-                    line1 += ' ' + a.house_number;
-                }
-            }
-            var city = a.city || a.town || a.village;
-            var district = a.suburb || a.city_district || a.neighbourhood;
-            var line2Parts = [];
-            if (a.postcode) {
-                line2Parts.push(a.postcode);
-            }
-            if (city) {
-                var cityText = city;
-                if (district && district !== city) {
-                    cityText += '-' + district;
-                }
-                line2Parts.push(cityText);
-            }
-            var line2 = line2Parts.join(' ');
-            if (line1 || line2) {
-                addr = line1;
-                if (line2) {
-                    addr += (addr ? ', ' : '') + line2;
-                }
-            }
-        }
-        if (!addr) {
-            addr = resp.address || resp.display_name;
-            if (!addr && resp.raw && resp.raw.display_name) {
-                addr = resp.raw.display_name;
-            }
-        }
-        $('#address-text').text(addr || '');
-        if (!addr) {
-            $('#address-error')
-                .text('Adresse konnte nicht abgerufen werden')
-                .show();
-        } else {
-            lastAddressLat = lat;
-            lastAddressLng = lon;
-            $('#address-error').hide();
-        }
-    }).fail(function() {
-        $('#address-text').text('');
-        $('#address-error').text('Adresse konnte nicht abgerufen werden').show();
-    });
-}
-
-
 
 
 function updateUI(data) {
