@@ -23,6 +23,9 @@ from version import get_version
 import qrcode
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager
+import stripe
 
 try:
     import teslapy
@@ -41,8 +44,13 @@ except ImportError:
 
 load_dotenv()
 app = Flask(__name__)
+app.config.from_object("config")
+db = SQLAlchemy(app)
+login_manager = LoginManager(app)
+stripe.api_key = os.getenv("STRIPE_API_KEY")
+LOCAL_TZ = ZoneInfo("Europe/Berlin")
 __version__ = get_version()
-CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
+CURRENT_YEAR = datetime.now(LOCAL_TZ).year
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
 
 
@@ -57,144 +65,52 @@ def inject_ga_id():
 # from any location while still finding the trip files and caches.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
-os.makedirs(DATA_DIR, exist_ok=True)
 
 
 def vehicle_dir(vehicle_id):
     """Return directory for a specific vehicle."""
     dir_name = str(vehicle_id) if vehicle_id is not None else "default"
-    path = os.path.join(DATA_DIR, dir_name)
-    os.makedirs(path, exist_ok=True)
-    return path
+    return os.path.join(DATA_DIR, dir_name)
 
 
 def trip_dir(vehicle_id):
     """Return directory holding trip CSV files for ``vehicle_id``."""
-    path = os.path.join(vehicle_dir(vehicle_id), "trips")
-    os.makedirs(path, exist_ok=True)
-    return path
+    return os.path.join(vehicle_dir(vehicle_id), "trips")
 
 
 def receipt_dir():
     """Directory for stored taximeter receipts."""
-    path = os.path.join(DATA_DIR, "receipts")
-    os.makedirs(path, exist_ok=True)
-    return path
+    return os.path.join(DATA_DIR, "receipts")
 
 
 def migrate_legacy_files():
-    """Move files from the old layout to per-vehicle directories."""
-    try:
-        for fname in os.listdir(DATA_DIR):
-            if fname.startswith("cache_") and fname.endswith(".json"):
-                vid = fname[len("cache_"):-5]
-                src = os.path.join(DATA_DIR, fname)
-                dst = os.path.join(vehicle_dir(vid), "cache.json")
-                if not os.path.exists(dst):
-                    os.rename(src, dst)
-            if fname.startswith("last_energy_") and fname.endswith(".txt"):
-                vid = fname[len("last_energy_"):-4]
-                src = os.path.join(DATA_DIR, fname)
-                dst = os.path.join(vehicle_dir(vid), "last_energy.txt")
-                if not os.path.exists(dst):
-                    os.rename(src, dst)
-        old_trip_dir = os.path.join(DATA_DIR, "trips")
-        if os.path.isdir(old_trip_dir):
-            for f in os.listdir(old_trip_dir):
-                if f.endswith(".csv"):
-                    src = os.path.join(old_trip_dir, f)
-                    dst = os.path.join(trip_dir(None), f)
-                    if not os.path.exists(dst):
-                        os.rename(src, dst)
-            try:
-                os.rmdir(old_trip_dir)
-            except OSError:
-                pass
-    except Exception:
-        pass
+    """Legacy file migration disabled in multi user mode."""
+    return
 
 
-migrate_legacy_files()
+# migrate_legacy_files()
 
 CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 APRS_HOST = "euro.aprs2.net"
 APRS_PORT = 14580
-LOCAL_TZ = ZoneInfo("Europe/Berlin")
 MILES_TO_KM = 1.60934
 api_logger = logging.getLogger("api_logger")
-if not api_logger.handlers:
-    handler = RotatingFileHandler(
-        os.path.join(DATA_DIR, "api.log"), maxBytes=1_000_000, backupCount=1
-    )
-    formatter = logging.Formatter("%(asctime)s %(message)s")
-    handler.setFormatter(formatter)
-    api_logger.addHandler(handler)
-    api_logger.setLevel(logging.INFO)
-    # Forward detailed library logs to the same file
-    for name in ("teslapy", "urllib3"):
-        lib_logger = logging.getLogger(name)
-        lib_logger.addHandler(handler)
-        lib_logger.setLevel(logging.DEBUG)
-    try:
-        import http.client as http_client
-
-        http_client.HTTPConnection.debuglevel = 1
-    except Exception:
-        pass
-
+api_logger.addHandler(logging.NullHandler())
 state_logger = logging.getLogger("state_logger")
-if not state_logger.handlers:
-    handler = RotatingFileHandler(
-        os.path.join(DATA_DIR, "state.log"), maxBytes=100_000, backupCount=1
-    )
-    formatter = logging.Formatter("%(asctime)s %(message)s")
-    formatter.converter = lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
-    handler.setFormatter(formatter)
-    state_logger.addHandler(handler)
-    state_logger.setLevel(logging.INFO)
-
+state_logger.addHandler(logging.NullHandler())
 energy_logger = logging.getLogger("energy_logger")
-if not energy_logger.handlers:
-    handler = logging.FileHandler(
-        os.path.join(DATA_DIR, "energy.log"), encoding="utf-8"
-    )
-    formatter = logging.Formatter("%(asctime)s %(message)s")
-    formatter.converter = lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
-    handler.setFormatter(formatter)
-    energy_logger.addHandler(handler)
-    energy_logger.setLevel(logging.INFO)
-
+energy_logger.addHandler(logging.NullHandler())
 sms_logger = logging.getLogger("sms_logger")
-if not sms_logger.handlers:
-    handler = RotatingFileHandler(
-        os.path.join(DATA_DIR, "sms.log"), maxBytes=100_000, backupCount=1
-    )
-    formatter = logging.Formatter("%(asctime)s %(message)s")
-    formatter.converter = lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
-    handler.setFormatter(formatter)
-    sms_logger.addHandler(handler)
-    sms_logger.setLevel(logging.INFO)
+sms_logger.addHandler(logging.NullHandler())
 
 
 def _load_last_state(filename=os.path.join(DATA_DIR, "state.log")):
-    """Load the last logged state for each vehicle from ``state.log``."""
-    result = {}
-    try:
-        with open(filename, "r", encoding="utf-8") as f:
-            for line in f:
-                idx = line.find("{")
-                if idx != -1:
-                    try:
-                        entry = json.loads(line[idx:])
-                        vid = entry.get("vehicle_id")
-                        state = entry.get("state")
-                        if vid is not None and state is not None:
-                            result[vid] = state
-                    except Exception:
-                        pass
-    except Exception:
-        pass
-    return result
+    """Return last logged state from memory.
+
+    File based state persistence has been removed for the multi user
+    setup, therefore this helper simply returns an empty dictionary.
+    """
+    return {}
 
 
 # Tools to build an aggregated list of API keys ------------------------------
@@ -379,23 +295,18 @@ CONFIG_ITEMS = [
 ]
 
 
+config_cache = {}
+
+
 def load_config():
-    try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-            if isinstance(cfg, dict):
-                return cfg
-    except Exception:
-        pass
-    return {}
+    """Return configuration from in-memory cache."""
+    return dict(config_cache)
 
 
 def save_config(cfg):
-    try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    """Persist configuration in memory only."""
+    if isinstance(cfg, dict):
+        config_cache.update(cfg)
 
 
 def get_taximeter_tariff():
@@ -700,87 +611,45 @@ def log_vehicle_state(vehicle_id, state):
 
 
 def _last_logged_energy(vehicle_id):
-    """Return the last logged energy value for ``vehicle_id`` or ``None``."""
-    try:
-        with open(os.path.join(DATA_DIR, "energy.log"), "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        for line in reversed(lines):
-            idx = line.find("{")
-            if idx != -1:
-                try:
-                    entry = json.loads(line[idx:])
-                    if entry.get("vehicle_id") == vehicle_id:
-                        return float(entry.get("added_energy", 0.0))
-                except Exception:
-                    continue
-    except Exception:
-        pass
-    return None
+    """Return the last logged energy value from memory."""
+    return last_energy_store.get(vehicle_id)
 
 
 def _log_energy(vehicle_id, amount):
-    """Store the last added energy in ``energy.log`` using local time."""
-    try:
-        last = _last_logged_energy(vehicle_id)
-        if last is None or abs(last - amount) > 0.001:
-            entry = json.dumps({"vehicle_id": vehicle_id, "added_energy": amount})
-            energy_logger.info(entry)
-    except Exception:
-        pass
+    """Store the last added energy value in memory."""
+    last = _last_logged_energy(vehicle_id)
+    if last is None or abs(last - amount) > 0.001:
+        last_energy_store[vehicle_id] = amount
+
+
+sms_entries = []
+cache_store = {}
+last_energy_store = {}
 
 
 def _log_sms(message, success):
-    """Append SMS information to ``sms.log``."""
-    try:
-        sms_logger.info(json.dumps({"message": message, "success": success}))
-    except Exception:
-        pass
-
-
-def _cache_file(vehicle_id):
-    """Return filename for cached data of a vehicle."""
-    return os.path.join(vehicle_dir(vehicle_id), "cache.json")
+    """Store SMS information in memory."""
+    sms_entries.append({"message": message, "success": success})
 
 
 def _load_cached(vehicle_id):
-    """Load cached vehicle data from disk."""
-    try:
-        with open(_cache_file(vehicle_id), "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
+    """Return cached vehicle data from memory."""
+    return cache_store.get(vehicle_id)
 
 
 def _save_cached(vehicle_id, data):
-    """Write vehicle data cache to disk."""
-    try:
-        with open(_cache_file(vehicle_id), "w", encoding="utf-8") as f:
-            json.dump(data, f)
-    except Exception:
-        pass
-
-
-def _last_energy_file(vehicle_id):
-    """Return filename for the last added energy of a vehicle."""
-    return os.path.join(vehicle_dir(vehicle_id), "last_energy.txt")
+    """Persist vehicle cache in memory."""
+    cache_store[vehicle_id] = data
 
 
 def _load_last_energy(vehicle_id):
-    """Load the last added energy value from disk."""
-    try:
-        with open(_last_energy_file(vehicle_id), "r", encoding="utf-8") as f:
-            return float(f.read().strip())
-    except Exception:
-        return None
+    """Return the last added energy value from memory."""
+    return last_energy_store.get(vehicle_id)
 
 
 def _save_last_energy(vehicle_id, value):
-    """Persist the last added energy value for a vehicle."""
-    try:
-        with open(_last_energy_file(vehicle_id), "w", encoding="utf-8") as f:
-            f.write(str(value))
-    except Exception:
-        pass
+    """Store the last added energy value in memory."""
+    last_energy_store[vehicle_id] = value
 
 
 def send_aprs(vehicle_data):
@@ -2596,4 +2465,7 @@ def debug_info():
 
 
 if __name__ == "__main__":
+    with app.app_context():
+        import models
+        models.init_db()
     app.run(host="0.0.0.0", port=8013, debug=True)
