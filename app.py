@@ -31,6 +31,8 @@ from flask_login import (
     login_required,
     current_user,
 )
+from flask_admin import Admin, AdminIndexView
+from flask_admin.contrib.sqla import ModelView
 import stripe
 import click
 
@@ -56,8 +58,64 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev")
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
-from models import User, ConfigOption, ConfigVisibility  # noqa: E402
+from models import User, ConfigOption, ConfigVisibility, Vehicle  # noqa: E402
 from taximeter import Taximeter  # noqa: E402
+
+
+class _AdminMixin:
+    """Shared access checks for admin views."""
+
+    def is_accessible(self):  # pragma: no cover - simple auth check
+        return current_user.is_authenticated and current_user.role == "admin"
+
+    def inaccessible_callback(self, name, **kwargs):  # pragma: no cover
+        if current_user.is_authenticated:
+            abort(403)
+        return redirect(url_for("login", next=request.url))
+
+
+class SecureAdminIndexView(_AdminMixin, AdminIndexView):
+    pass
+
+
+class SecureModelView(_AdminMixin, ModelView):
+    page_size = 20
+
+
+admin = Admin(app, index_view=SecureAdminIndexView(url="/admin"))
+
+
+class UserAdminView(SecureModelView):
+    column_list = ("email", "role", "subscription", "is_ham_operator")
+    form_columns = ("email", "role", "subscription", "is_ham_operator")
+    column_searchable_list = ("email", "username")
+    column_sortable_list = column_list
+    can_view_details = True
+
+
+admin.add_view(
+    UserAdminView(User, db.session, endpoint="users", name="Users")
+)
+
+
+class VehicleAdminView(SecureModelView):
+    column_list = (
+        "vehicle_id",
+        "user_id",
+        "vin",
+        "model",
+        "display_name",
+        "active",
+    )
+    form_columns = column_list
+    column_searchable_list = ("vehicle_id", "vin", "model", "display_name")
+    column_sortable_list = column_list
+    can_view_details = True
+
+
+admin.add_view(
+    VehicleAdminView(Vehicle, db.session, endpoint="vehicles", name="Vehicles")
+)
 
 
 @login_manager.user_loader
