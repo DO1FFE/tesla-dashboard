@@ -132,7 +132,7 @@ app.register_blueprint(auth_bp)
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    return db.session.get(User, int(user_id))
 
 
 @app.cli.command("ensure-admin")
@@ -2138,6 +2138,12 @@ def login():
 def logout():
     logout_user()
     return redirect(url_for("login"))
+
+
+@app.route("/<username_slug>/logout")
+@login_required
+def logout_slug(username_slug):
+    return logout()
 
 
 @app.route("/abo/checkout")
