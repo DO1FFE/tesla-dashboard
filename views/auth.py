@@ -1,6 +1,10 @@
 import os
+import base64
+import hashlib
+import secrets
 from datetime import datetime, timedelta
 from functools import wraps
+from urllib.parse import urlencode
 
 import requests
 from flask import (
@@ -63,46 +67,48 @@ def tesla_token_required(func):
 @auth_bp.route("/oauth/start")
 @login_required
 def oauth_start():
-    data = {
+    """Start OAuth flow with Tesla SSO using Authorization Code + PKCE."""
+    verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=")
+    session["code_verifier"] = verifier.decode("utf-8")
+    challenge = (
+        base64.urlsafe_b64encode(
+            hashlib.sha256(session["code_verifier"].encode("utf-8")).digest()
+        )
+        .rstrip(b"=")
+        .decode("utf-8")
+    )
+    params = {
         "client_id": os.getenv("TESLA_CLIENT_ID", "ownerapi"),
         "scope": "openid email offline_access",
+        "response_type": "code",
+        "redirect_uri": url_for("auth.oauth_callback", _external=True),
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
     }
-    headers = {"User-Agent": os.getenv("TESLA_USER_AGENT", "Mozilla/5.0")}
-    resp = requests.post(
-        "https://auth.tesla.com/oauth2/v3/device/code",
-        json=data,
-        headers=headers,
-    )
-    resp.raise_for_status()
-    info = resp.json()
-    session["device_code"] = info["device_code"]
-    return render_template(
-        "oauth_device.html", verify_url=info["verification_uri_complete"]
-    )
+    auth_url = "https://auth.tesla.com/oauth2/v3/authorize"
+    return redirect(f"{auth_url}?{urlencode(params)}")
 
 
 @auth_bp.route("/oauth/callback")
 @login_required
 def oauth_callback():
-    device_code = session.get("device_code")
-    if not device_code:
+    code = request.args.get("code")
+    verifier = session.get("code_verifier")
+    if not code or not verifier:
         abort(400)
     data = {
-        "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+        "grant_type": "authorization_code",
         "client_id": os.getenv("TESLA_CLIENT_ID", "ownerapi"),
-        "device_code": device_code,
+        "code": code,
+        "redirect_uri": url_for("auth.oauth_callback", _external=True),
+        "code_verifier": verifier,
     }
     headers = {"User-Agent": os.getenv("TESLA_USER_AGENT", "Mozilla/5.0")}
     resp = requests.post(
         "https://auth.tesla.com/oauth2/v3/token",
-        json=data,
+        data=data,
         headers=headers,
     )
-    if resp.status_code == 400:
-        error = resp.json().get("error")
-        if error in ("authorization_pending", "slow_down"):
-            return render_template("oauth_pending.html")
-        resp.raise_for_status()
     resp.raise_for_status()
     token_data = resp.json()
     expires_at = datetime.utcnow() + timedelta(token_data.get("expires_in", 0))
@@ -130,7 +136,7 @@ def oauth_callback():
             db.session.commit()
     except Exception:
         pass
-    session.pop("device_code", None)
+    session.pop("code_verifier", None)
     return redirect(url_for("index", username_slug=current_user.username_slug))
 
 
