@@ -24,7 +24,7 @@ This is a simple Flask application that displays real-time data from a Tesla veh
 6. You can also enter the driver's phone number in international format (for example `+491701234567`), your Infobip API key and an optional sender ID here. Leave the sender field empty if the account does not support custom senders. SMS messages to the driver can be enabled or disabled and you may choose whether they are only allowed while driving or at any time. When restricted to driving mode, messages are still allowed for five minutes after parking.
 7. When sending a text message the sender's name is requested as well. The entire message including the name must not exceed 160 characters.
 
-All sent text messages are written to `data/sms.log` and can be viewed on the `/<username_slug>/sms` page.
+All sent text messages are written to `data/sms.log` and can be viewed on the `/sms` page.
 Timestamps in this file are recorded in the Europe/Berlin timezone.
 
 All API calls are logged to `data/api.log` without storing request details. The log file uses rotation and will grow to at most 1&nbsp;MB.
@@ -80,7 +80,7 @@ The same information is also stored as hierarchical JSON in `data/api-liste.json
 * `/<username_slug>/state` – display the vehicle state log
 * `/<username_slug>/debug` – display environment info and recent log lines
 * `/<username_slug>/apilog` – show the raw API log
-* `/<username_slug>/sms` – show the SMS log
+* `/sms` – show the SMS log
 * `/<username_slug>/api/vehicles` – list available vehicles as JSON
 * `/<username_slug>/api/state` – return the current vehicle state as JSON
 * `/<username_slug>/api/version` – return the current dashboard version as JSON

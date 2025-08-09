@@ -28,6 +28,7 @@
             {% endfor %}
         </section>
 
+        {% if user.role == 'admin' or user.is_ham_operator %}
         <section class="config-section">
             <h2>APRS</h2>
             <label>
@@ -51,6 +52,12 @@
                 <input type="text" name="aprs_comment" value="{{ config.get('aprs_comment','') }}">
             </label>
         </section>
+        {% else %}
+        <section class="config-section">
+            <h2>APRS</h2>
+            <div class="upgrade-hint">Nur für lizensierte Funkamateure verfügbar</div>
+        </section>
+        {% endif %}
 
         <section class="config-section">
             <h2>API</h2>

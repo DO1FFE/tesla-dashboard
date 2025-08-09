@@ -1314,7 +1314,7 @@ $('#sms-send').on('click', function() {
     }
     $('#sms-status').text('Senden...');
     $.ajax({
-        url: API_PREFIX + '/sms',
+        url: '/api/sms',
         method: 'POST',
         contentType: 'application/json',
         data: JSON.stringify({message: msg, name: name}),
