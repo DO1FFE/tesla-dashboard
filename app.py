@@ -60,8 +60,15 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev")
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
-from models import User, ConfigOption, ConfigVisibility, Vehicle  # noqa: E402
+from models import (
+    User,
+    ConfigOption,
+    ConfigVisibility,
+    Vehicle,
+    TeslaToken,
+)  # noqa: E402
 from taximeter import Taximeter  # noqa: E402
+from views.auth import auth_bp, tesla_token_required, get_user_token  # noqa: E402
 
 
 class _AdminMixin:
@@ -118,6 +125,9 @@ class VehicleAdminView(SecureModelView):
 admin.add_view(
     VehicleAdminView(Vehicle, db.session, endpoint="vehicles", name="Vehicles")
 )
+
+
+app.register_blueprint(auth_bp)
 
 
 @login_manager.user_loader
@@ -1551,17 +1561,27 @@ def get_tesla():
     """Authenticate and return a Tesla object or None."""
     if teslapy is None:
         return None
+    token_rec = None
+    if current_user.is_authenticated:
+        token_rec = get_user_token()
 
     email = os.getenv("TESLA_EMAIL")
     password = os.getenv("TESLA_PASSWORD")
-    access_token = os.getenv("TESLA_ACCESS_TOKEN")
-    refresh_token = os.getenv("TESLA_REFRESH_TOKEN")
+    access_token = (
+        token_rec.access_token if token_rec else os.getenv("TESLA_ACCESS_TOKEN")
+    )
+    refresh_token = (
+        token_rec.refresh_token if token_rec else os.getenv("TESLA_REFRESH_TOKEN")
+    )
 
     tokens_provided = access_token and refresh_token
     if not tokens_provided and not (email and password):
         return None
 
-    tesla = teslapy.Tesla(email, app_user_agent="Tesla-Dashboard")
+    tesla = teslapy.Tesla(
+        email or "",
+        app_user_agent=os.getenv("TESLA_USER_AGENT", "Tesla-Dashboard"),
+    )
     try:
         if tokens_provided:
             tesla.sso_token = {
@@ -1569,6 +1589,19 @@ def get_tesla():
                 "refresh_token": refresh_token,
             }
             tesla.refresh_token()
+            if token_rec:
+                token_rec.access_token = tesla.sso_token.get(
+                    "access_token", access_token
+                )
+                token_rec.refresh_token = tesla.sso_token.get(
+                    "refresh_token", refresh_token
+                )
+                expires_in = tesla.sso_token.get("expires_in")
+                if expires_in:
+                    token_rec.expires_at = datetime.utcnow() + timedelta(
+                        seconds=expires_in
+                    )
+                db.session.commit()
         elif access_token:
             tesla.refresh_token({"access_token": access_token})
         else:
@@ -2337,6 +2370,7 @@ def stream_vehicle(user, vehicle_id=None):
 
 @app.route("/<username_slug>/api/vehicles")
 @user_from_slug
+@tesla_token_required
 def api_vehicles(user):
     vehicles = get_vehicle_list()
     return jsonify(vehicles)
@@ -2345,6 +2379,7 @@ def api_vehicles(user):
 @app.route("/<username_slug>/api/state")
 @app.route("/<username_slug>/api/state/<vehicle_id>")
 @user_from_slug
+@tesla_token_required
 def api_state(user, vehicle_id=None):
     """Return the last known state of the vehicle."""
     if vehicle_id is None:
