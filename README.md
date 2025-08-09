@@ -10,7 +10,11 @@ This is a simple Flask application that displays real-time data from a Tesla veh
     ```
     The application uses `python-dotenv` to load variables from a `.env` file.
 
-2. Copy `.env.example` to `.env` and fill in your Tesla credentials:
+2. Copy `.env.example` to `.env` and fill in your Tesla credentials and the
+   desired admin username. The email and password are also used for the initial
+   admin account which is automatically imported into the database on first
+   start:
+    - `ADMIN_USERNAME`
     - `TESLA_EMAIL` and `TESLA_PASSWORD` **or**
     - `TESLA_ACCESS_TOKEN` and `TESLA_REFRESH_TOKEN`
 
