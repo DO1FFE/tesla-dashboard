@@ -37,6 +37,7 @@ import stripe
 import click
 from pathlib import Path
 from collections import defaultdict
+from urllib.parse import urlparse, urljoin
 
 try:
     import teslapy
@@ -2128,6 +2129,12 @@ def register():
     return render_template("register.html")
 
 
+def _is_safe_url(target):
+    ref_url = urlparse(request.host_url)
+    test_url = urlparse(urljoin(request.host_url, target))
+    return test_url.scheme in ("http", "https") and ref_url.netloc == test_url.netloc
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -2142,6 +2149,9 @@ def login():
                 error = "Abo inaktiv"
                 return render_template("login.html", error=error, inactive=True)
             login_user(user)
+            next_url = request.args.get("next")
+            if next_url and _is_safe_url(next_url):
+                return redirect(next_url)
             return redirect(url_for("index", username_slug=user.username_slug))
         error = "Ungültige Anmeldedaten"
         return render_template("login.html", error=error)
