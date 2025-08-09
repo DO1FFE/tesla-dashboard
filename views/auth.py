@@ -26,6 +26,8 @@ auth_bp = Blueprint("auth", __name__)
 
 
 def get_user_token():
+    if not current_user.is_authenticated:
+        return None
     token = TeslaToken.query.filter_by(user_id=current_user.id).first()
     if token and token.expires_at <= datetime.utcnow():
         data = {
