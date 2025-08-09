@@ -51,6 +51,20 @@ class Vehicle(db.Model):
     __table_args__ = (db.UniqueConstraint("user_id", "vehicle_id"),)
 
 
+class TeslaToken(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    vehicle_id = db.Column(db.String, nullable=True)
+    access_token = db.Column(db.String, nullable=False)
+    refresh_token = db.Column(db.String, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "vehicle_id", name="uix_user_vehicle"),
+    )
+
+
 class VehicleState(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     vehicle_id = db.Column(
