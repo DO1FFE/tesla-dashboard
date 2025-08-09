@@ -135,9 +135,24 @@ def load_user(user_id):
     return db.session.get(User, int(user_id))
 
 
+def create_initial_admin():
+    """Create the first admin user from Tesla credentials if needed."""
+    email = os.getenv("TESLA_EMAIL")
+    password = os.getenv("TESLA_PASSWORD")
+    username = os.getenv("ADMIN_USERNAME")
+    if not all([email, password, username]):
+        return
+    if User.query.filter_by(role="admin").first():
+        return
+    user = User(username=username, email=email, role="admin")
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+
+
 @app.cli.command("ensure-admin")
 @click.option("--email", required=True)
-@click.option("--username", required=True)
+@click.option("--username", required=True, prompt=True)
 @click.option(
     "--password",
     required=True,
@@ -3139,4 +3154,5 @@ if __name__ == "__main__":
     with app.app_context():
         import models
         models.init_db()
+        create_initial_admin()
     app.run(host="0.0.0.0", port=8031, debug=True)
