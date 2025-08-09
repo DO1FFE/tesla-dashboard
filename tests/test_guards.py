@@ -35,8 +35,9 @@ def client():
 
 
 def login(client, username):
+    email = f"{username}@example.com"
     return client.post(
-        "/login", data={"username": username, "password": "pw"}, follow_redirects=True
+        "/login", data={"email": email, "password": "pw"}, follow_redirects=True
     )
 
 

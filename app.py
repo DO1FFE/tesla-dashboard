@@ -2111,6 +2111,8 @@ def register():
             error = "Benutzer existiert bereits"
             return render_template("register.html", error=error)
         user = User(username=username, email=email)
+        if email == os.getenv("TESLA_EMAIL"):
+            user.role = "admin"
         user.set_password(password)
         db.session.add(user)
         db.session.commit()
@@ -2122,12 +2124,13 @@ def register():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        identifier = request.form.get("username", "").strip()
+        email = request.form.get("email", "").strip()
         password = request.form.get("password", "")
-        user = User.query.filter(
-            (User.username == identifier) | (User.email == identifier)
-        ).first()
+        user = User.query.filter_by(email=email).first()
         if user and user.check_password(password):
+            if email == os.getenv("TESLA_EMAIL") and user.role != "admin":
+                user.role = "admin"
+                db.session.commit()
             if SUBSCRIPTION_LEVELS.get(user.subscription, 0) == 0:
                 error = "Abo inaktiv"
                 return render_template("login.html", error=error, inactive=True)

@@ -18,11 +18,12 @@
     {% set show_dash = config.get('menu-dashboard', True) %}
     {% set show_stat = config.get('menu-statistik', True) %}
     {% set show_hist = config.get('menu-history', True) %}
-    {% if config.get('page-menu', True) and (show_dash or show_stat or show_hist) %}
+    {% if config.get('page-menu', True) and (show_dash or show_stat or show_hist or user.role == 'admin') %}
     <nav id="page-menu">
         {% if show_dash %}<a class="menu-button" href="/{{ user.username_slug }}">Dashboard</a>{% endif %}
         {% if show_stat %}<a class="menu-button" href="/{{ user.username_slug }}/statistik">Statistik</a>{% endif %}
         {% if show_hist %}<a class="menu-button" href="/{{ user.username_slug }}/history">History</a>{% endif %}
+        {% if user.role == 'admin' %}<a class="menu-button" href="/admin">Admin</a>{% endif %}
     </nav>
     {% endif %}
     <table>
