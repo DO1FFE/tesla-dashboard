@@ -1,16 +1,22 @@
-import sqlite3
 import threading
 import time
 import math
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+try:  # running via `python app.py`
+    from __main__ import app, db  # type: ignore
+except ImportError:  # pragma: no cover
+    from app import app, db  # type: ignore
+
+from models import TaximeterRide, TaximeterPoint
 
 LOCAL_TZ = ZoneInfo("Europe/Berlin")
 
 
 class Taximeter:
-    def __init__(self, db_path, fetch_func, tariff_func, vehicle_id=None):
-        self.db_path = db_path
+    def __init__(self, fetch_func, tariff_func, vehicle_id=None):
         self.fetch_func = fetch_func
         self.tariff_func = tariff_func
         self.vehicle_id = vehicle_id
@@ -28,12 +34,14 @@ class Taximeter:
         self.wait_time = 0.0
         self.wait_cost = 0.0
         self.waiting = False
+        self.ride_id = None
+        self.user_id = None
 
     def _is_night(self, timestamp):
         hour = datetime.fromtimestamp(timestamp, LOCAL_TZ).hour
         return hour >= 22 or hour < 6
 
-    def start(self):
+    def start(self, user_id=None):
         with self.lock:
             if self.vehicle_id is None:
                 raise ValueError("vehicle_id is required")
@@ -43,6 +51,12 @@ class Taximeter:
                 self.active = True
                 self.paused = False
                 self.waiting = False
+                if self.ride_id:
+                    with app.app_context():
+                        ride = db.session.get(TaximeterRide, self.ride_id)
+                        if ride:
+                            ride.status = "active"
+                            db.session.commit()
                 thread_needed = True
             elif not self.ready:
                 return False
@@ -58,6 +72,18 @@ class Taximeter:
                 self.waiting = False
                 self.price = self._round_price(self._calc_price(0.0))
                 self.start_time = time.time()
+                self.user_id = user_id
+                with app.app_context():
+                    ride = TaximeterRide(
+                        status="active",
+                        started_at=datetime.utcnow(),
+                        tariff_snapshot_json=json.dumps(self.tariff),
+                        user_id=user_id,
+                        vehicle_id=self.vehicle_id,
+                    )
+                    db.session.add(ride)
+                    db.session.commit()
+                    self.ride_id = ride.id
                 thread_needed = True
         if thread_needed:
             self.thread = threading.Thread(target=self._run, daemon=True)
@@ -70,6 +96,12 @@ class Taximeter:
                 return False
             self.active = False
             self.paused = True
+            if self.ride_id:
+                with app.app_context():
+                    ride = db.session.get(TaximeterRide, self.ride_id)
+                    if ride:
+                        ride.status = "paused"
+                        db.session.commit()
         if self.thread:
             self.thread.join()
             self.thread = None
@@ -90,7 +122,35 @@ class Taximeter:
         dist = self.distance
         price = self._round_price(self._calc_price(dist) + self.wait_cost)
         breakdown = self._calc_breakdown(dist)
-        ride_id = self._save_ride(start, end, duration, dist, price)
+        ride_id = None
+        with app.app_context():
+            if self.ride_id:
+                ride = db.session.get(TaximeterRide, self.ride_id)
+            else:
+                ride = None
+            if ride:
+                ride.status = "stopped"
+                ride.ended_at = datetime.utcnow()
+                ride.duration_s = duration
+                ride.distance_m = dist * 1000
+                ride.wait_time_s = self.wait_time
+                ride.cost_base = breakdown.get("base", 0.0)
+                ride.cost_distance = (
+                    breakdown.get("cost_1_2", 0.0)
+                    + breakdown.get("cost_3_4", 0.0)
+                    + breakdown.get("cost_5_plus", 0.0)
+                )
+                ride.cost_wait = breakdown.get("wait_cost", 0.0)
+                ride.cost_total = price
+                ride.receipt_json = json.dumps(
+                    {
+                        "breakdown": breakdown,
+                        "distance": dist,
+                        "wait_time": self.wait_time,
+                    }
+                )
+                db.session.commit()
+                ride_id = ride.id
         result = {
             "start_time": start,
             "end_time": end,
@@ -144,11 +204,15 @@ class Taximeter:
             lat = None
             lon = None
             speed = None
+            heading = None
+            odo = None
             if isinstance(data, dict):
                 drive = data.get("drive_state", {})
                 lat = drive.get("latitude")
                 lon = drive.get("longitude")
                 speed = drive.get("speed")
+                heading = drive.get("heading")
+                odo = drive.get("odometer")
             now = time.time()
             dt = now - last_ts
             last_ts = now
@@ -161,6 +225,21 @@ class Taximeter:
                         if last is not None:
                             self.distance += self._haversine(last, point)
                         last = point
+                with app.app_context():
+                    if self.ride_id:
+                        tp = TaximeterPoint(
+                            ride_id=self.ride_id,
+                            ts=datetime.utcnow(),
+                            lat=lat,
+                            lon=lon,
+                            speed_kph=speed,
+                            heading_deg=heading,
+                            odo_m=odo,
+                            is_pause=False,
+                            is_wait=not moving,
+                        )
+                        db.session.add(tp)
+                        db.session.commit()
             with self.lock:
                 self.waiting = not moving
                 if not moving:
@@ -246,21 +325,6 @@ class Taximeter:
             price += remaining * r5
         return price
 
-    def _save_ride(self, start, end, duration, distance, price):
-        con = sqlite3.connect(self.db_path)
-        cur = con.cursor()
-        cur.execute(
-            "CREATE TABLE IF NOT EXISTS rides (id INTEGER PRIMARY KEY AUTOINCREMENT, start REAL, end REAL, duration REAL, distance REAL, price REAL)"
-        )
-        cur.execute(
-            "INSERT INTO rides (start, end, duration, distance, price) VALUES (?, ?, ?, ?, ?)",
-            (start, end, duration, distance, price),
-        )
-        ride_id = cur.lastrowid
-        con.commit()
-        con.close()
-        return ride_id
-
     def reset(self):
         with self.lock:
             self.active = False
@@ -275,3 +339,5 @@ class Taximeter:
             self.wait_time = 0.0
             self.wait_cost = 0.0
             self.waiting = False
+            self.ride_id = None
+            self.user_id = None

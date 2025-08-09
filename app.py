@@ -16,7 +16,6 @@ from flask import (
     url_for,
     redirect,
 )
-from taximeter import Taximeter
 import requests
 from functools import wraps
 from dotenv import load_dotenv
@@ -58,6 +57,7 @@ db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 from models import User, ConfigOption, ConfigVisibility  # noqa: E402
+from taximeter import Taximeter  # noqa: E402
 
 
 @login_manager.user_loader
@@ -320,7 +320,6 @@ def log_api_data(endpoint, data):
 
 STAT_FILE = os.path.join(DATA_DIR, "statistics.json")
 PARKTIME_FILE = os.path.join(DATA_DIR, "parktime.json")
-TAXI_DB = os.path.join(DATA_DIR, "taximeter.db")
 
 # Elements on the dashboard that can be toggled via the config page
 CONFIG_ITEMS = [
@@ -1798,7 +1797,7 @@ def _start_thread(vehicle_id):
 
 
 # Taximeter instance using the existing fetch function and config-based tariff
-taximeter = Taximeter(TAXI_DB, _fetch_data_once, get_taximeter_tariff)
+taximeter = Taximeter(_fetch_data_once, get_taximeter_tariff)
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -2556,9 +2555,11 @@ def sms_log_page():
     return render_template("sms.html", log_lines=log_lines, user=current_user)
 
 
-@app.route("/<username_slug>/taxameter")
-@user_from_slug
-def taxameter_page(user):
+@app.route("/taxameter")
+@login_required
+def taxameter_page():
+    if current_user.role != "admin":
+        abort(403)
     cfg = load_config()
     company = cfg.get("taxi_company", "Taxi Schauer")
     vehicle_id = request.args.get("vehicle_id")
@@ -2599,38 +2600,46 @@ def taxameter_page(user):
         trip_files=file_opts,
         vehicle_id=vehicle_id,
         selected_file=selected,
-        user=user,
+        user=current_user,
     )
 
 
-@app.route("/<username_slug>/api/taxameter/start", methods=["POST"])
-@user_from_slug
-def api_taxameter_start(user):
+@app.route("/api/taxameter/start", methods=["POST"])
+@login_required
+def api_taxameter_start():
+    if current_user.role != "admin":
+        abort(403)
     vid = request.form.get("vehicle_id")
     if vid is None:
         abort(400)
     taximeter.vehicle_id = vid
     _start_thread(vid)
-    taximeter.start()
+    taximeter.start(current_user.id)
     return jsonify(taximeter.status())
 
 
-@app.route("/<username_slug>/api/taxameter/pause", methods=["POST"])
-@user_from_slug
-def api_taxameter_pause(user):
+@app.route("/api/taxameter/pause", methods=["POST"])
+@login_required
+def api_taxameter_pause():
+    if current_user.role != "admin":
+        abort(403)
     vid = request.form.get("vehicle_id")
-    if vid:
-        taximeter.vehicle_id = vid
+    if vid is None:
+        abort(400)
+    taximeter.vehicle_id = vid
     taximeter.pause()
     return jsonify(taximeter.status())
 
 
-@app.route("/<username_slug>/api/taxameter/stop", methods=["POST"])
-@user_from_slug
-def api_taxameter_stop(user):
+@app.route("/api/taxameter/stop", methods=["POST"])
+@login_required
+def api_taxameter_stop():
+    if current_user.role != "admin":
+        abort(403)
     vid = request.form.get("vehicle_id")
-    if vid:
-        taximeter.vehicle_id = vid
+    if vid is None:
+        abort(400)
+    taximeter.vehicle_id = vid
     result = taximeter.stop()
     if result:
         company = get_taxi_company()
@@ -2654,12 +2663,7 @@ def api_taxameter_stop(user):
                     },
                     f,
                 )
-            url = url_for(
-                "taxameter_receipt",
-                username_slug=user.username_slug,
-                ride_id=ride_id,
-                _external=True,
-            )
+            url = url_for("taxameter_receipt", ride_id=ride_id, _external=True)
             img = qrcode.make(url)
             img_path = os.path.join(rdir, f"{ride_id}.png")
             img.save(img_path)
@@ -2670,29 +2674,37 @@ def api_taxameter_stop(user):
     return jsonify(result or {"active": False})
 
 
-@app.route("/<username_slug>/api/taxameter/reset", methods=["POST"])
-@user_from_slug
-def api_taxameter_reset(user):
+@app.route("/api/taxameter/reset", methods=["POST"])
+@login_required
+def api_taxameter_reset():
+    if current_user.role != "admin":
+        abort(403)
     vid = request.form.get("vehicle_id")
-    if vid:
-        taximeter.vehicle_id = vid
+    if vid is None:
+        abort(400)
+    taximeter.vehicle_id = vid
     taximeter.reset()
     return jsonify({"active": False})
 
 
-@app.route("/<username_slug>/api/taxameter/status")
-@user_from_slug
-def api_taxameter_status(user):
+@app.route("/api/taxameter/status")
+@login_required
+def api_taxameter_status():
+    if current_user.role != "admin":
+        abort(403)
     vid = request.args.get("vehicle_id")
-    if vid:
-        taximeter.vehicle_id = vid
+    if vid is None:
+        abort(400)
+    taximeter.vehicle_id = vid
     return jsonify(taximeter.status())
 
 
-@app.route("/<username_slug>/api/taxameter/trips")
-@user_from_slug
-def api_taxameter_trips(user):
+@app.route("/api/taxameter/trips")
+@login_required
+def api_taxameter_trips():
     """Return individual trips for a recorded file."""
+    if current_user.role != "admin":
+        abort(403)
     selected = request.args.get("file")
     if not selected or ".." in selected or not selected.endswith(".csv"):
         abort(404)
@@ -2712,16 +2724,18 @@ def api_taxameter_trips(user):
     return jsonify(result)
 
 
-@app.route("/<username_slug>/taxameter/receipt/<int:ride_id>")
-@user_from_slug
-def taxameter_receipt(user, ride_id):
+@app.route("/taxameter/receipt/<int:ride_id>")
+@login_required
+def taxameter_receipt(ride_id):
+    if current_user.role != "admin":
+        abort(403)
     rdir = receipt_dir()
     json_path = os.path.join(rdir, f"{ride_id}.json")
     if os.path.exists(json_path):
         try:
             with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return render_template("taxameter_receipt.html", user=user, **data)
+            return render_template("taxameter_receipt.html", user=current_user, **data)
         except Exception:
             pass
     path = os.path.join(rdir, f"{ride_id}.txt")
@@ -2733,9 +2747,11 @@ def taxameter_receipt(user, ride_id):
     return Response(text, mimetype="text/plain")
 
 
-@app.route("/<username_slug>/taxameter/trip_receipt")
-@user_from_slug
-def taxameter_trip_receipt(user):
+@app.route("/taxameter/trip_receipt")
+@login_required
+def taxameter_trip_receipt():
+    if current_user.role != "admin":
+        abort(403)
     """Create a taximeter receipt for a recorded trip."""
     selected = request.args.get("file")
     segment_idx = request.args.get("segment")
@@ -2770,7 +2786,7 @@ def taxameter_trip_receipt(user):
             dist = _trip_distance(path)
             wait_time = 0.0
     tariff = get_taximeter_tariff()
-    tm = Taximeter(TAXI_DB, lambda _vid: {}, get_taximeter_tariff)
+    tm = Taximeter(lambda _vid: {}, get_taximeter_tariff)
     tm.tariff = tariff
     tm.wait_time = wait_time
     tm.wait_cost = int(wait_time // 10) * tariff.get("wait_per_10s", 0.10)
@@ -2784,7 +2800,7 @@ def taxameter_trip_receipt(user):
         breakdown=breakdown,
         distance=dist,
         qr_code=None,
-        user=user,
+        user=current_user,
     )
 
 

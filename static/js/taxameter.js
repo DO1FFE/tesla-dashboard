@@ -131,7 +131,7 @@ $(function() {
     $('#trip-receipt-btn').click(function() {
         var query = $('#trip-select').val();
         if (query) {
-            window.open('/' + window.USER_SLUG + '/taxameter/trip_receipt?' + query, '_blank');
+            window.open('/taxameter/trip_receipt?' + query, '_blank');
         }
     });
 
