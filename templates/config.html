@@ -17,8 +17,13 @@
             {% for item in items %}
             <label class="checkbox">
                 {% set default_checked = item.get('default', True) %}
-                <input type="checkbox" name="{{ item.id }}" value="1" {% if config.get(item.id, default_checked) %}checked{% endif %}>
+                <input type="checkbox" name="{{ item.id }}" value="1"
+                       {% if config.get(item.id, default_checked) %}checked{% endif %}
+                       {% if item.locked %}disabled{% endif %}>
                 {{ item.desc }}
+                {% if item.locked %}
+                <div class="upgrade-hint">Nur mit {{ item.required_subscription|upper }}-Abo verfügbar – Jetzt upgraden</div>
+                {% endif %}
             </label>
             {% endfor %}
         </section>
