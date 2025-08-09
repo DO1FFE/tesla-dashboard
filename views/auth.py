@@ -15,8 +15,9 @@ from flask import (
 )
 from flask_login import current_user, login_required
 
-from app import db
-from models import TeslaToken
+# Avoid circular import by importing the database instance
+# from models instead of app.
+from models import TeslaToken, db
 
 auth_bp = Blueprint("auth", __name__)
 
