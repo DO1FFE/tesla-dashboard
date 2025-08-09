@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <title>Warten auf Bestätigung</title>
+</head>
+<body>
+    <h2>Warten auf Bestätigung</h2>
+    <p>Die Autorisierung wurde noch nicht abgeschlossen. Bitte schließen Sie die Anmeldung auf der Tesla-Seite ab und versuchen Sie es erneut.</p>
+    <form action="{{ url_for('auth.oauth_callback') }}" method="get">
+        <button type="submit">Erneut prüfen</button>
+    </form>
+</body>
+</html>

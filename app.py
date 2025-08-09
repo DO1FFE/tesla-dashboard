@@ -2088,6 +2088,13 @@ def _start_thread(vehicle_id):
 taximeter = Taximeter(_fetch_data_once, get_taximeter_tariff)
 
 
+@app.route("/")
+def root():
+    if current_user.is_authenticated:
+        return redirect(url_for("index", username_slug=current_user.username_slug))
+    return redirect(url_for("login"))
+
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
