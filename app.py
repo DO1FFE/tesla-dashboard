@@ -136,6 +136,16 @@ def load_user(user_id):
     return db.session.get(User, int(user_id))
 
 
+@app.before_request
+def load_user_from_cookie():
+    if not current_user.is_authenticated:
+        user_id = request.cookies.get("user_id")
+        if user_id:
+            user = db.session.get(User, int(user_id))
+            if user:
+                login_user(user)
+
+
 def create_initial_admin():
     """Create the first admin user from Tesla credentials if needed."""
     email = os.getenv("TESLA_EMAIL")
@@ -2125,7 +2135,15 @@ def register():
         db.session.add(user)
         db.session.commit()
         login_user(user)
-        return redirect(url_for("index", username_slug=user.username_slug))
+        resp = redirect(url_for("index", username_slug=user.username_slug))
+        resp.set_cookie(
+            "user_id",
+            str(user.id),
+            max_age=30 * 24 * 60 * 60,
+            httponly=True,
+            samesite="Lax",
+        )
+        return resp
     return render_template("register.html")
 
 
@@ -2150,9 +2168,20 @@ def login():
                 return render_template("login.html", error=error, inactive=True)
             login_user(user)
             next_url = request.args.get("next")
+            target = None
             if next_url and _is_safe_url(next_url):
-                return redirect(next_url)
-            return redirect(url_for("index", username_slug=user.username_slug))
+                target = next_url
+            else:
+                target = url_for("index", username_slug=user.username_slug)
+            resp = redirect(target)
+            resp.set_cookie(
+                "user_id",
+                str(user.id),
+                max_age=30 * 24 * 60 * 60,
+                httponly=True,
+                samesite="Lax",
+            )
+            return resp
         error = "Ungültige Anmeldedaten"
         return render_template("login.html", error=error)
     return render_template("login.html", inactive=request.args.get("inactive"))
@@ -2162,7 +2191,9 @@ def login():
 @login_required
 def logout():
     logout_user()
-    return redirect(url_for("login"))
+    resp = redirect(url_for("login"))
+    resp.delete_cookie("user_id")
+    return resp
 
 
 @app.route("/<username_slug>/logout")
