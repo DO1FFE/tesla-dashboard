@@ -8,3 +8,4 @@ aprslib
 phonenumbers==9.0.9
 qrcode
 stripe
+flask-admin
