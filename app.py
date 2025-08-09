@@ -2163,9 +2163,6 @@ def login():
             if email == os.getenv("TESLA_EMAIL") and user.role != "admin":
                 user.role = "admin"
                 db.session.commit()
-            if SUBSCRIPTION_LEVELS.get(user.subscription, 0) == 0:
-                error = "Abo inaktiv"
-                return render_template("login.html", error=error, inactive=True)
             login_user(user)
             next_url = request.args.get("next")
             target = None
