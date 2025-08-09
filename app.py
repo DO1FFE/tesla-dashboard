@@ -14,6 +14,7 @@ from flask import (
     send_from_directory,
     abort,
     url_for,
+    redirect,
 )
 from taximeter import Taximeter
 import requests
@@ -24,8 +25,14 @@ import qrcode
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager
+from flask_login import (
+    LoginManager,
+    login_user,
+    logout_user,
+    login_required,
+)
 import stripe
+import click
 
 try:
     import teslapy
@@ -45,8 +52,42 @@ except ImportError:
 load_dotenv()
 app = Flask(__name__)
 app.config.from_object("config")
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev")
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
+login_manager.login_view = "login"
+from models import User  # noqa: E402
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+
+@app.cli.command("ensure-admin")
+@click.option("--email", required=True)
+@click.option("--username", required=True)
+@click.option(
+    "--password",
+    required=True,
+    prompt=True,
+    hide_input=True,
+    confirmation_prompt=True,
+)
+def ensure_admin(email, username, password):
+    """Ensure an admin user exists."""
+    user = User.query.filter(
+        (User.email == email) | (User.username == username)
+    ).first()
+    if not user:
+        user = User(username=username, email=email, role="admin")
+        user.set_password(password)
+        db.session.add(user)
+    else:
+        user.role = "admin"
+        user.set_password(password)
+    db.session.commit()
+    click.echo(f"Admin {user.username} ensured")
 stripe.api_key = os.getenv("STRIPE_API_KEY")
 LOCAL_TZ = ZoneInfo("Europe/Berlin")
 __version__ = get_version()
@@ -1663,7 +1704,55 @@ def _start_thread(vehicle_id):
 taximeter = Taximeter(TAXI_DB, _fetch_data_once, get_taximeter_tariff)
 
 
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        email = request.form.get("email", "").strip()
+        password = request.form.get("password", "")
+        if not username or not email or not password:
+            error = "Alle Felder sind erforderlich"
+            return render_template("register.html", error=error)
+        existing = User.query.filter(
+            (User.username == username) | (User.email == email)
+        ).first()
+        if existing:
+            error = "Benutzer existiert bereits"
+            return render_template("register.html", error=error)
+        user = User(username=username, email=email)
+        user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
+        login_user(user)
+        return redirect(url_for("index"))
+    return render_template("register.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        identifier = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        user = User.query.filter(
+            (User.username == identifier) | (User.email == identifier)
+        ).first()
+        if user and user.check_password(password):
+            login_user(user)
+            return redirect(url_for("index"))
+        error = "Ungültige Anmeldedaten"
+        return render_template("login.html", error=error)
+    return render_template("login.html")
+
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for("login"))
+
+
 @app.route("/")
+@login_required
 def index():
     cfg = load_config()
     return render_template(
