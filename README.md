@@ -19,7 +19,7 @@ This is a simple Flask application that displays real-time data from a Tesla veh
     python app.py
     ```
 
-4. Open `http://localhost:8013` in your browser (the server listens on `0.0.0.0:8013`).
+4. Open `http://localhost:8031` in your browser (the server listens on `0.0.0.0:8031`).
 5. On the configuration page (`/<username_slug>/config`) you can set your APRS call sign, passcode and an optional comment to transmit position packets via an EU APRS-IS server. You may also enable an additional WX packet using a separate call sign. Temperatures are included in Celsius within the comment. Positions are sent at most every 30 seconds while driving and at least every 10 minutes even without changes. WX packets obey the same limits and are only transmitted when the outside temperature changes or after ten minutes without an update. The page also lets you adjust the Tesla API polling interval and disable the announcement text.
 6. You can also enter the driver's phone number in international format (for example `+491701234567`), your Infobip API key and an optional sender ID here. Leave the sender field empty if the account does not support custom senders. SMS messages to the driver can be enabled or disabled and you may choose whether they are only allowed while driving or at any time. When restricted to driving mode, messages are still allowed for five minutes after parking.
 7. When sending a text message the sender's name is requested as well. The entire message including the name must not exceed 160 characters.
