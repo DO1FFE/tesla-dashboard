@@ -30,6 +30,8 @@
     </div>
     <script>
         window.APP_VERSION = "{{ version }}";
+        window.USER_SLUG = "{{ user.username_slug }}";
+        window.API_PREFIX = '/' + window.USER_SLUG + '/api';
     </script>
     <script src="/static/js/main.js"></script>
     {% include 'public_banner.html' %}

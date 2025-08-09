@@ -20,11 +20,11 @@ This is a simple Flask application that displays real-time data from a Tesla veh
     ```
 
 4. Open `http://localhost:8013` in your browser (the server listens on `0.0.0.0:8013`).
-5. On the configuration page (`/config`) you can set your APRS call sign, passcode and an optional comment to transmit position packets via an EU APRS-IS server. You may also enable an additional WX packet using a separate call sign. Temperatures are included in Celsius within the comment. Positions are sent at most every 30 seconds while driving and at least every 10 minutes even without changes. WX packets obey the same limits and are only transmitted when the outside temperature changes or after ten minutes without an update. The page also lets you adjust the Tesla API polling interval and disable the announcement text.
+5. On the configuration page (`/<username_slug>/config`) you can set your APRS call sign, passcode and an optional comment to transmit position packets via an EU APRS-IS server. You may also enable an additional WX packet using a separate call sign. Temperatures are included in Celsius within the comment. Positions are sent at most every 30 seconds while driving and at least every 10 minutes even without changes. WX packets obey the same limits and are only transmitted when the outside temperature changes or after ten minutes without an update. The page also lets you adjust the Tesla API polling interval and disable the announcement text.
 6. You can also enter the driver's phone number in international format (for example `+491701234567`), your Infobip API key and an optional sender ID here. Leave the sender field empty if the account does not support custom senders. SMS messages to the driver can be enabled or disabled and you may choose whether they are only allowed while driving or at any time. When restricted to driving mode, messages are still allowed for five minutes after parking.
 7. When sending a text message the sender's name is requested as well. The entire message including the name must not exceed 160 characters.
 
-All sent text messages are written to `data/sms.log` and can be viewed on the `/sms` page.
+All sent text messages are written to `data/sms.log` and can be viewed on the `/<username_slug>/sms` page.
 Timestamps in this file are recorded in the Europe/Berlin timezone.
 
 All API calls are logged to `data/api.log` without storing request details. The log file uses rotation and will grow to at most 1&nbsp;MB.
@@ -42,7 +42,7 @@ can be started from any location while still accessing existing trips and logs.
 
 All required JavaScript and CSS libraries are bundled under `static/` so the dashboard works even without Internet access.
 
-The backend continuously polls the Tesla API and pushes new data to clients using Server-Sent Events (SSE). The frontend never talks to the Tesla API directly. It only requests data from the backend using the `/api/...` endpoints so tokens remain secure on the server.
+The backend continuously polls the Tesla API and pushes new data to clients using Server-Sent Events (SSE). The frontend never talks to the Tesla API directly. It only requests data from the backend using the `/<username_slug>/api/...` endpoints so tokens remain secure on the server.
 The frontend first checks `/api/state` to make sure the car is online before
 opening the streaming connection. When the vehicle is reported as `offline` or
 `asleep` no further API requests are made so the car remains in its current
@@ -53,7 +53,7 @@ state. The dashboard never wakes the vehicle automatically.
 The dashboard shows a short overview depending on whether the vehicle is parked, driving or charging. Below this, additional tables are grouped by category (battery/charging, climate, drive state, vehicle status and media information) to make the raw API data easier to read. While parked the dashboard also displays tire pressures, power usage of the drive unit and the 12V battery as well as how long the vehicle has been parked.
 
 While driving, a blue path is drawn on the map using the reported GPS positions. All trips of a day are logged to a single CSV file under `data/<vehicle_id>/trips` for later analysis.
-The `/history` page lists these files so previous trips can be selected and displayed on an interactive map.
+The `/<username_slug>/history` page lists these files so previous trips can be selected and displayed on an interactive map.
 Entire weeks or months can also be chosen to display longer time spans at once.
 Using the slider you can inspect each recorded point and see the exact timestamp along with speed and power information.
 When multiple cars are available a drop-down menu lets you switch between vehicles.
@@ -65,31 +65,31 @@ Clients reload automatically when the polling interval changes so the new settin
 
 Whenever a door, window, the trunk or the frunk is open or the vehicle is unlocked the backend switches to the normal polling interval. The same happens when someone is detected inside or the gear lever is in R, N or D. In all other situations the idle interval is used so the car can enter sleep mode.
 
-Data is streamed to the frontend via `/stream/<vehicle_id>` using Server-Sent Events so the dashboard updates instantly when new information arrives.
-The endpoint `/apiliste` exposes a text file listing all seen API variables and their latest values.
+Data is streamed to the frontend via `/<username_slug>/stream/<vehicle_id>` using Server-Sent Events so the dashboard updates instantly when new information arrives.
+The endpoint `/<username_slug>/apiliste` exposes a text file listing all seen API variables and their latest values.
 
 The same information is also stored as hierarchical JSON in `data/api-liste.json`.
 
 ## Endpoints
 
-* `/` – main dashboard with map and status information
-* `/map` – map-only view without additional details
-* `/daten` – vehicle data without the map
-* `/history` – select and display recorded trips
-* `/error` – show recent API errors (JSON via `/api/errors`)
-* `/state` – display the vehicle state log
-* `/debug` – display environment info and recent log lines
-* `/apilog` – show the raw API log
-* `/sms` – show the SMS log
-* `/api/vehicles` – list available vehicles as JSON
-* `/api/state` – return the current vehicle state as JSON
-* `/api/version` – return the current dashboard version as JSON
-* `/api/clients` – number of connected clients as JSON
-* `/api/occupant` – get or set occupant presence flag
+* `/<username_slug>` – main dashboard with map and status information
+* `/<username_slug>/map` – map-only view without additional details
+* `/<username_slug>/data` – vehicle data without the map
+* `/<username_slug>/history` – select and display recorded trips
+* `/<username_slug>/error` – show recent API errors (JSON via `/<username_slug>/api/errors`)
+* `/<username_slug>/state` – display the vehicle state log
+* `/<username_slug>/debug` – display environment info and recent log lines
+* `/<username_slug>/apilog` – show the raw API log
+* `/<username_slug>/sms` – show the SMS log
+* `/<username_slug>/api/vehicles` – list available vehicles as JSON
+* `/<username_slug>/api/state` – return the current vehicle state as JSON
+* `/<username_slug>/api/version` – return the current dashboard version as JSON
+* `/<username_slug>/api/clients` – number of connected clients as JSON
+* `/<username_slug>/api/occupant` – get or set occupant presence flag
     * Use `POST` with a JSON body like `{ "present": true }` or `{ "present": false }`
       to notify the dashboard whether someone is inside.
-* `/api/announcement` – return the current announcement text as JSON
-* `/stream/<vehicle_id>` – Server-Sent Events endpoint used by the frontend
+* `/<username_slug>/api/announcement` – return the current announcement text as JSON
+* `/<username_slug>/stream/<vehicle_id>` – Server-Sent Events endpoint used by the frontend
 
 ## Version
 

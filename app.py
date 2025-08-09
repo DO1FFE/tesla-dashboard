@@ -30,6 +30,7 @@ from flask_login import (
     login_user,
     logout_user,
     login_required,
+    current_user,
 )
 import stripe
 import click
@@ -446,6 +447,41 @@ def requires_auth(f):
         if not auth or not check_auth(auth.username, auth.password):
             return authenticate()
         return f(*args, **kwargs)
+
+    return decorated
+
+
+def user_from_slug(f):
+    """Resolve ``username_slug`` parameter to a ``User`` instance.
+
+    Redirect to the canonical lowercase URL when needed and abort with 404
+    if the user does not exist. The wrapped view receives the ``User``
+    object as first argument.
+    """
+
+    @wraps(f)
+    def decorated(username_slug, *args, **kwargs):
+        slug = username_slug.lower()
+        if username_slug != slug:
+            view_args = dict(request.view_args or {})
+            view_args["username_slug"] = slug
+            return redirect(url_for(request.endpoint, **view_args))
+        user = User.query.filter_by(username_slug=slug).first_or_404()
+        return f(user, *args, **kwargs)
+
+    return decorated
+
+
+def owner_or_admin(f):
+    """Allow access only for the owner of the page or an admin user."""
+
+    @wraps(f)
+    def decorated(user, *args, **kwargs):
+        if not current_user.is_authenticated:
+            abort(403)
+        if current_user.role != "admin" and current_user.id != user.id:
+            abort(403)
+        return f(user, *args, **kwargs)
 
     return decorated
 
@@ -1724,7 +1760,7 @@ def register():
         db.session.add(user)
         db.session.commit()
         login_user(user)
-        return redirect(url_for("index"))
+        return redirect(url_for("index", username_slug=user.username_slug))
     return render_template("register.html")
 
 
@@ -1738,7 +1774,7 @@ def login():
         ).first()
         if user and user.check_password(password):
             login_user(user)
-            return redirect(url_for("index"))
+            return redirect(url_for("index", username_slug=user.username_slug))
         error = "Ungültige Anmeldedaten"
         return render_template("login.html", error=error)
     return render_template("login.html")
@@ -1751,28 +1787,29 @@ def logout():
     return redirect(url_for("login"))
 
 
-@app.route("/")
-def index():
-    user = User.query.filter_by(role="admin").first()
-    if user:
-        login_user(user)
+@app.route("/<username_slug>")
+@user_from_slug
+def index(user):
     cfg = load_config()
     return render_template(
         "index.html",
         version=__version__,
         year=CURRENT_YEAR,
         config=cfg,
+        user=user,
     )
 
 
-@app.route("/map")
-def map_only():
+@app.route("/<username_slug>/map")
+@user_from_slug
+def map_only(user):
     """Display only the map without additional modules."""
-    return render_template("map.html", version=__version__)
+    return render_template("map.html", version=__version__, user=user)
 
 
-@app.route("/history")
-def trip_history():
+@app.route("/<username_slug>/history")
+@user_from_slug
+def trip_history(user):
     """Show recorded trips and allow selecting a trip to display."""
     paths = _get_trip_files()
     files = [os.path.relpath(p, DATA_DIR) for p in paths]
@@ -1808,24 +1845,27 @@ def trip_history():
         weeks=weeks,
         months=months,
         selected=selected,
-        weekly=weekly,
-        monthly=monthly,
-        config=cfg,
+    weekly=weekly,
+    monthly=monthly,
+    config=cfg,
+    user=user,
     )
 
 
-@app.route("/daten")
-def data_only():
+@app.route("/<username_slug>/data")
+@user_from_slug
+def data_only(user):
     """Display live or cached vehicle data without extra UI."""
     _start_thread("default")
     data = latest_data.get("default")
     if data is None:
         data = _fetch_data_once("default")
-    return render_template("data.html", data=data)
+    return render_template("data.html", data=data, user=user)
 
 
-@app.route("/api/data")
-def api_data():
+@app.route("/<username_slug>/api/data")
+@user_from_slug
+def api_data(user):
     _start_thread("default")
     data = latest_data.get("default")
     if data is None:
@@ -1833,8 +1873,9 @@ def api_data():
     return jsonify(data)
 
 
-@app.route("/api/data/<vehicle_id>")
-def api_data_vehicle(vehicle_id):
+@app.route("/<username_slug>/api/data/<vehicle_id>")
+@user_from_slug
+def api_data_vehicle(user, vehicle_id):
     _start_thread(vehicle_id)
     data = latest_data.get(vehicle_id)
     if data is None:
@@ -1842,9 +1883,11 @@ def api_data_vehicle(vehicle_id):
     return jsonify(data)
 
 
-@app.route("/stream")
-@app.route("/stream/<vehicle_id>")
-def stream_vehicle(vehicle_id="default"):
+
+@app.route("/<username_slug>/stream")
+@app.route("/<username_slug>/stream/<vehicle_id>")
+@user_from_slug
+def stream_vehicle(user, vehicle_id="default"):
     """Stream vehicle data to the client using Server-Sent Events."""
     _start_thread(vehicle_id)
 
@@ -1875,35 +1918,40 @@ def stream_vehicle(vehicle_id="default"):
     return Response(gen(), mimetype="text/event-stream")
 
 
-@app.route("/api/vehicles")
-def api_vehicles():
+@app.route("/<username_slug>/api/vehicles")
+@user_from_slug
+def api_vehicles(user):
     vehicles = get_vehicle_list()
     return jsonify(vehicles)
 
 
-@app.route("/api/state")
-@app.route("/api/state/<vehicle_id>")
-def api_state(vehicle_id=None):
+@app.route("/<username_slug>/api/state")
+@app.route("/<username_slug>/api/state/<vehicle_id>")
+@user_from_slug
+def api_state(user, vehicle_id=None):
     """Return the last known state of the vehicle."""
     state_info = get_vehicle_state(vehicle_id)
     return jsonify(state_info)
 
 
-@app.route("/api/version")
-def api_version():
+@app.route("/<username_slug>/api/version")
+@user_from_slug
+def api_version(user):
     """Return the current application version."""
     return jsonify({"version": __version__})
 
 
-@app.route("/api/clients")
-def api_clients():
+@app.route("/<username_slug>/api/clients")
+@user_from_slug
+def api_clients(user):
     """Return the current number of connected streaming clients."""
     count = sum(len(v) for v in subscribers.values())
     return jsonify({"clients": count})
 
 
-@app.route("/api/reverse_geocode")
-def api_reverse_geocode():
+@app.route("/<username_slug>/api/reverse_geocode")
+@user_from_slug
+def api_reverse_geocode(user):
     """Return address for given coordinates."""
     try:
         lat = float(request.args.get("lat"))
@@ -1915,8 +1963,9 @@ def api_reverse_geocode():
     return jsonify(result)
 
 
-@app.route("/api/config")
-def api_config():
+@app.route("/<username_slug>/api/config")
+@user_from_slug
+def api_config(user):
     """Return visibility configuration without sensitive fields."""
     cfg = load_config()
     if "phone_number" in cfg:
@@ -1927,8 +1976,9 @@ def api_config():
     return jsonify(cfg)
 
 
-@app.route("/api/announcement")
-def api_announcement():
+@app.route("/<username_slug>/api/announcement")
+@user_from_slug
+def api_announcement(user):
     """Return the current announcement text."""
     cfg = load_config()
     text = cfg.get("announcement", "")
@@ -1938,9 +1988,10 @@ def api_announcement():
     return jsonify({"announcement": text})
 
 
-@app.route("/api/alarm_state")
-@app.route("/api/alarm_state/<vehicle_id>")
-def api_alarm_state(vehicle_id=None):
+@app.route("/<username_slug>/api/alarm_state")
+@app.route("/<username_slug>/api/alarm_state/<vehicle_id>")
+@user_from_slug
+def api_alarm_state(user, vehicle_id=None):
     """Return the current alarm state."""
     vid = vehicle_id or "default"
     _start_thread(vid)
@@ -1956,8 +2007,9 @@ def api_alarm_state(vehicle_id=None):
     return jsonify({"alarm_state": alarm})
 
 
-@app.route("/api/occupant", methods=["GET", "POST"])
-def api_occupant():
+@app.route("/<username_slug>/api/occupant", methods=["GET", "POST"])
+@user_from_slug
+def api_occupant(user):
     """Return or update occupant presence status."""
     global occupant_present
     if request.method == "POST":
@@ -1985,8 +2037,9 @@ def _format_phone(phone, region="DE"):
         return None
 
 
-@app.route("/api/sms", methods=["POST"])
-def api_sms():
+@app.route("/<username_slug>/api/sms", methods=["POST"])
+@user_from_slug
+def api_sms(user):
     """Send a short text message using the configured phone number."""
     cfg = load_config()
     if not cfg.get("sms_enabled", True):
@@ -2050,9 +2103,10 @@ def api_sms():
         return jsonify({"success": False, "error": str(exc)})
 
 
-@app.route("/config", methods=["GET", "POST"])
-@requires_auth
-def config_page():
+@app.route("/<username_slug>/config", methods=["GET", "POST"])
+@user_from_slug
+@owner_or_admin
+def config_page(user):
     cfg = load_config()
     if request.method == "POST":
         for item in CONFIG_ITEMS:
@@ -2170,11 +2224,12 @@ def config_page():
         elif "api_interval_idle" in cfg:
             cfg.pop("api_interval_idle")
         save_config(cfg)
-    return render_template("config.html", items=CONFIG_ITEMS, config=cfg)
+    return render_template("config.html", items=CONFIG_ITEMS, config=cfg, user=user)
 
 
-@app.route("/error")
-def error_page():
+@app.route("/<username_slug>/error")
+@user_from_slug
+def error_page(user):
     """Display collected API errors."""
     with api_errors_lock:
         errors = list(api_errors)
@@ -2185,11 +2240,12 @@ def error_page():
             ).strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
             e["time_str"] = str(e["timestamp"])
-    return render_template("errors.html", errors=errors)
+    return render_template("errors.html", errors=errors, user=user)
 
 
-@app.route("/statistik")
-def statistics_page():
+@app.route("/<username_slug>/statistik")
+@user_from_slug
+def statistics_page(user):
     """Display statistics of vehicle state and distance."""
     stats = compute_statistics()
     current_month = datetime.now(LOCAL_TZ).strftime("%Y-%m")
@@ -2253,18 +2309,20 @@ def statistics_page():
 
     rows = monthly_rows + rows
     cfg = load_config()
-    return render_template("statistik.html", rows=rows, config=cfg)
+    return render_template("statistik.html", rows=rows, config=cfg, user=user)
 
 
-@app.route("/api/errors")
-def api_errors_route():
+@app.route("/<username_slug>/api/errors")
+@user_from_slug
+def api_errors_route(user):
     """Return collected API errors as JSON."""
     with api_errors_lock:
         return jsonify(list(api_errors))
 
 
-@app.route("/apiliste")
-def api_list_file():
+@app.route("/<username_slug>/apiliste")
+@user_from_slug
+def api_list_file(user):
     """Return the aggregated API key list as plain text."""
     try:
         with open(os.path.join(DATA_DIR, "api-liste.txt"), "r", encoding="utf-8") as f:
@@ -2279,8 +2337,9 @@ def api_list_file():
     return Response(content, mimetype="text/plain")
 
 
-@app.route("/state")
-def state_log_page():
+@app.route("/<username_slug>/state")
+@user_from_slug
+def state_log_page(user):
     """Display the vehicle state log."""
     log_lines = []
     try:
@@ -2288,11 +2347,12 @@ def state_log_page():
             log_lines = f.readlines()
     except Exception:
         pass
-    return render_template("state.html", log_lines=log_lines)
+    return render_template("state.html", log_lines=log_lines, user=user)
 
 
-@app.route("/apilog")
-def api_log_page():
+@app.route("/<username_slug>/apilog")
+@user_from_slug
+def api_log_page(user):
     """Display the API log."""
     log_lines = []
     try:
@@ -2300,11 +2360,12 @@ def api_log_page():
             log_lines = f.readlines()
     except Exception:
         pass
-    return render_template("apilog.html", log_lines=log_lines)
+    return render_template("apilog.html", log_lines=log_lines, user=user)
 
 
-@app.route("/sms")
-def sms_log_page():
+@app.route("/<username_slug>/sms")
+@user_from_slug
+def sms_log_page(user):
     """Display the SMS log."""
     log_lines = []
     try:
@@ -2312,11 +2373,12 @@ def sms_log_page():
             log_lines = f.readlines()
     except Exception:
         pass
-    return render_template("sms.html", log_lines=log_lines)
+    return render_template("sms.html", log_lines=log_lines, user=user)
 
 
-@app.route("/taxameter")
-def taxameter_page():
+@app.route("/<username_slug>/taxameter")
+@user_from_slug
+def taxameter_page(user):
     cfg = load_config()
     company = cfg.get("taxi_company", "Taxi Schauer")
     file_paths = [os.path.relpath(p, DATA_DIR) for p in _get_trip_files()]
@@ -2355,11 +2417,13 @@ def taxameter_page():
         trip_files=file_opts,
         vehicle_id=vehicle_id,
         selected_file=selected,
+        user=user,
     )
 
 
-@app.route("/api/taxameter/start", methods=["POST"])
-def api_taxameter_start():
+@app.route("/<username_slug>/api/taxameter/start", methods=["POST"])
+@user_from_slug
+def api_taxameter_start(user):
     vid = request.form.get("vehicle_id") or default_vehicle_id()
     taximeter.vehicle_id = vid
     _start_thread(vid)
@@ -2367,8 +2431,9 @@ def api_taxameter_start():
     return jsonify(taximeter.status())
 
 
-@app.route("/api/taxameter/pause", methods=["POST"])
-def api_taxameter_pause():
+@app.route("/<username_slug>/api/taxameter/pause", methods=["POST"])
+@user_from_slug
+def api_taxameter_pause(user):
     vid = request.form.get("vehicle_id")
     if vid:
         taximeter.vehicle_id = vid
@@ -2376,8 +2441,9 @@ def api_taxameter_pause():
     return jsonify(taximeter.status())
 
 
-@app.route("/api/taxameter/stop", methods=["POST"])
-def api_taxameter_stop():
+@app.route("/<username_slug>/api/taxameter/stop", methods=["POST"])
+@user_from_slug
+def api_taxameter_stop(user):
     vid = request.form.get("vehicle_id")
     if vid:
         taximeter.vehicle_id = vid
@@ -2404,7 +2470,12 @@ def api_taxameter_stop():
                     },
                     f,
                 )
-            url = url_for("taxameter_receipt", ride_id=ride_id, _external=True)
+            url = url_for(
+                "taxameter_receipt",
+                username_slug=user.username_slug,
+                ride_id=ride_id,
+                _external=True,
+            )
             img = qrcode.make(url)
             img_path = os.path.join(rdir, f"{ride_id}.png")
             img.save(img_path)
@@ -2415,8 +2486,9 @@ def api_taxameter_stop():
     return jsonify(result or {"active": False})
 
 
-@app.route("/api/taxameter/reset", methods=["POST"])
-def api_taxameter_reset():
+@app.route("/<username_slug>/api/taxameter/reset", methods=["POST"])
+@user_from_slug
+def api_taxameter_reset(user):
     vid = request.form.get("vehicle_id")
     if vid:
         taximeter.vehicle_id = vid
@@ -2424,16 +2496,18 @@ def api_taxameter_reset():
     return jsonify({"active": False})
 
 
-@app.route("/api/taxameter/status")
-def api_taxameter_status():
+@app.route("/<username_slug>/api/taxameter/status")
+@user_from_slug
+def api_taxameter_status(user):
     vid = request.args.get("vehicle_id")
     if vid:
         taximeter.vehicle_id = vid
     return jsonify(taximeter.status())
 
 
-@app.route("/api/taxameter/trips")
-def api_taxameter_trips():
+@app.route("/<username_slug>/api/taxameter/trips")
+@user_from_slug
+def api_taxameter_trips(user):
     """Return individual trips for a recorded file."""
     selected = request.args.get("file")
     if not selected or ".." in selected or not selected.endswith(".csv"):
@@ -2454,15 +2528,16 @@ def api_taxameter_trips():
     return jsonify(result)
 
 
-@app.route("/taxameter/receipt/<int:ride_id>")
-def taxameter_receipt(ride_id):
+@app.route("/<username_slug>/taxameter/receipt/<int:ride_id>")
+@user_from_slug
+def taxameter_receipt(user, ride_id):
     rdir = receipt_dir()
     json_path = os.path.join(rdir, f"{ride_id}.json")
     if os.path.exists(json_path):
         try:
             with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return render_template("taxameter_receipt.html", **data)
+            return render_template("taxameter_receipt.html", user=user, **data)
         except Exception:
             pass
     path = os.path.join(rdir, f"{ride_id}.txt")
@@ -2474,8 +2549,9 @@ def taxameter_receipt(ride_id):
     return Response(text, mimetype="text/plain")
 
 
-@app.route("/taxameter/trip_receipt")
-def taxameter_trip_receipt():
+@app.route("/<username_slug>/taxameter/trip_receipt")
+@user_from_slug
+def taxameter_trip_receipt(user):
     """Create a taximeter receipt for a recorded trip."""
     selected = request.args.get("file")
     segment_idx = request.args.get("segment")
@@ -2524,6 +2600,7 @@ def taxameter_trip_receipt():
         breakdown=breakdown,
         distance=dist,
         qr_code=None,
+        user=user,
     )
 
 
@@ -2532,8 +2609,9 @@ def receipts_file(filename):
     return send_from_directory(receipt_dir(), filename)
 
 
-@app.route("/debug")
-def debug_info():
+@app.route("/<username_slug>/debug")
+@user_from_slug
+def debug_info(user):
     """Display diagnostic information about the server."""
     env_info = {
         "teslapy_available": teslapy is not None,
@@ -2551,7 +2629,7 @@ def debug_info():
         pass
 
     return render_template(
-        "debug.html", env_info=env_info, log_lines=log_lines, latest=latest_data
+        "debug.html", env_info=env_info, log_lines=log_lines, latest=latest_data, user=user
     )
 
 
