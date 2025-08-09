@@ -4,7 +4,6 @@ flask-sqlalchemy
 teslapy
 python-dotenv
 requests
-pkce
 aprslib
 phonenumbers==9.0.9
 qrcode
