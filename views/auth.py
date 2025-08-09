@@ -65,7 +65,7 @@ def tesla_token_required(func):
 @login_required
 def oauth_start():
     code_verifier = pkce.generate_code_verifier()
-    code_challenge = pkce.generate_code_challenge(code_verifier)
+    code_challenge = pkce.get_code_challenge(code_verifier)
     session["code_verifier"] = code_verifier
     params = {
         "client_id": os.getenv("TESLA_CLIENT_ID", "ownerapi"),
