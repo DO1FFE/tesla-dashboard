@@ -24,6 +24,7 @@
             <span id="vehicle-info"></span>&nbsp;&nbsp;&nbsp;<span id="vehicle-status"></span>
         </span>
     </h2>
+    {% if show_tesla_link %}<p><a href="{{ url_for('auth.oauth_start') }}">Tesla-Konto verbinden</a></p>{% endif %}
     {% set show_dash = config.get('menu-dashboard', True) %}
     {% set show_stat = config.get('menu-statistik', True) %}
     {% set show_hist = config.get('menu-history', True) %}
