@@ -2206,10 +2206,12 @@ def _format_phone(phone, region="DE"):
         return None
 
 
-@app.route("/<username_slug>/api/sms", methods=["POST"])
-@user_from_slug
-def api_sms(user):
+@app.route("/api/sms", methods=["POST"])
+@login_required
+def api_sms():
     """Send a short text message using the configured phone number."""
+    if current_user.role != "admin":
+        abort(403)
     cfg = load_config()
     if not cfg.get("sms_enabled", True):
         return jsonify({"success": False, "error": "SMS disabled"}), 400
@@ -2288,6 +2290,10 @@ def config_page(user):
         wx_callsign = request.form.get("aprs_wx_callsign", "").strip()
         wx_enabled = "aprs_wx_enabled" in request.form
         aprs_comment = request.form.get("aprs_comment", "").strip()
+        if (callsign or passcode or wx_callsign or aprs_comment or "aprs_wx_enabled" in request.form) and not (
+            current_user.role == "admin" or current_user.is_ham_operator
+        ):
+            abort(403)
         announcement = request.form.get("announcement", "").strip()
         taxi_company = request.form.get("taxi_company", "").strip()
         taxi_slogan = request.form.get("taxi_slogan", "").strip()
@@ -2535,17 +2541,19 @@ def api_log_page(user):
     return render_template("apilog.html", log_lines=log_lines, user=user)
 
 
-@app.route("/<username_slug>/sms")
-@user_from_slug
-def sms_log_page(user):
+@app.route("/sms")
+@login_required
+def sms_log_page():
     """Display the SMS log."""
+    if current_user.role != "admin":
+        abort(403)
     log_lines = []
     try:
         with open(os.path.join(DATA_DIR, "sms.log"), "r", encoding="utf-8") as f:
             log_lines = f.readlines()
     except Exception:
         pass
-    return render_template("sms.html", log_lines=log_lines, user=user)
+    return render_template("sms.html", log_lines=log_lines, user=current_user)
 
 
 @app.route("/<username_slug>/taxameter")
