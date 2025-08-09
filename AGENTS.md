@@ -35,7 +35,7 @@ under `static/`.  Documentation and example files are located in `docs/`.
 
 ## Running locally
 
-- Use `python app.py` to start the development server on port 8013.
+- Use `python app.py` to start the development server on port 8031.
 - The application loads configuration from a `.env` file using `python-dotenv`.
 
 

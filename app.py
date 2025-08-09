@@ -3134,4 +3134,4 @@ if __name__ == "__main__":
     with app.app_context():
         import models
         models.init_db()
-    app.run(host="0.0.0.0", port=8013, debug=True)
+    app.run(host="0.0.0.0", port=8031, debug=True)
