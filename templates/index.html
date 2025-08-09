@@ -15,6 +15,9 @@
     <script src="/static/js/Leaflet.Marker.SlideTo.js"></script>
 </head>
 <body>
+    {% if user.subscription == 'free' %}
+    <p style="color:red;">Ihr Abo ist inaktiv.</p>
+    {% endif %}
     <a href="#dashboard-content" class="skip-link">Zum Inhalt springen</a>
     <h2>Tesla-Dashboard V{{ version }}
         <span id="header-right">
