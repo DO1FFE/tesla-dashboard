@@ -1565,8 +1565,6 @@ def get_tesla():
     if current_user.is_authenticated:
         token_rec = get_user_token()
 
-    email = os.getenv("TESLA_EMAIL")
-    password = os.getenv("TESLA_PASSWORD")
     access_token = (
         token_rec.access_token if token_rec else os.getenv("TESLA_ACCESS_TOKEN")
     )
@@ -1574,38 +1572,32 @@ def get_tesla():
         token_rec.refresh_token if token_rec else os.getenv("TESLA_REFRESH_TOKEN")
     )
 
-    tokens_provided = access_token and refresh_token
-    if not tokens_provided and not (email and password):
+    if not (access_token and refresh_token):
         return None
 
     tesla = teslapy.Tesla(
-        email or "",
+        "",
         app_user_agent=os.getenv("TESLA_USER_AGENT", "Tesla-Dashboard"),
     )
     try:
-        if tokens_provided:
-            tesla.sso_token = {
-                "access_token": access_token,
-                "refresh_token": refresh_token,
-            }
-            tesla.refresh_token()
-            if token_rec:
-                token_rec.access_token = tesla.sso_token.get(
-                    "access_token", access_token
+        tesla.sso_token = {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+        }
+        tesla.refresh_token()
+        if token_rec:
+            token_rec.access_token = tesla.sso_token.get(
+                "access_token", access_token
+            )
+            token_rec.refresh_token = tesla.sso_token.get(
+                "refresh_token", refresh_token
+            )
+            expires_in = tesla.sso_token.get("expires_in")
+            if expires_in:
+                token_rec.expires_at = datetime.utcnow() + timedelta(
+                    seconds=expires_in
                 )
-                token_rec.refresh_token = tesla.sso_token.get(
-                    "refresh_token", refresh_token
-                )
-                expires_in = tesla.sso_token.get("expires_in")
-                if expires_in:
-                    token_rec.expires_at = datetime.utcnow() + timedelta(
-                        seconds=expires_in
-                    )
-                db.session.commit()
-        elif access_token:
-            tesla.refresh_token({"access_token": access_token})
-        else:
-            tesla.fetch_token(password=password)
+            db.session.commit()
     except Exception as exc:
         _log_api_error(exc)
         return None
@@ -2243,12 +2235,16 @@ def delete_account():
 @user_from_slug
 def index(user):
     cfg = load_config()
+    show_tesla_link = False
+    if current_user.is_authenticated and current_user.id == user.id:
+        show_tesla_link = get_user_token() is None
     return render_template(
         "index.html",
         version=__version__,
         year=CURRENT_YEAR,
         config=cfg,
         user=user,
+        show_tesla_link=show_tesla_link,
     )
 
 
