@@ -9,7 +9,7 @@ LOCAL_TZ = ZoneInfo("Europe/Berlin")
 
 
 class Taximeter:
-    def __init__(self, db_path, fetch_func, tariff_func, vehicle_id="default"):
+    def __init__(self, db_path, fetch_func, tariff_func, vehicle_id=None):
         self.db_path = db_path
         self.fetch_func = fetch_func
         self.tariff_func = tariff_func
@@ -35,6 +35,8 @@ class Taximeter:
 
     def start(self):
         with self.lock:
+            if self.vehicle_id is None:
+                raise ValueError("vehicle_id is required")
             if self.active:
                 return False
             if self.paused:

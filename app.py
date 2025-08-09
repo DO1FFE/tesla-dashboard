@@ -111,8 +111,9 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 
 def vehicle_dir(vehicle_id):
     """Return directory for a specific vehicle."""
-    dir_name = str(vehicle_id) if vehicle_id is not None else "default"
-    return os.path.join(DATA_DIR, dir_name)
+    if vehicle_id is None:
+        raise ValueError("vehicle_id is required")
+    return os.path.join(DATA_DIR, str(vehicle_id))
 
 
 def trip_dir(vehicle_id):
@@ -530,7 +531,6 @@ api_errors_lock = threading.Lock()
 state_lock = threading.Lock()
 last_vehicle_state = _load_last_state()
 occupant_present = False
-_default_vehicle_id = None
 _last_aprs_info = {}
 _last_wx_info = {}
 
@@ -644,6 +644,8 @@ def track_drive_path(vehicle_data):
         if ts is None:
             ts = int(time.time() * 1000)
         vid = vehicle_data.get("id_s") or vehicle_data.get("vehicle_id")
+        if vid is None:
+            raise ValueError("vehicle_id is required")
         date_str = datetime.fromtimestamp(ts / 1000, LOCAL_TZ).strftime("%Y%m%d")
         if current_trip_file is None or current_trip_date != date_str:
             current_trip_file = os.path.join(trip_dir(vid), f"trip_{date_str}.csv")
@@ -762,7 +764,10 @@ def send_aprs(vehicle_data):
 
     temp_in = climate.get("inside_temp")
     temp_out = climate.get("outside_temp")
-    vid = str(vehicle_data.get("id_s") or vehicle_data.get("vehicle_id") or "default")
+    vid = vehicle_data.get("id_s") or vehicle_data.get("vehicle_id")
+    if vid is None:
+        raise ValueError("vehicle_id is required")
+    vid = str(vid)
     now = time.time()
     last = _last_aprs_info.get(vid)
     changed = last is None
@@ -1276,7 +1281,7 @@ def sanitize(data):
 
 def _cached_vehicle_list(tesla, ttl=86400):
     """Return vehicle list with basic time-based caching."""
-    global _vehicle_list_cache, _vehicle_list_cache_ts, _default_vehicle_id
+    global _vehicle_list_cache, _vehicle_list_cache_ts
     now = time.time()
     with _vehicle_list_lock:
         if not _vehicle_list_cache or now - _vehicle_list_cache_ts > ttl:
@@ -1286,28 +1291,10 @@ def _cached_vehicle_list(tesla, ttl=86400):
                 log_api_data(
                     "vehicle_list", sanitize([v.copy() for v in _vehicle_list_cache])
                 )
-                if _vehicle_list_cache and _default_vehicle_id is None:
-                    _default_vehicle_id = str(_vehicle_list_cache[0]["id_s"])
             except Exception as exc:
                 _log_api_error(exc)
                 return []
         return _vehicle_list_cache
-
-
-def default_vehicle_id():
-    """Return the first vehicle ID or None if unavailable."""
-    global _default_vehicle_id
-    if _default_vehicle_id is not None:
-        return _default_vehicle_id
-    tesla = get_tesla()
-    if tesla is None:
-        return None
-    vehicles = _cached_vehicle_list(tesla)
-    if vehicles:
-        _default_vehicle_id = str(vehicles[0]["id_s"])
-        return _default_vehicle_id
-    return None
-
 
 def _refresh_state(vehicle, times=2):
     """Query the vehicle state multiple times and return the last value."""
@@ -1323,9 +1310,11 @@ def _refresh_state(vehicle, times=2):
     return state
 
 
-def get_vehicle_state(vehicle_id=None):
+def get_vehicle_state(vehicle_id):
     """Return the current vehicle state without waking the car."""
-    vid = str(vehicle_id or _default_vehicle_id or "default")
+    if vehicle_id is None:
+        raise ValueError("vehicle_id is required")
+    vid = str(vehicle_id)
     state = last_vehicle_state.get(vid)
 
     tesla = get_tesla()
@@ -1364,8 +1353,10 @@ def get_vehicle_state(vehicle_id=None):
     }
 
 
-def get_vehicle_data(vehicle_id=None, state=None):
+def get_vehicle_data(vehicle_id, state=None):
     """Fetch vehicle data for a given vehicle id."""
+    if vehicle_id is None:
+        raise ValueError("vehicle_id is required")
     tesla = get_tesla()
     if tesla is None:
         return {"error": "Missing Tesla credentials or teslapy not installed"}
@@ -1374,11 +1365,9 @@ def get_vehicle_data(vehicle_id=None, state=None):
     if not vehicles:
         return {"error": "No vehicles found"}
 
-    vehicle = None
-    if vehicle_id is not None:
-        vehicle = next((v for v in vehicles if str(v["id_s"]) == str(vehicle_id)), None)
+    vehicle = next((v for v in vehicles if str(v["id_s"]) == str(vehicle_id)), None)
     if vehicle is None:
-        vehicle = vehicles[0]
+        return {"error": "Vehicle not found"}
 
     if state is None:
         try:
@@ -1442,8 +1431,10 @@ def get_vehicle_list():
     return sanitized
 
 
-def reverse_geocode(lat, lon, vehicle_id=None):
+def reverse_geocode(lat, lon, vehicle_id):
     """Return address ``Straße Hausnummer, PLZ Ort-Stadtteil`` for coordinates."""
+    if vehicle_id is None:
+        raise ValueError("vehicle_id is required")
 
     def _compose_label(street, house_number, postcode, city, district):
         parts = []
@@ -1526,18 +1517,16 @@ def reverse_geocode(lat, lon, vehicle_id=None):
     return {}
 
 
-def _fetch_data_once(vehicle_id="default"):
+def _fetch_data_once(vehicle_id):
     """Return current data or cached values based on vehicle state."""
-    if vehicle_id in (None, "default"):
-        vid = _default_vehicle_id
-        cache_id = "default"
-    else:
-        vid = vehicle_id
-        cache_id = vehicle_id
+    if vehicle_id is None:
+        raise ValueError("vehicle_id is required")
+    vid = vehicle_id
+    cache_id = vehicle_id
 
     cached = _load_cached(cache_id)
 
-    state = last_vehicle_state.get(vid or cache_id)
+    state = last_vehicle_state.get(vid)
     # Always refresh the vehicle state so transitions from offline/asleep
     # are detected even when no occupant is present.
     state_info = get_vehicle_state(vid)
@@ -1856,20 +1845,26 @@ def trip_history(user):
 @user_from_slug
 def data_only(user):
     """Display live or cached vehicle data without extra UI."""
-    _start_thread("default")
-    data = latest_data.get("default")
+    vid = request.args.get("vehicle_id")
+    if vid is None:
+        abort(400)
+    _start_thread(vid)
+    data = latest_data.get(vid)
     if data is None:
-        data = _fetch_data_once("default")
+        data = _fetch_data_once(vid)
     return render_template("data.html", data=data, user=user)
 
 
 @app.route("/<username_slug>/api/data")
 @user_from_slug
 def api_data(user):
-    _start_thread("default")
-    data = latest_data.get("default")
+    vid = request.args.get("vehicle_id")
+    if vid is None:
+        abort(400)
+    _start_thread(vid)
+    data = latest_data.get(vid)
     if data is None:
-        data = _fetch_data_once("default")
+        data = _fetch_data_once(vid)
     return jsonify(data)
 
 
@@ -1887,8 +1882,10 @@ def api_data_vehicle(user, vehicle_id):
 @app.route("/<username_slug>/stream")
 @app.route("/<username_slug>/stream/<vehicle_id>")
 @user_from_slug
-def stream_vehicle(user, vehicle_id="default"):
+def stream_vehicle(user, vehicle_id=None):
     """Stream vehicle data to the client using Server-Sent Events."""
+    if vehicle_id is None:
+        abort(400)
     _start_thread(vehicle_id)
 
     def gen():
@@ -1930,6 +1927,8 @@ def api_vehicles(user):
 @user_from_slug
 def api_state(user, vehicle_id=None):
     """Return the last known state of the vehicle."""
+    if vehicle_id is None:
+        abort(400)
     state_info = get_vehicle_state(vehicle_id)
     return jsonify(state_info)
 
@@ -1959,6 +1958,8 @@ def api_reverse_geocode(user):
     except (TypeError, ValueError):
         return jsonify({"error": "Missing coordinates"}), 400
     vehicle_id = request.args.get("vehicle_id")
+    if vehicle_id is None:
+        return jsonify({"error": "Missing vehicle_id"}), 400
     result = reverse_geocode(lat, lon, vehicle_id)
     return jsonify(result)
 
@@ -1993,7 +1994,9 @@ def api_announcement(user):
 @user_from_slug
 def api_alarm_state(user, vehicle_id=None):
     """Return the current alarm state."""
-    vid = vehicle_id or "default"
+    if vehicle_id is None:
+        abort(400)
+    vid = vehicle_id
     _start_thread(vid)
     data = latest_data.get(vid)
     if data is None:
@@ -2381,7 +2384,10 @@ def sms_log_page(user):
 def taxameter_page(user):
     cfg = load_config()
     company = cfg.get("taxi_company", "Taxi Schauer")
-    file_paths = [os.path.relpath(p, DATA_DIR) for p in _get_trip_files()]
+    vehicle_id = request.args.get("vehicle_id")
+    if vehicle_id is None:
+        abort(400)
+    file_paths = [os.path.relpath(p, DATA_DIR) for p in _get_trip_files(vehicle_id)]
     recent_files = file_paths[-10:]
     file_opts = []
     for f in recent_files:
@@ -2408,7 +2414,6 @@ def taxameter_page(user):
             value = f"file={selected}&segment={idx}"
             trips.append({"value": value, "label": label})
 
-    vehicle_id = default_vehicle_id()
     return render_template(
         "taxameter.html",
         company=company,
@@ -2424,7 +2429,9 @@ def taxameter_page(user):
 @app.route("/<username_slug>/api/taxameter/start", methods=["POST"])
 @user_from_slug
 def api_taxameter_start(user):
-    vid = request.form.get("vehicle_id") or default_vehicle_id()
+    vid = request.form.get("vehicle_id")
+    if vid is None:
+        abort(400)
     taximeter.vehicle_id = vid
     _start_thread(vid)
     taximeter.start()

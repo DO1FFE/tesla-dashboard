@@ -38,5 +38,45 @@ class User(db.Model, UserMixin):
         return check_password_hash(self.password_hash, password)
 
 
+class Vehicle(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    vehicle_id = db.Column(db.String, nullable=False)
+    vin = db.Column(db.String(17))
+    model = db.Column(db.String(32))
+    display_name = db.Column(db.String(128))
+    active = db.Column(db.Boolean, default=True)
+
+    __table_args__ = (db.UniqueConstraint("user_id", "vehicle_id"),)
+
+
+class VehicleState(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(
+        db.String, db.ForeignKey("vehicle.vehicle_id"), nullable=False
+    )
+    data = db.Column(db.JSON)
+    recorded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class EnergyLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(
+        db.String, db.ForeignKey("vehicle.vehicle_id"), nullable=False
+    )
+    energy = db.Column(db.Float)
+    recorded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class TripEntry(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(
+        db.String, db.ForeignKey("vehicle.vehicle_id"), nullable=False
+    )
+    started_at = db.Column(db.DateTime)
+    ended_at = db.Column(db.DateTime)
+    distance = db.Column(db.Float)
+
+
 def init_db():
     db.create_all()
