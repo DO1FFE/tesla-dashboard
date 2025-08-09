@@ -57,7 +57,7 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev")
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
-from models import User  # noqa: E402
+from models import User, ConfigOption, ConfigVisibility  # noqa: E402
 
 
 @login_manager.user_loader
@@ -94,6 +94,7 @@ LOCAL_TZ = ZoneInfo("Europe/Berlin")
 __version__ = get_version()
 CURRENT_YEAR = datetime.now(LOCAL_TZ).year
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
+SUBSCRIPTION_LEVELS = {"free": 0, "basic": 1, "pro": 2}
 
 
 @app.context_processor
@@ -338,6 +339,31 @@ CONFIG_ITEMS = [
 ]
 
 
+def _build_config_items(user):
+    items = []
+    user_level = SUBSCRIPTION_LEVELS.get(getattr(user, "subscription", "free"), 0)
+    for raw in CONFIG_ITEMS:
+        option = ConfigOption.query.filter_by(key=raw["id"]).first()
+        if not option:
+            option = ConfigOption(
+                key=raw["id"], label=raw["desc"], description=raw["desc"]
+            )
+            db.session.add(option)
+            db.session.commit()
+        vis = ConfigVisibility.query.filter_by(config_option_id=option.id).first()
+        required = vis.required_subscription if vis else "free"
+        locked = False
+        if vis:
+            required_level = SUBSCRIPTION_LEVELS.get(required, 0)
+            if user_level < required_level and not vis.always_active:
+                locked = True
+        item = dict(raw)
+        item["required_subscription"] = required
+        item["locked"] = locked
+        items.append(item)
+    return items
+
+
 config_cache = {}
 
 
@@ -485,6 +511,43 @@ def owner_or_admin(f):
         return f(user, *args, **kwargs)
 
     return decorated
+
+
+def requires_subscription(level):
+    """Ensure the current user meets the required subscription level.
+
+    The check consults :class:`ConfigVisibility` for the config option named
+    after the wrapped function.  If the option is marked as ``always_active``
+    the subscription requirement is bypassed.
+    """
+
+    def decorator(f):
+        option_key = f.__name__
+
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            if not current_user.is_authenticated:
+                abort(403)
+            required_level = SUBSCRIPTION_LEVELS.get(level, 0)
+            option = ConfigOption.query.filter_by(key=option_key).first()
+            if option:
+                vis = ConfigVisibility.query.filter_by(
+                    config_option_id=option.id
+                ).first()
+                if vis:
+                    if vis.always_active:
+                        return f(*args, **kwargs)
+                    required_level = SUBSCRIPTION_LEVELS.get(
+                        vis.required_subscription, required_level
+                    )
+            user_level = SUBSCRIPTION_LEVELS.get(current_user.subscription, 0)
+            if user_level < required_level:
+                abort(403)
+            return f(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
 
 
 def _load_parktime():
@@ -2111,8 +2174,11 @@ def api_sms(user):
 @owner_or_admin
 def config_page(user):
     cfg = load_config()
+    items = _build_config_items(user)
     if request.method == "POST":
-        for item in CONFIG_ITEMS:
+        for item in items:
+            if item["locked"]:
+                continue
             cfg[item["id"]] = item["id"] in request.form
         callsign = request.form.get("aprs_callsign", "").strip()
         passcode = request.form.get("aprs_passcode", "").strip()
@@ -2227,7 +2293,7 @@ def config_page(user):
         elif "api_interval_idle" in cfg:
             cfg.pop("api_interval_idle")
         save_config(cfg)
-    return render_template("config.html", items=CONFIG_ITEMS, config=cfg, user=user)
+    return render_template("config.html", items=items, config=cfg, user=user)
 
 
 @app.route("/<username_slug>/error")

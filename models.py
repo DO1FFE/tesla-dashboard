@@ -78,5 +78,36 @@ class TripEntry(db.Model):
     distance = db.Column(db.Float)
 
 
+class ConfigOption(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(80), unique=True, nullable=False)
+    label = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.String(255))
+
+
+class ConfigVisibility(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    config_option_id = db.Column(
+        db.Integer, db.ForeignKey("config_option.id"), nullable=False
+    )
+    required_subscription = db.Column(db.String(5), nullable=False, default="free")
+    always_active = db.Column(db.Boolean, default=False)
+
+    config_option = db.relationship("ConfigOption", backref="visibility", uselist=False)
+
+
+class UserConfig(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    config_option_id = db.Column(
+        db.Integer, db.ForeignKey("config_option.id"), nullable=False
+    )
+    value = db.Column(db.String)
+
+    __table_args__ = (db.UniqueConstraint("user_id", "config_option_id"),)
+
+    option = db.relationship("ConfigOption")
+
+
 def init_db():
     db.create_all()
