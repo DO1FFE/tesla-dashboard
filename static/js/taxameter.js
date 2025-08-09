@@ -1,6 +1,7 @@
 $(function() {
+    var API_PREFIX = window.API_PREFIX || '';
     function update() {
-        $.getJSON('/api/taxameter/status?vehicle_id=' + encodeURIComponent(VEHICLE_ID), function(data) {
+        $.getJSON(API_PREFIX + '/taxameter/status?vehicle_id=' + encodeURIComponent(VEHICLE_ID), function(data) {
             if (data.price !== undefined) {
                 $('#price').text(Number(data.price).toFixed(2));
             }
@@ -95,19 +96,19 @@ $(function() {
         $('#taximeter-receipt').hide();
         $('.active-btn').removeClass('active-btn');
         $(this).addClass('active-btn');
-        $.post('/api/taxameter/start', {vehicle_id: VEHICLE_ID}, update, 'json');
+        $.post(API_PREFIX + '/taxameter/start', {vehicle_id: VEHICLE_ID}, update, 'json');
     });
 
     $('#pause-btn').click(function() {
         $('.active-btn').removeClass('active-btn');
         $(this).addClass('active-btn');
-        $.post('/api/taxameter/pause', {vehicle_id: VEHICLE_ID}, update, 'json');
+        $.post(API_PREFIX + '/taxameter/pause', {vehicle_id: VEHICLE_ID}, update, 'json');
     });
 
     $('#stop-btn').click(function() {
         $('.active-btn').removeClass('active-btn');
         $(this).addClass('active-btn');
-        $.post('/api/taxameter/stop', {vehicle_id: VEHICLE_ID}, function(data) {
+        $.post(API_PREFIX + '/taxameter/stop', {vehicle_id: VEHICLE_ID}, function(data) {
             if (data.price !== undefined) {
                 $('#price').text(Number(data.price).toFixed(2));
                 $('#dist').text(Number(data.distance).toFixed(2));
@@ -120,7 +121,7 @@ $(function() {
 
     $('#reset-btn').click(function() {
         $('.active-btn').removeClass('active-btn');
-        $.post('/api/taxameter/reset', {vehicle_id: VEHICLE_ID}, update);
+        $.post(API_PREFIX + '/taxameter/reset', {vehicle_id: VEHICLE_ID}, update);
         $('#price').text('0.00');
         $('#dist').text('0.00');
         $('#time').text('0');
@@ -130,13 +131,13 @@ $(function() {
     $('#trip-receipt-btn').click(function() {
         var query = $('#trip-select').val();
         if (query) {
-            window.open('/taxameter/trip_receipt?' + query, '_blank');
+            window.open('/' + window.USER_SLUG + '/taxameter/trip_receipt?' + query, '_blank');
         }
     });
 
     function loadTrips(file) {
         if (!file) return;
-        $.getJSON('/api/taxameter/trips?file=' + encodeURIComponent(file), function(data) {
+        $.getJSON(API_PREFIX + '/taxameter/trips?file=' + encodeURIComponent(file), function(data) {
             $('#trip-select').empty();
             $.each(data, function(idx, t) {
                 $('#trip-select').append($('<option>').val(t.value).text(t.label));

@@ -1,5 +1,6 @@
 var currentVehicle = null;
 var APP_VERSION = window.APP_VERSION || null;
+var API_PREFIX = window.API_PREFIX || '/api';
 var MILES_TO_KM = 1.60934;
 var announcementRaw = '';
 var announcementList = [];
@@ -226,7 +227,7 @@ function updateHeader(data) {
 }
 
 function fetchVehicles() {
-    $.getJSON('/api/vehicles', function(resp) {
+    $.getJSON(API_PREFIX + '/vehicles', function(resp) {
         var vehicles = Array.isArray(resp) ? resp : [];
         var $select = $('#vehicle-select');
         var $label = $('label[for="vehicle-select"]');
@@ -1125,7 +1126,7 @@ function updateOfflineInfo(state, serviceMode, serviceModePlus) {
 }
 
 function updateClientCount() {
-    $.getJSON('/api/clients', function(resp) {
+    $.getJSON(API_PREFIX + '/clients', function(resp) {
         if (typeof resp.clients === 'number') {
             $('#client-count').text('Clients: ' + resp.clients);
         }
@@ -1163,7 +1164,7 @@ function updateAnnouncement() {
 }
 
 function fetchAnnouncement() {
-    $.getJSON('/api/announcement', function(resp) {
+    $.getJSON(API_PREFIX + '/announcement', function(resp) {
         if (typeof resp.announcement !== 'undefined') {
             if (resp.announcement !== announcementRaw) {
                 announcementRaw = resp.announcement;
@@ -1199,7 +1200,7 @@ function startStream() {
         eventSource.close();
     }
     showLoading();
-    eventSource = new EventSource('/stream/' + currentVehicle);
+    eventSource = new EventSource('/' + window.USER_SLUG + '/stream/' + currentVehicle);
     eventSource.onmessage = function(e) {
         var data = JSON.parse(e.data);
         if (!data.error) {
@@ -1212,11 +1213,11 @@ function startStream() {
             eventSource = null;
         }
         if (!currentVehicle) return;
-        $.getJSON('/api/state/' + currentVehicle, function(resp) {
+        $.getJSON(API_PREFIX + '/state/' + currentVehicle, function(resp) {
             var st = resp.state;
             updateVehicleState(st);
             updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
-            $.getJSON('/api/data/' + currentVehicle, function(data) {
+            $.getJSON(API_PREFIX + '/data/' + currentVehicle, function(data) {
                 if (data && !data.error) {
                     handleData(data);
                 }
@@ -1241,12 +1242,12 @@ function startStreamIfOnline() {
         return;
     }
     showLoading();
-    $.getJSON('/api/state/' + currentVehicle, function(resp) {
+    $.getJSON(API_PREFIX + '/state/' + currentVehicle, function(resp) {
         var st = resp.state;
         updateVehicleState(st);
         updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
         startStream();
-        $.getJSON('/api/data/' + currentVehicle, function(data) {
+        $.getJSON(API_PREFIX + '/data/' + currentVehicle, function(data) {
             if (data && !data.error) {
                 handleData(data);
             }
@@ -1254,7 +1255,7 @@ function startStreamIfOnline() {
     });
 }
 
-$.getJSON('/api/config', function(cfg) {
+$.getJSON(API_PREFIX + '/config', function(cfg) {
     applyConfig(cfg);
     lastConfigJSON = JSON.stringify(cfg || {});
     if (cfg) {
@@ -1265,7 +1266,7 @@ $.getJSON('/api/config', function(cfg) {
 });
 
 function fetchConfig() {
-    $.getJSON('/api/config', function(cfg) {
+    $.getJSON(API_PREFIX + '/config', function(cfg) {
         var json = JSON.stringify(cfg || {});
         if (json !== lastConfigJSON) {
             if (cfg && (cfg.api_interval !== lastApiInterval ||
@@ -1284,7 +1285,7 @@ function fetchConfig() {
 }
 
 function checkAppVersion() {
-    $.getJSON('/api/version', function(resp) {
+    $.getJSON(API_PREFIX + '/version', function(resp) {
         if (resp.version && APP_VERSION && resp.version !== APP_VERSION) {
             location.reload(true);
         }
@@ -1313,7 +1314,7 @@ $('#sms-send').on('click', function() {
     }
     $('#sms-status').text('Senden...');
     $.ajax({
-        url: '/api/sms',
+        url: API_PREFIX + '/sms',
         method: 'POST',
         contentType: 'application/json',
         data: JSON.stringify({message: msg, name: name}),
