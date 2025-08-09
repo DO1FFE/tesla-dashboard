@@ -1,0 +1,9 @@
+<div class="share-container">
+    <button id="share-button" type="button">Teilen</button>
+</div>
+{% if not current_user.is_authenticated %}
+<div class="public-banner">
+    Dein eigenes Dashboard? <a href="{{ url_for('register') }}">Jetzt registrieren</a> / <a href="{{ url_for('login') }}">einloggen</a>.
+</div>
+{% endif %}
+<script src="/static/js/share.js"></script>
