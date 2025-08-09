@@ -35,6 +35,8 @@ from flask_admin import Admin, AdminIndexView
 from flask_admin.contrib.sqla import ModelView
 import stripe
 import click
+from pathlib import Path
+from collections import defaultdict
 
 try:
     import teslapy
@@ -147,6 +149,201 @@ def ensure_admin(email, username, password):
         user.set_password(password)
     db.session.commit()
     click.echo(f"Admin {user.username} ensured")
+
+
+@app.cli.command("migrate-files-to-admin")
+@click.option("--admin", "admin_identifier", required=True)
+@click.option("--dry-run", is_flag=True, help="Do not write to DB or delete files")
+def migrate_files_to_admin(admin_identifier, dry_run):
+    """Import legacy files into the database for the given admin user."""
+    from models import (
+        VehicleState,
+        EnergyLog,
+        TripEntry,
+    )
+
+    # Optional models that may not exist in older deployments
+    import models as _models
+
+    SmsLog = getattr(_models, "SmsLog", None)
+    ApiLog = getattr(_models, "ApiLog", None)
+    StatisticsEntry = getattr(_models, "StatisticsEntry", None)
+
+    admin_user = (
+        User.query.filter(
+            ((User.username_slug == admin_identifier) | (User.email == admin_identifier))
+            & (User.role == "admin")
+        ).first()
+    )
+    if not admin_user:
+        raise click.ClickException("Admin user not found")
+
+    data_dir = Path(DATA_DIR)
+    if not data_dir.exists():
+        click.echo(f"Data directory {data_dir} does not exist")
+        return
+
+    def parse_ts(value):
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value)
+        except Exception:
+            try:
+                return datetime.utcfromtimestamp(float(value))
+            except Exception:
+                return None
+
+    def extract_vehicle_id(path: Path, data: dict | None = None):
+        try:
+            rel = path.relative_to(data_dir)
+            if rel.parts:
+                vid = rel.parts[0]
+                if vid and vid != "default":
+                    return vid
+        except ValueError:
+            pass
+        if data:
+            vid = data.get("vehicle_id")
+            if vid and vid != "default":
+                return vid
+        return None
+
+    def load_json_lines(path: Path):
+        entries = []
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+        return entries
+
+    def load_trip_json(path: Path):
+        data = json.load(path.open())
+        return data if isinstance(data, list) else [data]
+
+    handlers: dict[str, dict] = {
+        "state.log": {
+            "model": VehicleState,
+            "loader": load_json_lines,
+            "builder": lambda e, vid: VehicleState(
+                vehicle_id=vid,
+                user_id=admin_user.id,
+                data=e,
+                recorded_at=parse_ts(e.get("recorded_at")),
+            ),
+        },
+        "energy.log": {
+            "model": EnergyLog,
+            "loader": load_json_lines,
+            "builder": lambda e, vid: EnergyLog(
+                vehicle_id=vid,
+                user_id=admin_user.id,
+                energy=e.get("energy"),
+                recorded_at=parse_ts(e.get("recorded_at")),
+            ),
+        },
+        "trip_*.json": {
+            "model": TripEntry,
+            "loader": load_trip_json,
+            "builder": lambda e, vid: TripEntry(
+                vehicle_id=vid,
+                user_id=admin_user.id,
+                started_at=parse_ts(e.get("started_at")),
+                ended_at=parse_ts(e.get("ended_at")),
+                distance=e.get("distance"),
+            ),
+        },
+    }
+
+    if SmsLog is not None:
+        handlers["sms.log"] = {
+            "model": SmsLog,
+            "loader": load_json_lines,
+            "builder": lambda e, vid: SmsLog(
+                vehicle_id=vid,
+                user_id=admin_user.id,
+                data=e,
+                recorded_at=parse_ts(e.get("recorded_at")),
+            ),
+        }
+
+    if ApiLog is not None:
+        handlers["api-liste.txt"] = {
+            "model": ApiLog,
+            "loader": load_json_lines,
+            "builder": lambda e, vid: ApiLog(
+                vehicle_id=vid,
+                user_id=admin_user.id,
+                data=e,
+                recorded_at=parse_ts(e.get("recorded_at")),
+            ),
+        }
+
+    if StatisticsEntry is not None:
+        handlers["statistik.log"] = {
+            "model": StatisticsEntry,
+            "loader": load_json_lines,
+            "builder": lambda e, vid: StatisticsEntry(
+                vehicle_id=vid,
+                user_id=admin_user.id,
+                data=e,
+                recorded_at=parse_ts(e.get("recorded_at")),
+            ),
+        }
+
+    report: defaultdict[str, dict] = defaultdict(
+        lambda: {"imported": 0, "skipped": 0, "errors": 0}
+    )
+
+    had_errors = False
+
+    for pattern, spec in handlers.items():
+        for path in data_dir.rglob(pattern):
+            entries = spec["loader"](path)
+            if not entries:
+                continue
+            try:
+                if not dry_run:
+                    with db.session.begin():
+                        for entry in entries:
+                            vid = extract_vehicle_id(path, entry)
+                            if not vid:
+                                report[pattern]["skipped"] += 1
+                                continue
+                            obj = spec["builder"](entry, vid)
+                            db.session.merge(obj)
+                            report[pattern]["imported"] += 1
+                else:
+                    for entry in entries:
+                        vid = extract_vehicle_id(path, entry)
+                        if not vid:
+                            report[pattern]["skipped"] += 1
+                            continue
+                        report[pattern]["imported"] += 1
+                if not dry_run:
+                    path.unlink()
+                    try:
+                        path.parent.rmdir()
+                    except OSError:
+                        pass
+            except Exception:
+                db.session.rollback()
+                report[pattern]["errors"] += 1
+                had_errors = True
+
+    total = {"imported": 0, "skipped": 0, "errors": 0}
+    for key, stats in report.items():
+        click.echo(f"{key}: {stats}")
+        for k in total:
+            total[k] += stats[k]
+    click.echo(f"TOTAL: {total}")
+
+    if had_errors:
+        raise click.ClickException("Errors occurred during migration")
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
