@@ -6,6 +6,7 @@ import time
 import logging
 import glob
 import socket
+import uuid
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from flask import (
@@ -17,6 +18,7 @@ from flask import (
     send_from_directory,
     abort,
     url_for,
+    g,
 )
 from taximeter import Taximeter
 import requests
@@ -59,6 +61,19 @@ TESLA_REQUEST_TIMEOUT = float(os.getenv("TESLA_REQUEST_TIMEOUT", "5"))
 SOCKETIO_CLIENT_MAP = {5: "4.7.2", 4: "4.5.4"}
 SOCKETIO_JS_DIR = Path(__file__).parent / "static" / "js"
 SOCKETIO_DOWNLOAD_ATTEMPTS = set()
+
+
+def _preload_socketio_client():
+    """Fetch the appropriate Socket.IO client script on startup."""
+    try:
+        major = int(metadata.version("python-socketio").split(".", 1)[0])
+    except Exception:
+        major = max(SOCKETIO_CLIENT_MAP)
+    version = SOCKETIO_CLIENT_MAP.get(major, next(iter(SOCKETIO_CLIENT_MAP.values())))
+    ensure_socketio_client(version)
+
+
+_preload_socketio_client()
 
 
 def ensure_socketio_client(version: str) -> None:
@@ -107,9 +122,28 @@ def inject_ga_id():
     return {"ga_id": GA_TRACKING_ID}
 
 
+@app.before_request
+def assign_client_id():
+    """Ensure every client has a persistent identifier."""
+    cid = request.cookies.get("client_id")
+    if cid is None:
+        cid = uuid.uuid4().hex
+        g.client_id = cid
+        g.set_client_id_cookie = True
+    else:
+        g.client_id = cid
+
+
+@app.after_request
+def persist_client_id(resp):
+    if getattr(g, "set_client_id_cookie", False):
+        resp.set_cookie("client_id", g.client_id, max_age=315360000)
+    return resp
+
+
 # Track connected clients with their connection metadata
 active_clients = {}
-current_speaker = None
+current_speaker_id = None
 ptt_timer = None
 
 
@@ -2845,29 +2879,40 @@ def debug_info():
 # Socket.IO handlers for push-to-talk audio
 
 
-def _release_ptt(expected_sid):
-    """Release the PTT lock if still held by ``expected_sid``."""
-    global current_speaker, ptt_timer
-    if current_speaker == expected_sid:
-        current_speaker = None
+def _client_id():
+    return request.cookies.get("client_id")
+
+
+def _release_ptt(expected_id):
+    """Release the PTT lock if still held by ``expected_id``."""
+    global current_speaker_id, ptt_timer
+    if current_speaker_id == expected_id:
+        current_speaker_id = None
         socketio.emit("unlock_ptt", broadcast=True)
     ptt_timer = None
+
+
+@socketio.on("connect")
+def handle_connect():
+    cid = _client_id()
+    emit("your_id", {"id": cid})
 
 
 @socketio.on("start_speaking")
 def start_speaking():
     """Allow a client to speak if no other client is active."""
-    global current_speaker, ptt_timer
+    global current_speaker_id, ptt_timer
+    cid = _client_id()
     sid = request.sid
-    if current_speaker is None:
-        current_speaker = sid
+    if current_speaker_id is None:
+        current_speaker_id = cid
         emit("start_accepted", room=sid)
-        emit("lock_ptt", broadcast=True, include_self=False)
+        emit("lock_ptt", {"speaker": cid}, broadcast=True, include_self=False)
         if ptt_timer:
             ptt_timer.cancel()
-        ptt_timer = threading.Timer(30, _release_ptt, args=[sid])
+        ptt_timer = threading.Timer(30, _release_ptt, args=[cid])
         ptt_timer.start()
-    elif current_speaker == sid:
+    elif current_speaker_id == cid:
         emit("start_accepted", room=sid)
     else:
         emit("start_denied", room=sid)
@@ -2876,9 +2921,9 @@ def start_speaking():
 @socketio.on("stop_speaking")
 def stop_speaking():
     """Release the PTT lock when a client stops speaking."""
-    global current_speaker, ptt_timer
-    if request.sid == current_speaker:
-        current_speaker = None
+    global current_speaker_id, ptt_timer
+    if _client_id() == current_speaker_id:
+        current_speaker_id = None
         emit("unlock_ptt", broadcast=True)
         if ptt_timer:
             ptt_timer.cancel()
@@ -2888,16 +2933,16 @@ def stop_speaking():
 @socketio.on("audio_chunk")
 def handle_audio_chunk(data):
     """Forward audio data from the active speaker to all listeners."""
-    if request.sid == current_speaker:
+    if _client_id() == current_speaker_id:
         emit("play_audio", data, broadcast=True, include_self=False)
 
 
 @socketio.on("disconnect")
 def handle_disconnect():
     """Ensure lock is released if the speaker disconnects."""
-    global current_speaker, ptt_timer
-    if request.sid == current_speaker:
-        current_speaker = None
+    global current_speaker_id, ptt_timer
+    if _client_id() == current_speaker_id:
+        current_speaker_id = None
         emit("unlock_ptt", broadcast=True)
         if ptt_timer:
             ptt_timer.cancel()
