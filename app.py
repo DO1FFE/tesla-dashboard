@@ -5,6 +5,7 @@ import threading
 import time
 import logging
 import glob
+import socket
 from logging.handlers import RotatingFileHandler
 from flask import (
     Flask,
@@ -51,6 +52,36 @@ GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
 def inject_ga_id():
     """Add Google Analytics tracking ID to all templates."""
     return {"ga_id": GA_TRACKING_ID}
+
+
+# Track connected clients with their connection metadata
+active_clients = {}
+
+
+@app.before_request
+def _track_client():
+    """Collect information about the connecting client."""
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    ua = request.headers.get("User-Agent", "")
+    hostname = ""
+    try:
+        hostname = socket.gethostbyaddr(ip)[0]
+    except Exception:
+        pass
+    now = time.time()
+    info = active_clients.get(ip)
+    if info is None:
+        active_clients[ip] = {
+            "ip": ip,
+            "hostname": hostname,
+            "user_agent": ua,
+            "first_seen": now,
+            "last_seen": now,
+        }
+    else:
+        info["last_seen"] = now
+        info["user_agent"] = ua
+        info["hostname"] = hostname
 
 
 # Ensure data paths are relative to this file regardless of the
@@ -2593,6 +2624,27 @@ def taxameter_trip_receipt():
 @app.route("/receipts/<path:filename>")
 def receipts_file(filename):
     return send_from_directory(receipt_dir(), filename)
+
+
+@app.route("/clients")
+def clients_view():
+    """Show currently connected clients."""
+    now = time.time()
+    items = []
+    for data in active_clients.values():
+        delta = now - data.get("first_seen", now)
+        days = int(delta // 86400)
+        hms = time.strftime("%H:%M:%S", time.gmtime(delta % 86400))
+        items.append(
+            {
+                "ip": data.get("ip"),
+                "hostname": data.get("hostname"),
+                "user_agent": data.get("user_agent"),
+                "duration": f"{days:02d} Tage, {hms}",
+            }
+        )
+    items.sort(key=lambda d: d["ip"] or "")
+    return render_template("clients.html", clients=items)
 
 
 @app.route("/debug")
