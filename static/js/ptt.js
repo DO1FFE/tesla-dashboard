@@ -10,7 +10,7 @@
         const gain = audioCtx.createGain();
         osc.type = 'sine';
         osc.frequency.value = 880;
-        gain.gain.value = 0.2;
+        gain.gain.value = 1.0;
         osc.connect(gain);
         gain.connect(audioCtx.destination);
         osc.start();
@@ -144,9 +144,15 @@
     // Reconstruct the binary data into a playable blob.  The server forwards
     // a ``Uint8Array`` which we turn back into a Blob before playback.
     const chunk = new Uint8Array(data);
+    if (!chunk.length) {
+      console.error('Received empty audio data');
+      return;
+    }
     const audioBlob = new Blob([chunk], { type: 'audio/webm;codecs=opus' });
     const url = URL.createObjectURL(audioBlob);
     const audio = new Audio(url);
+    audio.volume = 1.0;
+    audio.addEventListener('error', (e) => console.error('Audio element error', e));
     const playMain = () => {
       audio.play().catch((err) => console.error('Audio playback failed', err));
       audio.addEventListener('ended', () => URL.revokeObjectURL(url));
