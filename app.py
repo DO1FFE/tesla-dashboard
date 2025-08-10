@@ -2948,13 +2948,18 @@ def stop_speaking():
 def handle_audio_chunk(data):
     """Forward audio data from the active speaker to all listeners."""
     if _client_id() == current_speaker_id:
-        if isinstance(data, (bytes, bytearray)) and len(data) > 0:
-            # ``socketio.emit`` broadcasts to all clients by default.  Using the
+        try:
+            raw = bytes(data)
+        except Exception:
+            app.logger.warning("Invalid audio chunk received: %r", type(data))
+            return
+        if raw:
+            # ``socketio.emit`` broadcasts to all clients by default. Using the
             # ``include_self`` flag avoids echoing the audio back to the active
             # speaker while keeping the data in its original binary form.
-            socketio.emit("play_audio", data, include_self=False)
+            socketio.emit("play_audio", raw, include_self=False)
         else:
-            app.logger.warning("Invalid audio chunk received: %r", type(data))
+            app.logger.warning("Empty audio chunk received")
 
 
 @socketio.on("disconnect")
