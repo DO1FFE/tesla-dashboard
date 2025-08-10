@@ -2,7 +2,6 @@
   const socket = io();
   const pttBtn = document.getElementById('ptt-btn');
   const levelMeter = document.getElementById('audio-level');
-  const audioDataDisplay = document.getElementById('audio-data');
   const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
   function playPing() {
@@ -65,13 +64,6 @@
           // Send a typed array so that the Python backend receives the raw
           // bytes without any additional encoding.
           socket.emit('audio_chunk', chunk);
-          if (audioDataDisplay) {
-            const hex = Array.from(chunk.slice(0, 20))
-              .map((b) => b.toString(16).padStart(2, '0'))
-              .join(' ');
-            audioDataDisplay.textContent =
-              (audioDataDisplay.textContent + ' ' + hex).slice(-400);
-          }
         });
       }
     };
@@ -269,14 +261,6 @@
       if (!chunk.length) {
         console.error('Received empty audio data');
         return;
-      }
-
-      if (audioDataDisplay) {
-        const hex = Array.from(chunk.slice(0, 20))
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join(' ');
-        audioDataDisplay.textContent =
-          (audioDataDisplay.textContent + ' ' + hex).slice(-400);
       }
 
       // ``decodeAudioData`` expects an ``ArrayBuffer`` containing the encoded
