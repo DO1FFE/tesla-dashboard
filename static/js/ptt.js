@@ -62,7 +62,9 @@
         });
       }
     };
-    recorder.start(250);
+    // Use a small timeslice so that audio chunks are delivered frequently,
+    // enabling smoother streaming on the receiving side.
+    recorder.start(100);
   }
 
   function stopRecording() {
@@ -151,17 +153,24 @@
   });
 
   socket.on('start_accepted', () => {
-    startRecording();
-    startLevelMonitoring();
-    clearTot();
-    totTimer = setTimeout(() => {
-      socket.emit('stop_speaking');
-      stopRecording();
-      if (pttBtn) {
-        pttBtn.classList.remove('active-btn');
-      }
-      totTimer = null;
-    }, 30000);
+    // Play a short ping before transmission starts so the speaker also
+    // receives an audible indication that the channel is live.  The ping is
+    // played locally and not forwarded to other clients.
+    playPing()
+      .catch((err) => console.error('Ping playback failed', err))
+      .finally(() => {
+        startRecording();
+        startLevelMonitoring();
+        clearTot();
+        totTimer = setTimeout(() => {
+          socket.emit('stop_speaking');
+          stopRecording();
+          if (pttBtn) {
+            pttBtn.classList.remove('active-btn');
+          }
+          totTimer = null;
+        }, 30000);
+      });
   });
 
   socket.on('start_denied', () => {
@@ -197,10 +206,14 @@
     clearTot();
   });
 
+  // Maintain a running timestamp so that received chunks can be scheduled
+  // back-to-back without gaps.  ``playbackTime`` is initialised with the
+  // current context time and advanced by the duration of each decoded chunk.
+  let playbackTime = audioCtx.currentTime;
+
   socket.on('play_audio', (data) => {
-    // Reconstruct the binary data into a playable blob.  Socket.IO may deliver
-    // the bytes in different container formats depending on the transport.  We
-    // normalise the input so that ``chunk`` is always a ``Uint8Array``.
+    // Normalise ``data`` into a ``Uint8Array`` irrespective of the transport
+    // used by Socket.IO.
     let chunk;
     if (data instanceof ArrayBuffer) {
       chunk = new Uint8Array(data);
@@ -209,8 +222,6 @@
     } else if (data && data.buffer instanceof ArrayBuffer) {
       chunk = new Uint8Array(data.buffer);
     } else if (data && Array.isArray(data.data)) {
-      // When falling back to JSON transports the payload arrives as an object
-      // with a ``data`` array similar to Node's ``Buffer`` representation.
       chunk = new Uint8Array(data.data);
     } else {
       try {
@@ -224,34 +235,44 @@
       console.error('Received empty audio data');
       return;
     }
-    const audioBlob = new Blob([chunk], { type: 'audio/webm;codecs=opus' });
-    const url = URL.createObjectURL(audioBlob);
-    const audio = new Audio(url);
-    audio.volume = 1.0;
-    audio.addEventListener('error', (e) => console.error('Audio element error', e));
-    const source = audioCtx.createMediaElementSource(audio);
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 256;
-    source.connect(analyser);
-    analyser.connect(audioCtx.destination);
-    const dataArr = new Uint8Array(analyser.fftSize);
-    const updateLevel = () => {
-      analyser.getByteTimeDomainData(dataArr);
-      let sum = 0;
-      for (let i = 0; i < dataArr.length; i++) {
-        const v = (dataArr[i] - 128) / 128;
-        sum += v * v;
-      }
-      const rms = Math.sqrt(sum / dataArr.length);
-      if (levelMeter) levelMeter.value = rms;
-      if (!audio.paused && !audio.ended) {
-        requestAnimationFrame(updateLevel);
-      } else if (levelMeter) {
-        levelMeter.value = 0;
-      }
-    };
-    audio.addEventListener('play', () => updateLevel());
-    audio.play().catch((err) => console.error('Audio playback failed', err));
-    audio.addEventListener('ended', () => URL.revokeObjectURL(url));
+
+    // ``decodeAudioData`` expects an ``ArrayBuffer`` containing the encoded
+    // audio.  ``slice`` ensures the view only covers the transmitted bytes.
+    const ab = chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength);
+
+    audioCtx
+      .decodeAudioData(ab)
+      .then((buffer) => {
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        analyser.connect(audioCtx.destination);
+        const dataArr = new Uint8Array(analyser.fftSize);
+        const updateLevel = () => {
+          analyser.getByteTimeDomainData(dataArr);
+          let sum = 0;
+          for (let i = 0; i < dataArr.length; i++) {
+            const v = (dataArr[i] - 128) / 128;
+            sum += v * v;
+          }
+          const rms = Math.sqrt(sum / dataArr.length);
+          if (levelMeter) levelMeter.value = rms;
+          req = requestAnimationFrame(updateLevel);
+        };
+        let req = requestAnimationFrame(updateLevel);
+        source.onended = () => {
+          cancelAnimationFrame(req);
+          if (levelMeter) levelMeter.value = 0;
+        };
+        // Schedule the chunk immediately after the previous one.
+        if (playbackTime < audioCtx.currentTime) {
+          playbackTime = audioCtx.currentTime;
+        }
+        source.start(playbackTime);
+        playbackTime += buffer.duration;
+      })
+      .catch((err) => console.error('Audio decode failed', err));
   });
 })();
