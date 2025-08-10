@@ -156,6 +156,7 @@ def persist_client_id(resp):
 active_clients = {}
 current_speaker_id = None
 ptt_timer = None
+audio_buffer = bytearray()
 
 
 @lru_cache(maxsize=256)
@@ -2897,10 +2898,19 @@ def _client_id():
     return request.cookies.get("client_id")
 
 
+def _flush_audio_buffer():
+    """Send and clear buffered audio if available."""
+    global audio_buffer
+    if audio_buffer:
+        socketio.emit("play_audio", bytes(audio_buffer), include_self=False)
+        audio_buffer.clear()
+
+
 def _release_ptt(expected_id):
     """Release the PTT lock if still held by ``expected_id``."""
-    global current_speaker_id, ptt_timer
+    global current_speaker_id, ptt_timer, audio_buffer
     if current_speaker_id == expected_id:
+        _flush_audio_buffer()
         current_speaker_id = None
         socketio.emit("unlock_ptt", broadcast=True)
     ptt_timer = None
@@ -2915,11 +2925,12 @@ def handle_connect():
 @socketio.on("start_speaking")
 def start_speaking():
     """Allow a client to speak if no other client is active."""
-    global current_speaker_id, ptt_timer
+    global current_speaker_id, ptt_timer, audio_buffer
     cid = _client_id()
     sid = request.sid
     if current_speaker_id is None:
         current_speaker_id = cid
+        audio_buffer.clear()
         emit("start_accepted", room=sid)
         emit("lock_ptt", {"speaker": cid}, broadcast=True, include_self=False)
         if ptt_timer:
@@ -2937,6 +2948,7 @@ def stop_speaking():
     """Release the PTT lock when a client stops speaking."""
     global current_speaker_id, ptt_timer
     if _client_id() == current_speaker_id:
+        _flush_audio_buffer()
         current_speaker_id = None
         emit("unlock_ptt", broadcast=True)
         if ptt_timer:
@@ -2948,15 +2960,14 @@ def stop_speaking():
 def handle_audio_chunk(data):
     """Forward audio data from the active speaker to all listeners."""
     if _client_id() == current_speaker_id:
+        global audio_buffer
         try:
             raw = bytes(data)
         except Exception:
             app.logger.warning("Invalid audio chunk received: %r", type(data))
             return
         if raw:
-            # ``include_self=False`` prevents the speaker from receiving their
-            # own audio while all other clients hear the transmission.
-            socketio.emit("play_audio", raw, include_self=False)
+            audio_buffer.extend(raw)
         else:
             app.logger.warning("Empty audio chunk received")
 
@@ -2966,6 +2977,7 @@ def handle_disconnect():
     """Ensure lock is released if the speaker disconnects."""
     global current_speaker_id, ptt_timer
     if _client_id() == current_speaker_id:
+        _flush_audio_buffer()
         current_speaker_id = None
         emit("unlock_ptt", broadcast=True)
         if ptt_timer:

@@ -1150,8 +1150,3 @@ select {
   border-radius: 4px;
 }
 
-#audio-data {
-  width: 200px;
-  display: inline-block;
-  margin-left: 10px;
-}
