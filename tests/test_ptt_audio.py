@@ -5,13 +5,29 @@ import pytest
 # Ensure the application root is on the import path when tests run from the
 # ``tests`` directory.
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
-from app import app, socketio
+import app as app_module
+
+app = app_module.app
+socketio = app_module.socketio
 
 
 def make_client():
     flask_client = app.test_client()
     flask_client.get('/')  # ensure client_id cookie
     return socketio.test_client(app, flask_test_client=flask_client)
+
+
+@pytest.fixture(autouse=True)
+def reset_ptt():
+    app_module.current_speaker_id = None
+    if app_module.ptt_timer:
+        app_module.ptt_timer.cancel()
+        app_module.ptt_timer = None
+    yield
+    app_module.current_speaker_id = None
+    if app_module.ptt_timer:
+        app_module.ptt_timer.cancel()
+        app_module.ptt_timer = None
 
 
 def test_audio_chunk_broadcast():
@@ -33,3 +49,23 @@ def test_audio_chunk_broadcast():
     received = listener.get_received()
     msgs = [m for m in received if m['name'] == 'play_audio']
     assert msgs and msgs[0]['args'][0] == payload
+
+
+def test_audio_chunk_multiple_listeners():
+    speaker = make_client()
+    listener1 = make_client()
+    listener2 = make_client()
+
+    speaker.emit('start_speaking')
+    speaker.get_received()
+    listener1.get_received()
+    listener2.get_received()
+
+    payload = b'data'
+    speaker.emit('audio_chunk', payload)
+
+    msgs1 = [m for m in listener1.get_received() if m['name'] == 'play_audio']
+    msgs2 = [m for m in listener2.get_received() if m['name'] == 'play_audio']
+
+    assert msgs1 and msgs1[0]['args'][0] == payload
+    assert msgs2 and msgs2[0]['args'][0] == payload
