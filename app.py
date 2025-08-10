@@ -2954,10 +2954,12 @@ def handle_audio_chunk(data):
             app.logger.warning("Invalid audio chunk received: %r", type(data))
             return
         if raw:
-            # ``socketio.emit`` broadcasts to all clients by default. Using the
-            # ``include_self`` flag avoids echoing the audio back to the active
-            # speaker while keeping the data in its original binary form.
-            socketio.emit("play_audio", raw, include_self=False)
+            # ``socketio.emit`` does not broadcast unless explicitly
+            # requested.  Without ``broadcast=True`` the audio chunk would be
+            # sent only to the sender and then discarded because
+            # ``include_self`` is ``False``.  Setting ``broadcast=True``
+            # forwards the binary audio data to all other connected clients.
+            socketio.emit("play_audio", raw, broadcast=True, include_self=False)
         else:
             app.logger.warning("Empty audio chunk received")
 
