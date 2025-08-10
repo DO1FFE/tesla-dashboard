@@ -996,19 +996,21 @@ select {
 
 #ptt-controls {
   margin: 10px 0;
-  padding: 8px;
+  padding: 10px;
+  color: var(--text-color);
   background: rgba(255, 235, 59, 0.2);
   border: 1px solid #ffeb3b;
   border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
   display: flex;
   flex-direction: column;
-  align-items: stretch;
   gap: 4px;
 }
 
-#ptt-btn,
-#audio-level {
-  width: 100%;
+#ptt-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
 }
 
 #ptt-btn {
@@ -1029,6 +1031,7 @@ select {
 }
 
 #ptt-desc {
+  display: block;
   margin-bottom: 4px;
 }
 
