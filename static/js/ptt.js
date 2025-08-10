@@ -226,77 +226,89 @@
   let playbackChain = Promise.resolve();
 
   socket.on('play_audio', (data) => {
-    audioCtx.resume().catch((err) => console.error('Audio context resume failed', err));
+    audioCtx
+      .resume()
+      .catch((err) => console.error('Audio context resume failed', err));
     // Normalise ``data`` into a ``Uint8Array`` irrespective of the transport
-    // used by Socket.IO.
-    let chunk;
-    if (data instanceof ArrayBuffer) {
-      chunk = new Uint8Array(data);
-    } else if (data instanceof Uint8Array) {
-      chunk = data;
-    } else if (data && data.buffer instanceof ArrayBuffer) {
-      chunk = new Uint8Array(data.buffer);
-    } else if (data && Array.isArray(data.data)) {
-      chunk = new Uint8Array(data.data);
-    } else {
-      try {
+    // used by Socket.IO.  ``Blob`` objects are converted asynchronously.
+    (async () => {
+      let chunk;
+      if (data instanceof ArrayBuffer) {
         chunk = new Uint8Array(data);
-      } catch (err) {
-        console.error('Unsupported audio data format', err);
+      } else if (data instanceof Uint8Array) {
+        chunk = data;
+      } else if (data && data.buffer instanceof ArrayBuffer) {
+        chunk = new Uint8Array(data.buffer);
+      } else if (data && Array.isArray(data.data)) {
+        chunk = new Uint8Array(data.data);
+      } else if (data instanceof Blob) {
+        try {
+          const buf = await data.arrayBuffer();
+          chunk = new Uint8Array(buf);
+        } catch (err) {
+          console.error('Blob to ArrayBuffer failed', err);
+          return;
+        }
+      } else {
+        try {
+          chunk = new Uint8Array(data);
+        } catch (err) {
+          console.error('Unsupported audio data format', err);
+          return;
+        }
+      }
+      if (!chunk.length) {
+        console.error('Received empty audio data');
         return;
       }
-    }
-    if (!chunk.length) {
-      console.error('Received empty audio data');
-      return;
-    }
 
-    // ``decodeAudioData`` expects an ``ArrayBuffer`` containing the encoded
-    // audio.  ``slice`` ensures the view only covers the transmitted bytes.
-    const ab = chunk.buffer.slice(
-      chunk.byteOffset,
-      chunk.byteOffset + chunk.byteLength
-    );
+      // ``decodeAudioData`` expects an ``ArrayBuffer`` containing the encoded
+      // audio.  ``slice`` ensures the view only covers the transmitted bytes.
+      const ab = chunk.buffer.slice(
+        chunk.byteOffset,
+        chunk.byteOffset + chunk.byteLength
+      );
 
-    // Queue decoding and playback so chunks are processed in order.  This
-    // avoids gaps or stutter caused by out-of-order Promise resolution when
-    // ``decodeAudioData`` completes at different times for each chunk.
-    playbackChain = playbackChain
-      .catch(() => {})
-      .then(() => audioCtx.decodeAudioData(ab))
-      .then((buffer) => {
-        const source = audioCtx.createBufferSource();
-        source.buffer = buffer;
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 256;
-        source.connect(analyser);
-        analyser.connect(audioCtx.destination);
-        const dataArr = new Uint8Array(analyser.fftSize);
-        const updateLevel = () => {
-          analyser.getByteTimeDomainData(dataArr);
-          let sum = 0;
-          for (let i = 0; i < dataArr.length; i++) {
-            const v = (dataArr[i] - 128) / 128;
-            sum += v * v;
+      // Queue decoding and playback so chunks are processed in order.  This
+      // avoids gaps or stutter caused by out-of-order Promise resolution when
+      // ``decodeAudioData`` completes at different times for each chunk.
+      playbackChain = playbackChain
+        .catch(() => {})
+        .then(() => audioCtx.decodeAudioData(ab))
+        .then((buffer) => {
+          const source = audioCtx.createBufferSource();
+          source.buffer = buffer;
+          const analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 256;
+          source.connect(analyser);
+          analyser.connect(audioCtx.destination);
+          const dataArr = new Uint8Array(analyser.fftSize);
+          const updateLevel = () => {
+            analyser.getByteTimeDomainData(dataArr);
+            let sum = 0;
+            for (let i = 0; i < dataArr.length; i++) {
+              const v = (dataArr[i] - 128) / 128;
+              sum += v * v;
+            }
+            const rms = Math.sqrt(sum / dataArr.length);
+            if (levelMeter) levelMeter.value = rms;
+            req = requestAnimationFrame(updateLevel);
+          };
+          let req = requestAnimationFrame(updateLevel);
+          source.onended = () => {
+            cancelAnimationFrame(req);
+            if (levelMeter) levelMeter.value = 0;
+          };
+          // Schedule the chunk immediately after the previous one.  Maintain a
+          // small lead over ``currentTime`` so late chunks do not cause audible
+          // gaps.
+          if (playbackTime < audioCtx.currentTime + 0.05) {
+            playbackTime = audioCtx.currentTime + 0.05;
           }
-          const rms = Math.sqrt(sum / dataArr.length);
-          if (levelMeter) levelMeter.value = rms;
-          req = requestAnimationFrame(updateLevel);
-        };
-        let req = requestAnimationFrame(updateLevel);
-        source.onended = () => {
-          cancelAnimationFrame(req);
-          if (levelMeter) levelMeter.value = 0;
-        };
-        // Schedule the chunk immediately after the previous one.  Maintain a
-        // small lead over ``currentTime`` so late chunks do not cause audible
-        // gaps.
-        if (playbackTime < audioCtx.currentTime + 0.05) {
-          playbackTime = audioCtx.currentTime + 0.05;
-        }
-        source.start(playbackTime);
-        playbackTime += buffer.duration;
-      })
-      .catch((err) => console.error('Audio decode failed', err));
+          source.start(playbackTime);
+          playbackTime += buffer.duration;
+        })
+        .catch((err) => console.error('Audio decode failed', err));
+    })();
   });
 })();
