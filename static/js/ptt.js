@@ -2,6 +2,7 @@
   const socket = io();
   const pttBtn = document.getElementById('ptt-btn');
   const levelMeter = document.getElementById('audio-level');
+  const audioDataDisplay = document.getElementById('audio-data');
   const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
   function playPing() {
@@ -60,9 +61,17 @@
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) {
         e.data.arrayBuffer().then((buf) => {
+          const chunk = new Uint8Array(buf);
           // Send a typed array so that the Python backend receives the raw
           // bytes without any additional encoding.
-          socket.emit('audio_chunk', new Uint8Array(buf));
+          socket.emit('audio_chunk', chunk);
+          if (audioDataDisplay) {
+            const hex = Array.from(chunk.slice(0, 20))
+              .map((b) => b.toString(16).padStart(2, '0'))
+              .join(' ');
+            audioDataDisplay.textContent =
+              (audioDataDisplay.textContent + ' ' + hex).slice(-400);
+          }
         });
       }
     };
