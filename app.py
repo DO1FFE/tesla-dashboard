@@ -2954,10 +2954,9 @@ def handle_audio_chunk(data):
             app.logger.warning("Invalid audio chunk received: %r", type(data))
             return
         if raw:
-            # ``socketio.emit`` automatically broadcasts to all connected
-            # clients.  ``skip_sid`` excludes the sender so only listeners
-            # receive the audio chunk.
-            socketio.emit("play_audio", raw, skip_sid=request.sid)
+            # ``include_self=False`` prevents the speaker from receiving their
+            # own audio while all other clients hear the transmission.
+            socketio.emit("play_audio", raw, include_self=False)
         else:
             app.logger.warning("Empty audio chunk received")
 
