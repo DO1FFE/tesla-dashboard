@@ -26,6 +26,7 @@ from version import get_version
 import qrcode
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from importlib import metadata
 from flask_socketio import SocketIO, emit
 
 try:
@@ -53,33 +54,47 @@ GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
 # Ensure required Socket.IO client libraries are available in ``static/js``.
 SOCKETIO_CLIENT_MAP = {5: "4.7.2", 4: "4.5.4"}
 SOCKETIO_JS_DIR = Path(__file__).parent / "static" / "js"
+SOCKETIO_DOWNLOAD_ATTEMPTS = set()
 
 
-def ensure_socketio_clients():
-    """Download missing Socket.IO client scripts into ``static/js``."""
+def ensure_socketio_client(version: str) -> None:
+    """Download missing Socket.IO client script into ``static/js``.
+
+    The download is attempted only once per version to avoid blocking
+    repeated requests when the CDN is unreachable.
+    """
+
+    if version in SOCKETIO_DOWNLOAD_ATTEMPTS:
+        return
+    SOCKETIO_DOWNLOAD_ATTEMPTS.add(version)
+
     SOCKETIO_JS_DIR.mkdir(parents=True, exist_ok=True)
-    for version in SOCKETIO_CLIENT_MAP.values():
-        dest = SOCKETIO_JS_DIR / f"socket.io-{version}.min.js"
-        if not dest.exists():
-            url = f"https://cdn.socket.io/{version}/socket.io.min.js"
-            try:
-                resp = requests.get(url, timeout=10)
-                resp.raise_for_status()
-                dest.write_bytes(resp.content)
-            except Exception as exc:
-                logging.warning("Failed to download Socket.IO %s: %s", version, exc)
+    dest = SOCKETIO_JS_DIR / f"socket.io-{version}.min.js"
+    if dest.exists():
+        return
+
+    url = f"https://cdn.socket.io/{version}/socket.io.min.js"
+    try:
+        resp = requests.get(url, timeout=2)
+        resp.raise_for_status()
+        dest.write_bytes(resp.content)
+    except Exception as exc:
+        logging.warning("Failed to download Socket.IO %s: %s", version, exc)
 
 
 def socketio_client_script() -> str:
-    """Return relative path to matching Socket.IO client script."""
+    """Return URL to a compatible Socket.IO client script."""
     try:
-        import socketio as sio
-        major = int(sio.__version__.split(".", 1)[0])
+        major = int(metadata.version("python-socketio").split(".", 1)[0])
     except Exception:
-        major = max(SOCKETIO_CLIENT_MAP.keys())
+        major = max(SOCKETIO_CLIENT_MAP)
     version = SOCKETIO_CLIENT_MAP.get(major, next(iter(SOCKETIO_CLIENT_MAP.values())))
-    ensure_socketio_clients()
-    return f"js/socket.io-{version}.min.js"
+
+    ensure_socketio_client(version)
+    dest = SOCKETIO_JS_DIR / f"socket.io-{version}.min.js"
+    if dest.exists():
+        return url_for("static", filename=f"js/socket.io-{version}.min.js")
+    return f"https://cdn.socket.io/{version}/socket.io.min.js"
 
 
 @app.context_processor
