@@ -19,7 +19,7 @@ from flask import (
 )
 from taximeter import Taximeter
 import requests
-from functools import wraps
+from functools import wraps, lru_cache
 from dotenv import load_dotenv
 from version import get_version
 import qrcode
@@ -58,20 +58,32 @@ def inject_ga_id():
 active_clients = {}
 
 
-def lookup_location(ip):
-    """Return city/country information for ``ip`` using ipinfo.io."""
+@lru_cache(maxsize=256)
+def _ipinfo_data(ip):
+    """Return cached JSON data from ipinfo.io for ``ip``."""
     try:
         resp = requests.get(f"https://ipinfo.io/{ip}/json", timeout=1)
         if resp.ok:
-            data = resp.json()
-            city = data.get("city")
-            country = data.get("country")
-            if city and country:
-                return f"{city}, {country}"
-            return city or country or ""
+            return resp.json()
     except Exception:
         pass
-    return ""
+    return {}
+
+
+def lookup_location(ip):
+    """Return city/country information for ``ip`` using ipinfo.io."""
+    data = _ipinfo_data(ip)
+    city = data.get("city")
+    country = data.get("country")
+    if city and country:
+        return f"{city}, {country}"
+    return city or country or ""
+
+
+def lookup_provider(ip):
+    """Return provider/organisation information for ``ip``."""
+    data = _ipinfo_data(ip)
+    return data.get("org", "")
 
 
 def parse_user_agent(ua):
@@ -121,6 +133,7 @@ def _track_client():
             "ip": ip,
             "hostname": hostname,
             "location": lookup_location(ip),
+            "provider": lookup_provider(ip),
             "user_agent": ua,
             "browser": browser,
             "os": os_name,
@@ -136,6 +149,8 @@ def _track_client():
         info["browser"], info["os"] = parse_user_agent(ua)
         if not info.get("location"):
             info["location"] = lookup_location(ip)
+        if not info.get("provider"):
+            info["provider"] = lookup_provider(ip)
 
     if request.path.startswith("/stream"):
         info["connections"] = info.get("connections", 0) + 1
@@ -2075,6 +2090,7 @@ def api_client_details():
                 "ip": data.get("ip"),
                 "hostname": data.get("hostname"),
                 "location": data.get("location"),
+                "provider": data.get("provider"),
                 "browser": data.get("browser"),
                 "os": data.get("os"),
                 "user_agent": data.get("user_agent"),
@@ -2731,6 +2747,7 @@ def clients_view():
                 "ip": data.get("ip"),
                 "hostname": data.get("hostname"),
                 "location": data.get("location"),
+                "provider": data.get("provider"),
                 "browser": data.get("browser"),
                 "os": data.get("os"),
                 "user_agent": data.get("user_agent"),
