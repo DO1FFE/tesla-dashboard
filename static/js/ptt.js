@@ -26,11 +26,15 @@
 
   function startRecording() {
     if (!mediaStream) return;
-    recorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm' });
+    recorder = new MediaRecorder(mediaStream, {
+      mimeType: 'audio/webm;codecs=opus'
+    });
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) {
         e.data.arrayBuffer().then((buf) => {
-          socket.emit('audio_chunk', buf);
+          // Send a typed array so that the Python backend receives the raw
+          // bytes without any additional encoding.
+          socket.emit('audio_chunk', new Uint8Array(buf));
         });
       }
     };
@@ -119,9 +123,13 @@
   });
 
   socket.on('play_audio', (data) => {
-    const audioBlob = new Blob([data], { type: 'audio/webm' });
+    // Reconstruct the binary data into a playable blob.  The server forwards
+    // a ``Uint8Array`` which we turn back into a Blob before playback.
+    const chunk = new Uint8Array(data);
+    const audioBlob = new Blob([chunk], { type: 'audio/webm;codecs=opus' });
     const url = URL.createObjectURL(audioBlob);
     const audio = new Audio(url);
-    audio.play();
+    audio.play().catch((err) => console.error('Audio playback failed', err));
+    audio.addEventListener('ended', () => URL.revokeObjectURL(url));
   });
 })();
