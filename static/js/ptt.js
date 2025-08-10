@@ -1,6 +1,24 @@
 (function () {
   const socket = io();
   const pttBtn = document.getElementById('ptt-btn');
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  function playPing() {
+    return audioCtx.resume().then(() => {
+      return new Promise((resolve) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 880;
+        gain.gain.value = 0.2;
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.1);
+        osc.onended = resolve;
+      });
+    });
+  }
   let clientId;
   let mediaStream;
   let recorder;
@@ -129,7 +147,13 @@
     const audioBlob = new Blob([chunk], { type: 'audio/webm;codecs=opus' });
     const url = URL.createObjectURL(audioBlob);
     const audio = new Audio(url);
-    audio.play().catch((err) => console.error('Audio playback failed', err));
-    audio.addEventListener('ended', () => URL.revokeObjectURL(url));
+    const playMain = () => {
+      audio.play().catch((err) => console.error('Audio playback failed', err));
+      audio.addEventListener('ended', () => URL.revokeObjectURL(url));
+    };
+    playPing().then(playMain).catch((err) => {
+      console.error('Ping playback failed', err);
+      playMain();
+    });
   });
 })();
