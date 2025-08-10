@@ -4,6 +4,7 @@ import queue
 import threading
 import time
 import logging
+import glob
 from logging.handlers import RotatingFileHandler
 from flask import (
     Flask,
@@ -142,10 +143,32 @@ if not api_logger.handlers:
     except Exception:
         pass
 
+
+def _merge_state_logs(filename=os.path.join(DATA_DIR, "state.log")):
+    """Combine rotated state log files into a single file."""
+    parts = sorted(
+        glob.glob(f"{filename}.*"),
+        key=lambda p: int(p.rsplit(".", 1)[1]),
+        reverse=True,
+    )
+    if not parts:
+        return
+    base_content = ""
+    if os.path.exists(filename):
+        with open(filename, "r", encoding="utf-8") as f:
+            base_content = f.read()
+    with open(filename, "w", encoding="utf-8") as dest:
+        for part in parts:
+            with open(part, "r", encoding="utf-8") as src:
+                dest.write(src.read())
+            os.remove(part)
+        dest.write(base_content)
+
 state_logger = logging.getLogger("state_logger")
 if not state_logger.handlers:
-    handler = RotatingFileHandler(
-        os.path.join(DATA_DIR, "state.log"), maxBytes=100_000, backupCount=1
+    _merge_state_logs()
+    handler = logging.FileHandler(
+        os.path.join(DATA_DIR, "state.log"), encoding="utf-8"
     )
     formatter = logging.Formatter("%(asctime)s %(message)s")
     formatter.converter = lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
