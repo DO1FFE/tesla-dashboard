@@ -25,6 +25,7 @@ from version import get_version
 import qrcode
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from flask_socketio import SocketIO, emit
 
 try:
     import teslapy
@@ -43,6 +44,7 @@ except ImportError:
 
 load_dotenv()
 app = Flask(__name__)
+socketio = SocketIO(app)
 __version__ = get_version()
 CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
@@ -56,6 +58,7 @@ def inject_ga_id():
 
 # Track connected clients with their connection metadata
 active_clients = {}
+current_speaker = None
 
 
 @lru_cache(maxsize=256)
@@ -502,6 +505,7 @@ CONFIG_ITEMS = [
     {"id": "menu-history", "desc": "History im Seitenmenü"},
     {"id": "nav-bar", "desc": "Navigationsleiste"},
     {"id": "media-player", "desc": "Medienwiedergabe"},
+    {"id": "ptt-controls", "desc": "Push-to-Talk"},
 ]
 
 
@@ -2781,5 +2785,48 @@ def debug_info():
     )
 
 
+# Socket.IO handlers for push-to-talk audio
+
+
+@socketio.on("start_speaking")
+def start_speaking():
+    """Allow a client to speak if no other client is active."""
+    global current_speaker
+    sid = request.sid
+    if current_speaker is None:
+        current_speaker = sid
+        emit("start_accepted", room=sid)
+        emit("lock_ptt", broadcast=True, include_self=False)
+    elif current_speaker == sid:
+        emit("start_accepted", room=sid)
+    else:
+        emit("start_denied", room=sid)
+
+
+@socketio.on("stop_speaking")
+def stop_speaking():
+    """Release the PTT lock when a client stops speaking."""
+    global current_speaker
+    if request.sid == current_speaker:
+        current_speaker = None
+        emit("unlock_ptt", broadcast=True)
+
+
+@socketio.on("audio_chunk")
+def handle_audio_chunk(data):
+    """Forward audio data from the active speaker to all listeners."""
+    if request.sid == current_speaker:
+        emit("play_audio", data, broadcast=True, include_self=False)
+
+
+@socketio.on("disconnect")
+def handle_disconnect():
+    """Ensure lock is released if the speaker disconnects."""
+    global current_speaker
+    if request.sid == current_speaker:
+        current_speaker = None
+        emit("unlock_ptt", broadcast=True)
+
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8013, debug=True)
+    socketio.run(app, host="0.0.0.0", port=8013, debug=True)
