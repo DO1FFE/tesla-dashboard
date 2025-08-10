@@ -198,9 +198,28 @@
   });
 
   socket.on('play_audio', (data) => {
-    // Reconstruct the binary data into a playable blob.  The server forwards
-    // a ``Uint8Array`` which we turn back into a Blob before playback.
-    const chunk = new Uint8Array(data);
+    // Reconstruct the binary data into a playable blob.  Socket.IO may deliver
+    // the bytes in different container formats depending on the transport.  We
+    // normalise the input so that ``chunk`` is always a ``Uint8Array``.
+    let chunk;
+    if (data instanceof ArrayBuffer) {
+      chunk = new Uint8Array(data);
+    } else if (data instanceof Uint8Array) {
+      chunk = data;
+    } else if (data && data.buffer instanceof ArrayBuffer) {
+      chunk = new Uint8Array(data.buffer);
+    } else if (data && Array.isArray(data.data)) {
+      // When falling back to JSON transports the payload arrives as an object
+      // with a ``data`` array similar to Node's ``Buffer`` representation.
+      chunk = new Uint8Array(data.data);
+    } else {
+      try {
+        chunk = new Uint8Array(data);
+      } catch (err) {
+        console.error('Unsupported audio data format', err);
+        return;
+      }
+    }
     if (!chunk.length) {
       console.error('Received empty audio data');
       return;
