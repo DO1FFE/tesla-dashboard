@@ -29,7 +29,9 @@
     recorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm' });
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) {
-        socket.emit('audio_chunk', e.data);
+        e.data.arrayBuffer().then((buf) => {
+          socket.emit('audio_chunk', buf);
+        });
       }
     };
     recorder.start(250);
