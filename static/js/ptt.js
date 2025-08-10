@@ -28,6 +28,7 @@
   let micSource;
   let micAnalyser;
   let levelReq;
+  let lastPing = 0;
 
   function clearTot() {
     if (totTimer) {
@@ -178,8 +179,13 @@
     clearTot();
     // Give listeners a short ping indicating that another user started
     // transmitting.  Errors are logged but should not interrupt normal
-    // operation.
-    playPing().catch((err) => console.error('Ping playback failed', err));
+    // operation.  A small time buffer avoids multiple pings when the
+    // server emits duplicate lock events in quick succession.
+    const now = Date.now();
+    if (now - lastPing > 500) {
+      lastPing = now;
+      playPing().catch((err) => console.error('Ping playback failed', err));
+    }
   });
 
   socket.on('unlock_ptt', () => {
