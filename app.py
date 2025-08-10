@@ -53,6 +53,7 @@ socketio = SocketIO(app)
 __version__ = get_version()
 CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
+TESLA_REQUEST_TIMEOUT = float(os.getenv("TESLA_REQUEST_TIMEOUT", "5"))
 
 # Ensure required Socket.IO client libraries are available in ``static/js``.
 SOCKETIO_CLIENT_MAP = {5: "4.7.2", 4: "4.5.4"}
@@ -1465,7 +1466,7 @@ def get_tesla():
     if not tokens_provided and not (email and password):
         return None
 
-    tesla = teslapy.Tesla(email, app_user_agent="Tesla-Dashboard")
+    tesla = teslapy.Tesla(email, app_user_agent="Tesla-Dashboard", timeout=TESLA_REQUEST_TIMEOUT)
     try:
         if tokens_provided:
             tesla.sso_token = {
@@ -1544,11 +1545,15 @@ def default_vehicle_id():
     return None
 
 
-def _refresh_state(vehicle, times=2):
+def _refresh_state(vehicle, times=1):
     """Query the vehicle state multiple times and return the last value."""
     state = None
     for _ in range(times):
-        vehicle.get_vehicle_summary()
+        try:
+            vehicle.get_vehicle_summary()
+        except Exception as exc:
+            _log_api_error(exc)
+            break
         state = vehicle.get("state") or vehicle["state"]
         log_vehicle_state(vehicle["id_s"], state)
         log_api_data("get_vehicle_summary", {"state": state})
