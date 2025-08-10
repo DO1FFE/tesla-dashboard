@@ -1,3 +1,6 @@
+import eventlet
+eventlet.monkey_patch()
+
 import os
 import json
 import queue
@@ -51,7 +54,7 @@ load_dotenv()
 app = Flask(__name__)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 3600
 Compress(app)
-socketio = SocketIO(app)
+socketio = SocketIO(app, async_mode="eventlet")
 __version__ = get_version()
 CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")

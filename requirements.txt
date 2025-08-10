@@ -1,6 +1,7 @@
 flask
 flask-compress
 flask-socketio
+eventlet
 teslapy
 python-dotenv
 requests
