@@ -2948,7 +2948,7 @@ def stop_speaking():
 def handle_audio_chunk(data):
     """Forward audio data from the active speaker to all listeners."""
     if _client_id() == current_speaker_id:
-        emit("play_audio", data, broadcast=True, include_self=False)
+        emit("play_audio", data, broadcast=True, include_self=False, binary=True)
 
 
 @socketio.on("disconnect")
