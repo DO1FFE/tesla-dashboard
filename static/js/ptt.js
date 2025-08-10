@@ -271,6 +271,14 @@
         return;
       }
 
+      if (audioDataDisplay) {
+        const hex = Array.from(chunk.slice(0, 20))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join(' ');
+        audioDataDisplay.textContent =
+          (audioDataDisplay.textContent + ' ' + hex).slice(-400);
+      }
+
       // ``decodeAudioData`` expects an ``ArrayBuffer`` containing the encoded
       // audio.  ``slice`` ensures the view only covers the transmitted bytes.
       const ab = chunk.buffer.slice(
