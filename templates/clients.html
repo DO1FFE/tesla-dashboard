@@ -20,6 +20,9 @@
             <tr>
                 <th>IP-Adresse</th>
                 <th>Namensauflösung</th>
+                <th>Standort</th>
+                <th>Browser</th>
+                <th>Betriebssystem</th>
                 <th>Browserdaten</th>
                 <th>Verbunden seit</th>
             </tr>
@@ -29,6 +32,9 @@
             <tr>
                 <td>{{ c.ip }}</td>
                 <td>{{ c.hostname }}</td>
+                <td>{{ c.location }}</td>
+                <td>{{ c.browser }}</td>
+                <td>{{ c.os }}</td>
                 <td>{{ c.user_agent }}</td>
                 <td>seit {{ c.duration }}</td>
             </tr>
