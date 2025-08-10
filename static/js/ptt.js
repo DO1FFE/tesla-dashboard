@@ -50,9 +50,12 @@
   function startRecording() {
     if (!mediaStream) return;
     audioCtx.resume().catch((err) => console.error('Audio context resume failed', err));
-    recorder = new MediaRecorder(mediaStream, {
-      mimeType: 'audio/webm;codecs=opus'
-    });
+    let mimeType = 'audio/webm;codecs=opus';
+    if (typeof MediaRecorder.isTypeSupported === 'function' &&
+        !MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = 'audio/ogg;codecs=opus';
+    }
+    recorder = new MediaRecorder(mediaStream, { mimeType });
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) {
         e.data.arrayBuffer().then((buf) => {
@@ -62,9 +65,9 @@
         });
       }
     };
-    // Use a small timeslice so that audio chunks are delivered frequently,
-    // enabling smoother streaming on the receiving side.
-    recorder.start(100);
+    // Use a modest timeslice so that audio chunks are delivered frequently
+    // while still containing enough data for smooth decoding.
+    recorder.start(250);
   }
 
   function stopRecording() {
