@@ -1,10 +1,6 @@
 (function () {
-  const pttBtn = document.getElementById('ptt-btn');
-  if (!pttBtn) {
-    return;
-  }
-
   const socket = io();
+  const pttBtn = document.getElementById('ptt-btn');
   let clientId;
   let mediaStream;
   let recorder;
@@ -28,8 +24,6 @@
     }
   }
 
-  initMedia();
-
   function startRecording() {
     if (!mediaStream) return;
     recorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm' });
@@ -47,35 +41,39 @@
     }
   }
 
-  pttBtn.addEventListener('mousedown', () => {
-    if (canSpeak) {
-      pttBtn.classList.add('active-btn');
-      socket.emit('start_speaking');
-    }
-  });
+  if (pttBtn) {
+    initMedia();
 
-  pttBtn.addEventListener('mouseup', () => {
-    socket.emit('stop_speaking');
-    stopRecording();
-    pttBtn.classList.remove('active-btn');
-    clearTot();
-  });
+    pttBtn.addEventListener('mousedown', () => {
+      if (canSpeak) {
+        pttBtn.classList.add('active-btn');
+        socket.emit('start_speaking');
+      }
+    });
 
-  pttBtn.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    if (canSpeak) {
-      pttBtn.classList.add('active-btn');
-      socket.emit('start_speaking');
-    }
-  });
+    pttBtn.addEventListener('mouseup', () => {
+      socket.emit('stop_speaking');
+      stopRecording();
+      pttBtn.classList.remove('active-btn');
+      clearTot();
+    });
 
-  pttBtn.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    socket.emit('stop_speaking');
-    stopRecording();
-    pttBtn.classList.remove('active-btn');
-    clearTot();
-  });
+    pttBtn.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      if (canSpeak) {
+        pttBtn.classList.add('active-btn');
+        socket.emit('start_speaking');
+      }
+    });
+
+    pttBtn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      socket.emit('stop_speaking');
+      stopRecording();
+      pttBtn.classList.remove('active-btn');
+      clearTot();
+    });
+  }
 
   socket.on('your_id', (data) => {
     clientId = data.id;
@@ -87,26 +85,34 @@
     totTimer = setTimeout(() => {
       socket.emit('stop_speaking');
       stopRecording();
-      pttBtn.classList.remove('active-btn');
+      if (pttBtn) {
+        pttBtn.classList.remove('active-btn');
+      }
       totTimer = null;
     }, 30000);
   });
 
   socket.on('start_denied', () => {
-    pttBtn.classList.remove('active-btn');
+    if (pttBtn) {
+      pttBtn.classList.remove('active-btn');
+    }
   });
 
-  socket.on('lock_ptt', (data) => {
+  socket.on('lock_ptt', () => {
     canSpeak = false;
-    pttBtn.disabled = true;
-    pttBtn.classList.remove('active-btn');
+    if (pttBtn) {
+      pttBtn.disabled = true;
+      pttBtn.classList.remove('active-btn');
+    }
     clearTot();
   });
 
   socket.on('unlock_ptt', () => {
     canSpeak = true;
-    pttBtn.disabled = false;
-    pttBtn.classList.remove('active-btn');
+    if (pttBtn) {
+      pttBtn.disabled = false;
+      pttBtn.classList.remove('active-btn');
+    }
     clearTot();
   });
 
