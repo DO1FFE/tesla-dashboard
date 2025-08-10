@@ -210,6 +210,8 @@
   // back-to-back without gaps.  ``playbackTime`` is initialised with the
   // current context time and advanced by the duration of each decoded chunk.
   let playbackTime = audioCtx.currentTime;
+  // Promise chain to ensure chunks are decoded and scheduled sequentially.
+  let playbackChain = Promise.resolve();
 
   socket.on('play_audio', (data) => {
     // Normalise ``data`` into a ``Uint8Array`` irrespective of the transport
@@ -238,10 +240,17 @@
 
     // ``decodeAudioData`` expects an ``ArrayBuffer`` containing the encoded
     // audio.  ``slice`` ensures the view only covers the transmitted bytes.
-    const ab = chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength);
+    const ab = chunk.buffer.slice(
+      chunk.byteOffset,
+      chunk.byteOffset + chunk.byteLength
+    );
 
-    audioCtx
-      .decodeAudioData(ab)
+    // Queue decoding and playback so chunks are processed in order.  This
+    // avoids gaps or stutter caused by out-of-order Promise resolution when
+    // ``decodeAudioData`` completes at different times for each chunk.
+    playbackChain = playbackChain
+      .catch(() => {})
+      .then(() => audioCtx.decodeAudioData(ab))
       .then((buffer) => {
         const source = audioCtx.createBufferSource();
         source.buffer = buffer;
@@ -266,9 +275,11 @@
           cancelAnimationFrame(req);
           if (levelMeter) levelMeter.value = 0;
         };
-        // Schedule the chunk immediately after the previous one.
-        if (playbackTime < audioCtx.currentTime) {
-          playbackTime = audioCtx.currentTime;
+        // Schedule the chunk immediately after the previous one.  Maintain a
+        // small lead over ``currentTime`` so late chunks do not cause audible
+        // gaps.
+        if (playbackTime < audioCtx.currentTime + 0.05) {
+          playbackTime = audioCtx.currentTime + 0.05;
         }
         source.start(playbackTime);
         playbackTime += buffer.duration;
