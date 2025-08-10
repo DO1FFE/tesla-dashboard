@@ -27,6 +27,7 @@
   let totTimer;
   let micSource;
   let micAnalyser;
+  let micSilencer;
   let levelReq;
   let lastPing = 0;
 
@@ -84,6 +85,10 @@
     micAnalyser = audioCtx.createAnalyser();
     micAnalyser.fftSize = 256;
     micSource.connect(micAnalyser);
+    micSilencer = audioCtx.createGain();
+    micSilencer.gain.value = 0;
+    micAnalyser.connect(micSilencer);
+    micSilencer.connect(audioCtx.destination);
     const data = new Uint8Array(micAnalyser.fftSize);
     const update = () => {
       micAnalyser.getByteTimeDomainData(data);
@@ -111,6 +116,10 @@
     if (micAnalyser) {
       micAnalyser.disconnect();
       micAnalyser = null;
+    }
+    if (micSilencer) {
+      micSilencer.disconnect();
+      micSilencer = null;
     }
     if (levelMeter) {
       levelMeter.value = 0;
@@ -217,6 +226,7 @@
   let playbackChain = Promise.resolve();
 
   socket.on('play_audio', (data) => {
+    audioCtx.resume().catch((err) => console.error('Audio context resume failed', err));
     // Normalise ``data`` into a ``Uint8Array`` irrespective of the transport
     // used by Socket.IO.
     let chunk;
