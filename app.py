@@ -117,7 +117,7 @@ def _track_client():
     info = active_clients.get(ip)
     if info is None:
         browser, os_name = parse_user_agent(ua)
-        active_clients[ip] = {
+        info = {
             "ip": ip,
             "hostname": hostname,
             "location": lookup_location(ip),
@@ -126,7 +126,9 @@ def _track_client():
             "os": os_name,
             "first_seen": now,
             "last_seen": now,
+            "connections": 0,
         }
+        active_clients[ip] = info
     else:
         info["last_seen"] = now
         info["user_agent"] = ua
@@ -134,6 +136,9 @@ def _track_client():
         info["browser"], info["os"] = parse_user_agent(ua)
         if not info.get("location"):
             info["location"] = lookup_location(ip)
+
+    if request.path.startswith("/stream"):
+        info["connections"] = info.get("connections", 0) + 1
 
 
 # Ensure data paths are relative to this file regardless of the
@@ -1993,6 +1998,7 @@ def api_data_vehicle(vehicle_id):
 def stream_vehicle(vehicle_id="default"):
     """Stream vehicle data to the client using Server-Sent Events."""
     _start_thread(vehicle_id)
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
 
     def gen():
         q = queue.Queue()
@@ -2017,6 +2023,11 @@ def stream_vehicle(vehicle_id="default"):
                 subscribers.get(vehicle_id, []).remove(q)
             except ValueError:
                 pass
+            info = active_clients.get(ip)
+            if info:
+                info["connections"] = info.get("connections", 1) - 1
+                if info["connections"] <= 0:
+                    active_clients.pop(ip, None)
 
     return Response(gen(), mimetype="text/event-stream")
 
@@ -2054,6 +2065,8 @@ def api_client_details():
     now = time.time()
     items = []
     for data in active_clients.values():
+        if data.get("connections", 0) <= 0:
+            continue
         delta = now - data.get("first_seen", now)
         days = int(delta // 86400)
         hms = time.strftime("%H:%M:%S", time.gmtime(delta % 86400))
@@ -2708,6 +2721,8 @@ def clients_view():
     now = time.time()
     items = []
     for data in active_clients.values():
+        if data.get("connections", 0) <= 0:
+            continue
         delta = now - data.get("first_seen", now)
         days = int(delta // 86400)
         hms = time.strftime("%H:%M:%S", time.gmtime(delta % 86400))
