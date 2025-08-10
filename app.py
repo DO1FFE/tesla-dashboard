@@ -28,6 +28,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from importlib import metadata
 from flask_socketio import SocketIO, emit
+from flask_compress import Compress
 
 try:
     import teslapy
@@ -46,6 +47,8 @@ except ImportError:
 
 load_dotenv()
 app = Flask(__name__)
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 3600
+Compress(app)
 socketio = SocketIO(app)
 __version__ = get_version()
 CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
