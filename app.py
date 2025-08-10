@@ -2147,7 +2147,10 @@ def stream_vehicle(vehicle_id="default"):
                 if info["connections"] <= 0:
                     active_clients.pop(ip, None)
 
-    return Response(gen(), mimetype="text/event-stream")
+    resp = Response(gen(), mimetype="text/event-stream")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
 
 
 @app.route("/api/vehicles")
