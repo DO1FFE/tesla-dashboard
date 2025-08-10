@@ -176,6 +176,10 @@
       pttBtn.classList.remove('active-btn');
     }
     clearTot();
+    // Give listeners a short ping indicating that another user started
+    // transmitting.  Errors are logged but should not interrupt normal
+    // operation.
+    playPing().catch((err) => console.error('Ping playback failed', err));
   });
 
   socket.on('unlock_ptt', () => {
@@ -222,13 +226,7 @@
       }
     };
     audio.addEventListener('play', () => updateLevel());
-    const playMain = () => {
-      audio.play().catch((err) => console.error('Audio playback failed', err));
-      audio.addEventListener('ended', () => URL.revokeObjectURL(url));
-    };
-    playPing().then(playMain).catch((err) => {
-      console.error('Ping playback failed', err);
-      playMain();
-    });
+    audio.play().catch((err) => console.error('Audio playback failed', err));
+    audio.addEventListener('ended', () => URL.revokeObjectURL(url));
   });
 })();
