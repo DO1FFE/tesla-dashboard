@@ -96,13 +96,18 @@ def ensure_socketio_client(version: str) -> None:
         logging.warning("Failed to download Socket.IO %s: %s", version, exc)
 
 
-def _preload_socketio_client():
-    """Fetch the appropriate Socket.IO client script on startup."""
+def _socketio_client_version() -> str:
+    """Return the Socket.IO client version matching ``python-socketio``."""
     try:
         major = int(metadata.version("python-socketio").split(".", 1)[0])
     except Exception:
         major = max(SOCKETIO_CLIENT_MAP)
-    version = SOCKETIO_CLIENT_MAP.get(major, next(iter(SOCKETIO_CLIENT_MAP.values())))
+    return SOCKETIO_CLIENT_MAP.get(major, next(iter(SOCKETIO_CLIENT_MAP.values())))
+
+
+def _preload_socketio_client():
+    """Fetch the appropriate Socket.IO client script on startup."""
+    version = _socketio_client_version()
     ensure_socketio_client(version)
 
 
@@ -111,12 +116,7 @@ _preload_socketio_client()
 
 def socketio_client_script() -> str:
     """Return URL to a compatible Socket.IO client script."""
-    try:
-        major = int(metadata.version("python-socketio").split(".", 1)[0])
-    except Exception:
-        major = max(SOCKETIO_CLIENT_MAP)
-    version = SOCKETIO_CLIENT_MAP.get(major, next(iter(SOCKETIO_CLIENT_MAP.values())))
-
+    version = _socketio_client_version()
     ensure_socketio_client(version)
     dest = SOCKETIO_JS_DIR / f"socket.io-{version}.min.js"
     if dest.exists():
