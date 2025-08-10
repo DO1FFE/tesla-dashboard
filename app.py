@@ -91,6 +91,7 @@ def inject_ga_id():
 # Track connected clients with their connection metadata
 active_clients = {}
 current_speaker = None
+ptt_timer = None
 
 
 @lru_cache(maxsize=256)
@@ -2821,15 +2822,28 @@ def debug_info():
 # Socket.IO handlers for push-to-talk audio
 
 
+def _release_ptt(expected_sid):
+    """Release the PTT lock if still held by ``expected_sid``."""
+    global current_speaker, ptt_timer
+    if current_speaker == expected_sid:
+        current_speaker = None
+        socketio.emit("unlock_ptt", broadcast=True)
+    ptt_timer = None
+
+
 @socketio.on("start_speaking")
 def start_speaking():
     """Allow a client to speak if no other client is active."""
-    global current_speaker
+    global current_speaker, ptt_timer
     sid = request.sid
     if current_speaker is None:
         current_speaker = sid
         emit("start_accepted", room=sid)
         emit("lock_ptt", broadcast=True, include_self=False)
+        if ptt_timer:
+            ptt_timer.cancel()
+        ptt_timer = threading.Timer(30, _release_ptt, args=[sid])
+        ptt_timer.start()
     elif current_speaker == sid:
         emit("start_accepted", room=sid)
     else:
@@ -2839,10 +2853,13 @@ def start_speaking():
 @socketio.on("stop_speaking")
 def stop_speaking():
     """Release the PTT lock when a client stops speaking."""
-    global current_speaker
+    global current_speaker, ptt_timer
     if request.sid == current_speaker:
         current_speaker = None
         emit("unlock_ptt", broadcast=True)
+        if ptt_timer:
+            ptt_timer.cancel()
+            ptt_timer = None
 
 
 @socketio.on("audio_chunk")
@@ -2855,10 +2872,13 @@ def handle_audio_chunk(data):
 @socketio.on("disconnect")
 def handle_disconnect():
     """Ensure lock is released if the speaker disconnects."""
-    global current_speaker
+    global current_speaker, ptt_timer
     if request.sid == current_speaker:
         current_speaker = None
         emit("unlock_ptt", broadcast=True)
+        if ptt_timer:
+            ptt_timer.cancel()
+            ptt_timer = None
 
 
 if __name__ == "__main__":

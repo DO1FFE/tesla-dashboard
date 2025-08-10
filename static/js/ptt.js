@@ -8,6 +8,14 @@
   let mediaStream;
   let recorder;
   let canSpeak = true;
+  let totTimer;
+
+  function clearTot() {
+    if (totTimer) {
+      clearTimeout(totTimer);
+      totTimer = null;
+    }
+  }
 
   async function initMedia() {
     try {
@@ -40,6 +48,7 @@
 
   pttBtn.addEventListener('mousedown', () => {
     if (canSpeak) {
+      pttBtn.classList.add('active-btn');
       socket.emit('start_speaking');
     }
   });
@@ -47,11 +56,14 @@
   pttBtn.addEventListener('mouseup', () => {
     socket.emit('stop_speaking');
     stopRecording();
+    pttBtn.classList.remove('active-btn');
+    clearTot();
   });
 
   pttBtn.addEventListener('touchstart', (e) => {
     e.preventDefault();
     if (canSpeak) {
+      pttBtn.classList.add('active-btn');
       socket.emit('start_speaking');
     }
   });
@@ -60,24 +72,37 @@
     e.preventDefault();
     socket.emit('stop_speaking');
     stopRecording();
+    pttBtn.classList.remove('active-btn');
+    clearTot();
   });
 
   socket.on('start_accepted', () => {
     startRecording();
+    clearTot();
+    totTimer = setTimeout(() => {
+      socket.emit('stop_speaking');
+      stopRecording();
+      pttBtn.classList.remove('active-btn');
+      totTimer = null;
+    }, 30000);
   });
 
   socket.on('start_denied', () => {
-    // speaking denied
+    pttBtn.classList.remove('active-btn');
   });
 
   socket.on('lock_ptt', () => {
     canSpeak = false;
     pttBtn.disabled = true;
+    pttBtn.classList.remove('active-btn');
+    clearTot();
   });
 
   socket.on('unlock_ptt', () => {
     canSpeak = true;
     pttBtn.disabled = false;
+    pttBtn.classList.remove('active-btn');
+    clearTot();
   });
 
   socket.on('play_audio', (data) => {
