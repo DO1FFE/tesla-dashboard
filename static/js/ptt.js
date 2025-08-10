@@ -48,6 +48,7 @@
 
   function startRecording() {
     if (!mediaStream) return;
+    audioCtx.resume().catch((err) => console.error('Audio context resume failed', err));
     recorder = new MediaRecorder(mediaStream, {
       mimeType: 'audio/webm;codecs=opus'
     });
@@ -72,6 +73,7 @@
 
   function startLevelMonitoring() {
     if (!mediaStream || !levelMeter) return;
+    audioCtx.resume().catch((err) => console.error('Audio context resume failed', err));
     micSource = audioCtx.createMediaStreamSource(mediaStream);
     micAnalyser = audioCtx.createAnalyser();
     micAnalyser.fftSize = 256;
