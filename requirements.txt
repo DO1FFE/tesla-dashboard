@@ -1,8 +1,9 @@
 flask
+flask-compress
+flask-socketio
 teslapy
 python-dotenv
 requests
 aprslib
 phonenumbers==9.0.9
 qrcode
-flask-socketio
