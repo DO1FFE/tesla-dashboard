@@ -79,11 +79,14 @@ def oauth_start():
         .rstrip(b"=")
         .decode("utf-8")
     )
+    redirect_uri = os.getenv(
+        "TESLA_REDIRECT_URI", url_for("auth.oauth_callback", _external=True)
+    )
     params = {
         "client_id": os.getenv("TESLA_CLIENT_ID", "ownerapi"),
         "scope": "openid email offline_access",
         "response_type": "code",
-        "redirect_uri": url_for("auth.oauth_callback", _external=True),
+        "redirect_uri": redirect_uri,
         "code_challenge": challenge,
         "code_challenge_method": "S256",
     }
@@ -98,11 +101,14 @@ def oauth_callback():
     verifier = session.get("code_verifier")
     if not code or not verifier:
         abort(400)
+    redirect_uri = os.getenv(
+        "TESLA_REDIRECT_URI", url_for("auth.oauth_callback", _external=True)
+    )
     data = {
         "grant_type": "authorization_code",
         "client_id": os.getenv("TESLA_CLIENT_ID", "ownerapi"),
         "code": code,
-        "redirect_uri": url_for("auth.oauth_callback", _external=True),
+        "redirect_uri": redirect_uri,
         "code_verifier": verifier,
     }
     headers = {"User-Agent": os.getenv("TESLA_USER_AGENT", "Mozilla/5.0")}

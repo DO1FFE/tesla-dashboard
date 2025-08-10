@@ -17,6 +17,11 @@ This is a simple Flask application that displays real-time data from a Tesla veh
     - `ADMIN_USERNAME`
     - `TESLA_EMAIL` and `TESLA_PASSWORD` **or**
     - `TESLA_ACCESS_TOKEN` and `TESLA_REFRESH_TOKEN`
+    - `TESLA_REDIRECT_URI` (optional, defaults to the local callback)
+
+   When Tesla's sign-in page reports an unknown `redirect_uri`, set
+   `TESLA_REDIRECT_URI` to the URL registered for your Tesla OAuth
+   application, for example `https://auth.tesla.com/void/callback`.
 
 3. Run the server:
     ```bash
