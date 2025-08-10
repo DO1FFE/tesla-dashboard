@@ -2954,12 +2954,12 @@ def handle_audio_chunk(data):
             app.logger.warning("Invalid audio chunk received: %r", type(data))
             return
         if raw:
-            # ``socketio.emit`` does not broadcast unless explicitly
-            # requested.  Without ``broadcast=True`` the audio chunk would be
-            # sent only to the sender and then discarded because
-            # ``include_self`` is ``False``.  Setting ``broadcast=True``
-            # forwards the binary audio data to all other connected clients.
-            socketio.emit("play_audio", raw, broadcast=True, include_self=False)
+            # ``socketio.emit`` cannot accept the ``broadcast`` flag with the
+            # server version used in this project and would raise a
+            # ``TypeError``.  Using the context-aware ``emit`` instead ensures
+            # the audio chunk is forwarded to all connected clients except the
+            # sender.
+            emit("play_audio", raw, broadcast=True, include_self=False)
         else:
             app.logger.warning("Empty audio chunk received")
 
