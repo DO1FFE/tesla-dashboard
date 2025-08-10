@@ -5,6 +5,7 @@
   }
 
   const socket = io();
+  let clientId;
   let mediaStream;
   let recorder;
   let canSpeak = true;
@@ -76,6 +77,10 @@
     clearTot();
   });
 
+  socket.on('your_id', (data) => {
+    clientId = data.id;
+  });
+
   socket.on('start_accepted', () => {
     startRecording();
     clearTot();
@@ -91,7 +96,7 @@
     pttBtn.classList.remove('active-btn');
   });
 
-  socket.on('lock_ptt', () => {
+  socket.on('lock_ptt', (data) => {
     canSpeak = false;
     pttBtn.disabled = true;
     pttBtn.classList.remove('active-btn');
