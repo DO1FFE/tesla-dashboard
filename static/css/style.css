@@ -750,19 +750,6 @@ select {
     margin-left: 0;
     margin-top: 4px;
   }
-
-  #ptt-controls {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  #ptt-btn,
-  #audio-level {
-    width: 100%;
-  }
-  #ptt-desc {
-    margin-left: 0;
-    margin-top: 4px;
-  }
 }
 
 #openings-indicator {
@@ -1003,9 +990,9 @@ select {
   border-radius: 4px;
 }
 
-#sms-status {
-  margin-left: 10px;
-}
+  #sms-status {
+    margin-left: 10px;
+  }
 
 #ptt-controls {
   margin: 10px 0;
@@ -1014,8 +1001,14 @@ select {
   border: 1px solid #ffeb3b;
   border-radius: 8px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 4px;
+}
+
+#ptt-btn,
+#audio-level {
+  width: 100%;
 }
 
 #ptt-btn {
@@ -1036,7 +1029,7 @@ select {
 }
 
 #ptt-desc {
-  margin-left: 10px;
+  margin-bottom: 4px;
 }
 
 /* Taximeter page */
