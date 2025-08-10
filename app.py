@@ -2948,7 +2948,10 @@ def stop_speaking():
 def handle_audio_chunk(data):
     """Forward audio data from the active speaker to all listeners."""
     if _client_id() == current_speaker_id:
-        emit("play_audio", data, broadcast=True, include_self=False, binary=True)
+        # ``socketio.emit`` broadcasts to all clients by default.  Using the
+        # ``include_self`` flag avoids echoing the audio back to the active
+        # speaker while keeping the data in its original binary form.
+        socketio.emit("play_audio", data, include_self=False)
 
 
 @socketio.on("disconnect")
