@@ -2048,6 +2048,30 @@ def api_clients():
     return jsonify({"clients": count})
 
 
+@app.route("/api/clients/details")
+def api_client_details():
+    """Return detailed information about connected clients."""
+    now = time.time()
+    items = []
+    for data in active_clients.values():
+        delta = now - data.get("first_seen", now)
+        days = int(delta // 86400)
+        hms = time.strftime("%H:%M:%S", time.gmtime(delta % 86400))
+        items.append(
+            {
+                "ip": data.get("ip"),
+                "hostname": data.get("hostname"),
+                "location": data.get("location"),
+                "browser": data.get("browser"),
+                "os": data.get("os"),
+                "user_agent": data.get("user_agent"),
+                "duration": f"{days:02d} Tage, {hms}",
+            }
+        )
+    items.sort(key=lambda d: d["ip"] or "")
+    return jsonify({"clients": items})
+
+
 @app.route("/api/reverse_geocode")
 def api_reverse_geocode():
     """Return address for given coordinates."""
