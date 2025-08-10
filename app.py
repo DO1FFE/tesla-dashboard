@@ -6,6 +6,7 @@ import time
 import logging
 import glob
 import socket
+from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from flask import (
     Flask,
@@ -48,6 +49,37 @@ socketio = SocketIO(app)
 __version__ = get_version()
 CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
+
+# Ensure required Socket.IO client libraries are available in ``static/js``.
+SOCKETIO_CLIENT_MAP = {5: "4.7.2", 4: "4.5.4"}
+SOCKETIO_JS_DIR = Path(__file__).parent / "static" / "js"
+
+
+def ensure_socketio_clients():
+    """Download missing Socket.IO client scripts into ``static/js``."""
+    SOCKETIO_JS_DIR.mkdir(parents=True, exist_ok=True)
+    for version in SOCKETIO_CLIENT_MAP.values():
+        dest = SOCKETIO_JS_DIR / f"socket.io-{version}.min.js"
+        if not dest.exists():
+            url = f"https://cdn.socket.io/{version}/socket.io.min.js"
+            try:
+                resp = requests.get(url, timeout=10)
+                resp.raise_for_status()
+                dest.write_bytes(resp.content)
+            except Exception as exc:
+                logging.warning("Failed to download Socket.IO %s: %s", version, exc)
+
+
+def socketio_client_script() -> str:
+    """Return relative path to matching Socket.IO client script."""
+    try:
+        import socketio as sio
+        major = int(sio.__version__.split(".", 1)[0])
+    except Exception:
+        major = max(SOCKETIO_CLIENT_MAP.keys())
+    version = SOCKETIO_CLIENT_MAP.get(major, next(iter(SOCKETIO_CLIENT_MAP.values())))
+    ensure_socketio_clients()
+    return f"js/socket.io-{version}.min.js"
 
 
 @app.context_processor
@@ -1932,6 +1964,7 @@ def index():
         version=__version__,
         year=CURRENT_YEAR,
         config=cfg,
+        socketio_client_script=socketio_client_script(),
     )
 
 
