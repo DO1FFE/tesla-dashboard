@@ -57,23 +57,18 @@ CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
 TESLA_REQUEST_TIMEOUT = float(os.getenv("TESLA_REQUEST_TIMEOUT", "5"))
 
+"""Utilities for serving a compatible Socket.IO client script.
+
+``ensure_socketio_client`` downloads the script into ``static/js`` if it is not
+already present.  ``_preload_socketio_client`` is invoked on startup to ensure
+the file is available before the first request.  The helper functions are
+defined before the preload call so that the module can import cleanly.
+"""
+
 # Ensure required Socket.IO client libraries are available in ``static/js``.
 SOCKETIO_CLIENT_MAP = {5: "4.7.2", 4: "4.5.4"}
 SOCKETIO_JS_DIR = Path(__file__).parent / "static" / "js"
 SOCKETIO_DOWNLOAD_ATTEMPTS = set()
-
-
-def _preload_socketio_client():
-    """Fetch the appropriate Socket.IO client script on startup."""
-    try:
-        major = int(metadata.version("python-socketio").split(".", 1)[0])
-    except Exception:
-        major = max(SOCKETIO_CLIENT_MAP)
-    version = SOCKETIO_CLIENT_MAP.get(major, next(iter(SOCKETIO_CLIENT_MAP.values())))
-    ensure_socketio_client(version)
-
-
-_preload_socketio_client()
 
 
 def ensure_socketio_client(version: str) -> None:
@@ -99,6 +94,19 @@ def ensure_socketio_client(version: str) -> None:
         dest.write_bytes(resp.content)
     except Exception as exc:
         logging.warning("Failed to download Socket.IO %s: %s", version, exc)
+
+
+def _preload_socketio_client():
+    """Fetch the appropriate Socket.IO client script on startup."""
+    try:
+        major = int(metadata.version("python-socketio").split(".", 1)[0])
+    except Exception:
+        major = max(SOCKETIO_CLIENT_MAP)
+    version = SOCKETIO_CLIENT_MAP.get(major, next(iter(SOCKETIO_CLIENT_MAP.values())))
+    ensure_socketio_client(version)
+
+
+_preload_socketio_client()
 
 
 def socketio_client_script() -> str:
