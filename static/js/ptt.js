@@ -1,6 +1,7 @@
 (function () {
   const socket = io();
   const pttBtn = document.getElementById('ptt-btn');
+  const levelMeter = document.getElementById('audio-level');
   const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
   function playPing() {
@@ -24,6 +25,9 @@
   let recorder;
   let canSpeak = true;
   let totTimer;
+  let micSource;
+  let micAnalyser;
+  let levelReq;
 
   function clearTot() {
     if (totTimer) {
@@ -62,6 +66,46 @@
   function stopRecording() {
     if (recorder && recorder.state !== 'inactive') {
       recorder.stop();
+    }
+    stopLevelMonitoring();
+  }
+
+  function startLevelMonitoring() {
+    if (!mediaStream || !levelMeter) return;
+    micSource = audioCtx.createMediaStreamSource(mediaStream);
+    micAnalyser = audioCtx.createAnalyser();
+    micAnalyser.fftSize = 256;
+    micSource.connect(micAnalyser);
+    const data = new Uint8Array(micAnalyser.fftSize);
+    const update = () => {
+      micAnalyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) {
+        const v = (data[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      levelMeter.value = rms;
+      levelReq = requestAnimationFrame(update);
+    };
+    update();
+  }
+
+  function stopLevelMonitoring() {
+    if (levelReq) {
+      cancelAnimationFrame(levelReq);
+      levelReq = null;
+    }
+    if (micSource) {
+      micSource.disconnect();
+      micSource = null;
+    }
+    if (micAnalyser) {
+      micAnalyser.disconnect();
+      micAnalyser = null;
+    }
+    if (levelMeter) {
+      levelMeter.value = 0;
     }
   }
 
@@ -105,6 +149,7 @@
 
   socket.on('start_accepted', () => {
     startRecording();
+    startLevelMonitoring();
     clearTot();
     totTimer = setTimeout(() => {
       socket.emit('stop_speaking');
@@ -153,6 +198,28 @@
     const audio = new Audio(url);
     audio.volume = 1.0;
     audio.addEventListener('error', (e) => console.error('Audio element error', e));
+    const source = audioCtx.createMediaElementSource(audio);
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    analyser.connect(audioCtx.destination);
+    const dataArr = new Uint8Array(analyser.fftSize);
+    const updateLevel = () => {
+      analyser.getByteTimeDomainData(dataArr);
+      let sum = 0;
+      for (let i = 0; i < dataArr.length; i++) {
+        const v = (dataArr[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / dataArr.length);
+      if (levelMeter) levelMeter.value = rms;
+      if (!audio.paused && !audio.ended) {
+        requestAnimationFrame(updateLevel);
+      } else if (levelMeter) {
+        levelMeter.value = 0;
+      }
+    };
+    audio.addEventListener('play', () => updateLevel());
     const playMain = () => {
       audio.play().catch((err) => console.error('Audio playback failed', err));
       audio.addEventListener('ended', () => URL.revokeObjectURL(url));
