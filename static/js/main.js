@@ -1254,6 +1254,7 @@ function startStreamIfOnline() {
     });
 }
 
+fetchVehicles();
 $.getJSON('/api/config', function(cfg) {
     applyConfig(cfg);
     lastConfigJSON = JSON.stringify(cfg || {});
@@ -1261,7 +1262,6 @@ $.getJSON('/api/config', function(cfg) {
         lastApiInterval = cfg.api_interval;
         lastApiIntervalIdle = cfg.api_interval_idle;
     }
-    fetchVehicles();
 });
 
 function fetchConfig() {
