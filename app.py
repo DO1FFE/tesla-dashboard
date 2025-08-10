@@ -58,6 +58,51 @@ def inject_ga_id():
 active_clients = {}
 
 
+def lookup_location(ip):
+    """Return city/country information for ``ip`` using ipinfo.io."""
+    try:
+        resp = requests.get(f"https://ipinfo.io/{ip}/json", timeout=1)
+        if resp.ok:
+            data = resp.json()
+            city = data.get("city")
+            country = data.get("country")
+            if city and country:
+                return f"{city}, {country}"
+            return city or country or ""
+    except Exception:
+        pass
+    return ""
+
+
+def parse_user_agent(ua):
+    """Extract simple browser and OS information from user agent string."""
+    browser = ""
+    os_name = ""
+    if "Firefox" in ua:
+        browser = "Firefox"
+    elif "Chrome" in ua and "Chromium" not in ua:
+        browser = "Chrome"
+    elif "Chromium" in ua:
+        browser = "Chromium"
+    elif "Safari" in ua and "Chrome" not in ua:
+        browser = "Safari"
+    elif "MSIE" in ua or "Trident" in ua:
+        browser = "Internet Explorer"
+
+    if "Windows" in ua:
+        os_name = "Windows"
+    elif "Android" in ua:
+        os_name = "Android"
+    elif "iPhone" in ua or "iPad" in ua or "iOS" in ua:
+        os_name = "iOS"
+    elif "Mac OS X" in ua:
+        os_name = "macOS"
+    elif "Linux" in ua:
+        os_name = "Linux"
+
+    return browser, os_name
+
+
 @app.before_request
 def _track_client():
     """Collect information about the connecting client."""
@@ -71,10 +116,14 @@ def _track_client():
     now = time.time()
     info = active_clients.get(ip)
     if info is None:
+        browser, os_name = parse_user_agent(ua)
         active_clients[ip] = {
             "ip": ip,
             "hostname": hostname,
+            "location": lookup_location(ip),
             "user_agent": ua,
+            "browser": browser,
+            "os": os_name,
             "first_seen": now,
             "last_seen": now,
         }
@@ -82,6 +131,9 @@ def _track_client():
         info["last_seen"] = now
         info["user_agent"] = ua
         info["hostname"] = hostname
+        info["browser"], info["os"] = parse_user_agent(ua)
+        if not info.get("location"):
+            info["location"] = lookup_location(ip)
 
 
 # Ensure data paths are relative to this file regardless of the
@@ -2639,6 +2691,9 @@ def clients_view():
             {
                 "ip": data.get("ip"),
                 "hostname": data.get("hostname"),
+                "location": data.get("location"),
+                "browser": data.get("browser"),
+                "os": data.get("os"),
                 "user_agent": data.get("user_agent"),
                 "duration": f"{days:02d} Tage, {hms}",
             }
