@@ -2523,6 +2523,12 @@ def blocked():
     return render_template("blocked.html"), 403
 
 
+@app.errorhandler(404)
+def handle_404(_):
+    """Display blocked page for unknown routes."""
+    return render_template("blocked.html"), 404
+
+
 @app.route("/error")
 def error_page():
     """Display collected API errors."""
