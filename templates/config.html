@@ -68,6 +68,14 @@
         </section>
 
         <section class="config-section">
+            <h2>Zugang</h2>
+            <label>
+                Blockierte IP-Adressen (kommagetrennt)
+                <input type="text" name="blocked_ips" value="{{ config.get('blocked_ips','') }}">
+            </label>
+        </section>
+
+        <section class="config-section">
             <h2>SMS</h2>
             <label>
                 Handynummer des Fahrers

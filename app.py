@@ -21,6 +21,7 @@ from flask import (
     send_from_directory,
     abort,
     url_for,
+    redirect,
     g,
 )
 from taximeter import Taximeter
@@ -255,6 +256,27 @@ def _track_client():
 
     if request.path.startswith("/stream"):
         info["connections"] = info.get("connections", 0) + 1
+
+
+# Block clients based on configured IP addresses
+@app.before_request
+def block_ip_clients():
+    cfg = load_config()
+    raw = cfg.get("blocked_ips", "")
+    if isinstance(raw, str):
+        blocked = [ip.strip() for ip in raw.split(",") if ip.strip()]
+    elif isinstance(raw, list):
+        blocked = [ip.strip() for ip in raw if isinstance(ip, str) and ip.strip()]
+    else:
+        blocked = []
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    if (
+        blocked
+        and ip in blocked
+        and request.path != "/blocked"
+        and not request.path.startswith("/images/")
+    ):
+        return redirect(url_for("blocked"))
 
 
 # Ensure data paths are relative to this file regardless of the
@@ -2372,6 +2394,7 @@ def config_page():
         wx_enabled = "aprs_wx_enabled" in request.form
         aprs_comment = request.form.get("aprs_comment", "").strip()
         announcement = request.form.get("announcement", "").strip()
+        blocked_ips = request.form.get("blocked_ips", "").strip()
         taxi_company = request.form.get("taxi_company", "").strip()
         taxi_slogan = request.form.get("taxi_slogan", "").strip()
         phone_number = request.form.get("phone_number", "").strip()
@@ -2414,6 +2437,12 @@ def config_page():
             cfg["announcement"] = announcement
         elif "announcement" in cfg:
             cfg.pop("announcement")
+        if blocked_ips:
+            cfg["blocked_ips"] = ",".join(
+                ip.strip() for ip in blocked_ips.split(",") if ip.strip()
+            )
+        elif "blocked_ips" in cfg:
+            cfg.pop("blocked_ips")
         if taxi_company:
             cfg["taxi_company"] = taxi_company
         elif "taxi_company" in cfg:
@@ -2480,6 +2509,18 @@ def config_page():
             cfg.pop("api_interval_idle")
         save_config(cfg)
     return render_template("config.html", items=CONFIG_ITEMS, config=cfg)
+
+
+@app.route("/images/<path:filename>")
+def images(filename):
+    return send_from_directory(
+        os.path.join(app.root_path, "static", "images"), filename
+    )
+
+
+@app.route("/blocked")
+def blocked():
+    return render_template("blocked.html"), 403
 
 
 @app.route("/error")
