@@ -2249,7 +2249,7 @@ def api_client_details():
                 "browser": data.get("browser"),
                 "os": data.get("os"),
                 "user_agent": data.get("user_agent"),
-                "pages": ", ".join(data.get("pages", [])),
+                "pages": data.get("pages", []),
                 "duration": f"{days:02d} Tage, {hms}",
             }
         )
@@ -2930,7 +2930,7 @@ def clients_view():
                 "browser": data.get("browser"),
                 "os": data.get("os"),
                 "user_agent": data.get("user_agent"),
-                "pages": ", ".join(data.get("pages", [])),
+                "pages": ", ".join(str(p) for p in data.get("pages", [])),
                 "duration": f"{days:02d} Tage, {hms}",
             }
         )

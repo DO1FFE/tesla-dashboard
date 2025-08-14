@@ -14,7 +14,11 @@ async function fetchClients() {
             const tr = document.createElement('tr');
             ['ip', 'hostname', 'location', 'provider', 'browser', 'os', 'user_agent', 'pages', 'duration'].forEach(function(key) {
                 const td = document.createElement('td');
-                td.textContent = c[key] || '';
+                let value = c[key];
+                if (key === 'pages' && Array.isArray(value)) {
+                    value = value.join(', ');
+                }
+                td.textContent = value || '';
                 tr.appendChild(td);
             });
             tbody.appendChild(tr);
