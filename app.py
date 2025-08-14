@@ -10,6 +10,7 @@ import logging
 import glob
 import socket
 import uuid
+from urllib.parse import urlparse
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from flask import (
@@ -254,9 +255,29 @@ def _track_client():
         if not info.get("provider"):
             info["provider"] = lookup_provider(ip)
     if not request.path.startswith("/static/") and not request.path.startswith("/images/"):
-        pages = info.setdefault("pages", [])
-        if request.path not in pages:
-            pages.append(request.path)
+        page_path = request.path
+        if page_path.startswith("/api"):
+            ref = request.headers.get("Referer")
+            if ref:
+                try:
+                    page_path = urlparse(ref).path
+                except Exception:
+                    page_path = None
+            else:
+                page_path = None
+        if page_path:
+            page = page_path.strip("/")
+            if not page:
+                page = "index.html"
+            else:
+                segment = page.split("/")[-1]
+                if "." not in segment:
+                    page = f"{segment}.html"
+                else:
+                    page = segment
+            pages = info.setdefault("pages", [])
+            if page not in pages:
+                pages.append(page)
 
     if request.path.startswith("/stream"):
         info["connections"] = info.get("connections", 0) + 1
