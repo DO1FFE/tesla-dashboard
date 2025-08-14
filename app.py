@@ -262,9 +262,9 @@ def _track_client():
                 try:
                     page_path = urlparse(ref).path
                 except Exception:
-                    page_path = None
+                    page_path = "/"
             else:
-                page_path = None
+                page_path = "/"
         if page_path:
             page = page_path.strip("/")
             if not page:
@@ -301,6 +301,13 @@ def block_ip_clients():
         and request.path != "/blocked"
         and not request.path.startswith("/images/")
     ):
+        # Replace recorded pages so the client shows as blocked
+        info = active_clients.setdefault(ip, {"ip": ip})
+        pages = info.setdefault("pages", [])
+        if "index.html" in pages:
+            pages.remove("index.html")
+        if "blocked.html" not in pages:
+            pages.append("blocked.html")
         return render_template("blocked.html"), 403
 
 
@@ -2249,8 +2256,8 @@ def api_client_details():
                 "browser": data.get("browser"),
                 "os": data.get("os"),
                 "user_agent": data.get("user_agent"),
-                # Join visited pages into a comma separated string for easier display
-                "pages": ", ".join(str(p) for p in data.get("pages", [])),
+                # Return list of visited pages so clients can format them
+                "pages": data.get("pages", []),
                 "duration": f"{days:02d} Tage, {hms}",
             }
         )
@@ -2931,7 +2938,7 @@ def clients_view():
                 "browser": data.get("browser"),
                 "os": data.get("os"),
                 "user_agent": data.get("user_agent"),
-                "pages": ", ".join(str(p) for p in data.get("pages", [])),
+                "pages": data.get("pages", []),
                 "duration": f"{days:02d} Tage, {hms}",
             }
         )
