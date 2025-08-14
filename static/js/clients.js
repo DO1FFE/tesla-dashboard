@@ -12,7 +12,7 @@ async function fetchClients() {
         tbody.innerHTML = '';
         data.clients.forEach(function(c) {
             const tr = document.createElement('tr');
-            ['ip', 'hostname', 'location', 'provider', 'browser', 'os', 'user_agent', 'duration'].forEach(function(key) {
+            ['ip', 'hostname', 'location', 'provider', 'browser', 'os', 'user_agent', 'pages', 'duration'].forEach(function(key) {
                 const td = document.createElement('td');
                 td.textContent = c[key] || '';
                 tr.appendChild(td);

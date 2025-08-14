@@ -25,6 +25,7 @@
                 <th>Browser</th>
                 <th>Betriebssystem</th>
                 <th>Browserdaten</th>
+                <th>Seiten</th>
                 <th>Verbunden seit</th>
             </tr>
         </thead>
@@ -38,6 +39,7 @@
                 <td>{{ c.browser }}</td>
                 <td>{{ c.os }}</td>
                 <td>{{ c.user_agent }}</td>
+                <td>{{ c.pages }}</td>
                 <td>seit {{ c.duration }}</td>
             </tr>
             {% endfor %}
