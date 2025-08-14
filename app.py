@@ -2249,7 +2249,8 @@ def api_client_details():
                 "browser": data.get("browser"),
                 "os": data.get("os"),
                 "user_agent": data.get("user_agent"),
-                "pages": data.get("pages", []),
+                # Join visited pages into a comma separated string for easier display
+                "pages": ", ".join(str(p) for p in data.get("pages", [])),
                 "duration": f"{days:02d} Tage, {hms}",
             }
         )
