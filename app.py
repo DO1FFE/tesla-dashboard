@@ -253,6 +253,10 @@ def _track_client():
             info["location"] = lookup_location(ip)
         if not info.get("provider"):
             info["provider"] = lookup_provider(ip)
+    if not request.path.startswith("/static/") and not request.path.startswith("/images/"):
+        pages = info.setdefault("pages", [])
+        if request.path not in pages:
+            pages.append(request.path)
 
     if request.path.startswith("/stream"):
         info["connections"] = info.get("connections", 0) + 1
@@ -276,7 +280,7 @@ def block_ip_clients():
         and request.path != "/blocked"
         and not request.path.startswith("/images/")
     ):
-        return redirect(url_for("blocked"))
+        return render_template("blocked.html"), 403
 
 
 # Ensure data paths are relative to this file regardless of the
@@ -2212,8 +2216,6 @@ def api_client_details():
     now = time.time()
     items = []
     for data in active_clients.values():
-        if data.get("connections", 0) <= 0:
-            continue
         delta = now - data.get("first_seen", now)
         days = int(delta // 86400)
         hms = time.strftime("%H:%M:%S", time.gmtime(delta % 86400))
@@ -2226,6 +2228,7 @@ def api_client_details():
                 "browser": data.get("browser"),
                 "os": data.get("os"),
                 "user_agent": data.get("user_agent"),
+                "pages": ", ".join(data.get("pages", [])),
                 "duration": f"{days:02d} Tage, {hms}",
             }
         )
@@ -2894,8 +2897,6 @@ def clients_view():
     now = time.time()
     items = []
     for data in active_clients.values():
-        if data.get("connections", 0) <= 0:
-            continue
         delta = now - data.get("first_seen", now)
         days = int(delta // 86400)
         hms = time.strftime("%H:%M:%S", time.gmtime(delta % 86400))
@@ -2908,6 +2909,7 @@ def clients_view():
                 "browser": data.get("browser"),
                 "os": data.get("os"),
                 "user_agent": data.get("user_agent"),
+                "pages": ", ".join(data.get("pages", [])),
                 "duration": f"{days:02d} Tage, {hms}",
             }
         )
