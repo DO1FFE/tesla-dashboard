@@ -61,6 +61,7 @@ __version__ = get_version()
 CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
 TESLA_REQUEST_TIMEOUT = float(os.getenv("TESLA_REQUEST_TIMEOUT", "5"))
+CLIENT_TIMEOUT = int(os.getenv("CLIENT_TIMEOUT", "60"))
 
 """Utilities for serving a compatible Socket.IO client script.
 
@@ -2243,7 +2244,13 @@ def api_client_details():
     """Return detailed information about connected clients."""
     now = time.time()
     items = []
-    for data in active_clients.values():
+    expired = []
+    for ip, data in list(active_clients.items()):
+        last_seen = data.get("last_seen", now)
+        pages = data.get("pages", [])
+        if now - last_seen > CLIENT_TIMEOUT or not pages:
+            expired.append(ip)
+            continue
         delta = now - data.get("first_seen", now)
         days = int(delta // 86400)
         hms = time.strftime("%H:%M:%S", time.gmtime(delta % 86400))
@@ -2257,10 +2264,12 @@ def api_client_details():
                 "os": data.get("os"),
                 "user_agent": data.get("user_agent"),
                 # Return list of visited pages so clients can format them
-                "pages": data.get("pages", []),
+                "pages": pages,
                 "duration": f"{days:02d} Tage, {hms}",
             }
         )
+    for ip in expired:
+        active_clients.pop(ip, None)
     items.sort(key=lambda d: d["ip"] or "")
     return jsonify({"clients": items})
 
@@ -2925,7 +2934,13 @@ def clients_view():
     """Show currently connected clients."""
     now = time.time()
     items = []
-    for data in active_clients.values():
+    expired = []
+    for ip, data in list(active_clients.items()):
+        last_seen = data.get("last_seen", now)
+        pages = data.get("pages", [])
+        if now - last_seen > CLIENT_TIMEOUT or not pages:
+            expired.append(ip)
+            continue
         delta = now - data.get("first_seen", now)
         days = int(delta // 86400)
         hms = time.strftime("%H:%M:%S", time.gmtime(delta % 86400))
@@ -2938,10 +2953,12 @@ def clients_view():
                 "browser": data.get("browser"),
                 "os": data.get("os"),
                 "user_agent": data.get("user_agent"),
-                "pages": data.get("pages", []),
+                "pages": pages,
                 "duration": f"{days:02d} Tage, {hms}",
             }
         )
+    for ip in expired:
+        active_clients.pop(ip, None)
     items.sort(key=lambda d: d["ip"] or "")
     return render_template("clients.html", clients=items)
 
