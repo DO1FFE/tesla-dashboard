@@ -2592,6 +2592,15 @@ def statistics_page():
     current_month = datetime.now(LOCAL_TZ).strftime("%Y-%m")
     monthly = {}
     rows = []
+    current = {
+        "online_sum": 0.0,
+        "offline_sum": 0.0,
+        "asleep_sum": 0.0,
+        "km": 0.0,
+        "speed": 0.0,
+        "energy": 0.0,
+        "count": 0,
+    }
     for day in sorted(stats.keys()):
         entry = stats[day]
         if day.startswith(current_month):
@@ -2608,6 +2617,13 @@ def statistics_page():
             diff = round(100.0 - total, 2)
             row["offline"] = round(row["offline"] + diff, 2)
             rows.append(row)
+            current["online_sum"] += entry.get("online", 0.0)
+            current["offline_sum"] += entry.get("offline", 0.0)
+            current["asleep_sum"] += entry.get("asleep", 0.0)
+            current["km"] += entry.get("km", 0.0)
+            current["energy"] += entry.get("energy", 0.0)
+            current["speed"] = max(current["speed"], entry.get("speed", 0.0))
+            current["count"] += 1
             continue
         month = day[:7]
         m = monthly.setdefault(
@@ -2649,8 +2665,25 @@ def statistics_page():
         monthly_rows.append(row)
 
     rows = monthly_rows + rows
+
+    summary = None
+    if current["count"]:
+        cnt = current["count"]
+        summary = {
+            "date": current_month,
+            "online": round(current["online_sum"] / cnt, 2),
+            "offline": round(current["offline_sum"] / cnt, 2),
+            "asleep": round(current["asleep_sum"] / cnt, 2),
+            "km": round(current["km"], 2),
+            "speed": int(round(current["speed"])),
+            "energy": round(current["energy"], 2),
+        }
+        total = summary["online"] + summary["offline"] + summary["asleep"]
+        diff = round(100.0 - total, 2)
+        summary["offline"] = round(summary["offline"] + diff, 2)
+
     cfg = load_config()
-    return render_template("statistik.html", rows=rows, config=cfg)
+    return render_template("statistik.html", rows=rows, summary=summary, config=cfg)
 
 
 @app.route("/api/errors")

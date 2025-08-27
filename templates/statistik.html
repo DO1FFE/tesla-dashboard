@@ -38,6 +38,17 @@
             <td>{{ row.energy }}</td>
         </tr>
         {% endfor %}
+        {% if summary %}
+        <tr>
+            <td><strong>{{ summary.date }} Summe</strong></td>
+            <td>{{ summary.online }}</td>
+            <td>{{ summary.offline }}</td>
+            <td>{{ summary.asleep }}</td>
+            <td>{{ summary.km }}</td>
+            <td>{{ summary.speed }}</td>
+            <td>{{ summary.energy }}</td>
+        </tr>
+        {% endif %}
     </table>
 </body>
 </html>
