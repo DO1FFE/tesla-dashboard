@@ -257,10 +257,10 @@ function handleData(data) {
     updateHeader(data);
     updateUI(data);
     updateVehicleState(data.state);
-    var vehicleState = data.vehicle_state || {};
-    updateOfflineInfo(data.state, vehicleState.service_mode, vehicleState.service_mode_plus);
-    var drive = data.drive_state || {};
     var vehicle = data.vehicle_state || {};
+    updateOfflineInfo(data.state, vehicle.service_mode, vehicle.service_mode_plus);
+    updateSoftwareUpdate(vehicle.software_update);
+    var drive = data.drive_state || {};
     updateDataAge(vehicle.timestamp);
     updateLockStatus(vehicle.locked);
     updateUserPresence(vehicle.is_user_present);
@@ -602,7 +602,7 @@ function updateHeaterIndicator(front, rear, steering, wiper,
     setLevel('seat-left', seatL, 'Sitzheizung Fahrer');
     setLevel('seat-right', seatR, 'Sitzheizung Beifahrer');
     setLevel('seat-rear-left', seatRL, 'Sitzheizung hinten links');
-    setLevel('seat-rear-center', seatRC, 'Sitzheizung hinten Mitte');
+    setLevel('seat-rear-center', seatRC, 'Sitzheizung hinten mitte');
     setLevel('seat-rear-right', seatRR, 'Sitzheizung hinten rechts');
 }
 
@@ -1100,6 +1100,30 @@ function updateVehicleState(state) {
     }
 }
 
+function updateSoftwareUpdate(info) {
+    var $msg = $('#software-update');
+    if (info && (info.status || info.version ||
+                 typeof info.download_perc === 'number' ||
+                 typeof info.install_perc === 'number' ||
+                 typeof info.expected_duration_sec === 'number')) {
+        var parts = [];
+        if (info.version) parts.push('Version: ' + info.version);
+        if (info.status) parts.push('Status: ' + info.status);
+        if (typeof info.download_perc === 'number') {
+            parts.push('Download: ' + info.download_perc + '%');
+        }
+        if (typeof info.install_perc === 'number') {
+            parts.push('Installation: ' + info.install_perc + '%');
+        }
+        if (typeof info.expected_duration_sec === 'number') {
+            parts.push('Dauer: ' + info.expected_duration_sec + 's');
+        }
+        $msg.text('Software-Update – ' + parts.join(', ')).show();
+    } else {
+        $msg.hide().text('');
+    }
+}
+
 function updateOfflineInfo(state, serviceMode, serviceModePlus) {
     var $msg = $('#offline-msg');
     if (serviceModePlus) {
@@ -1216,6 +1240,7 @@ function startStream() {
             var st = resp.state;
             updateVehicleState(st);
             updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
+            updateSoftwareUpdate(resp.software_update);
             $.getJSON('/api/data/' + currentVehicle, function(data) {
                 if (data && !data.error) {
                     handleData(data);
@@ -1245,6 +1270,7 @@ function startStreamIfOnline() {
         var st = resp.state;
         updateVehicleState(st);
         updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
+        updateSoftwareUpdate(resp.software_update);
         startStream();
         $.getJSON('/api/data/' + currentVehicle, function(data) {
             if (data && !data.error) {
