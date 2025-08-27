@@ -1120,8 +1120,13 @@ function updateVehicleState(state) {
 
 function updateSoftwareUpdate(info) {
     var $msg = $('#software-update');
-    var available = info && info.version ? parseVersion(info.version) : null;
-    if (!info || !available || !installedVersion || !isNewerVersion(installedVersion, available)) {
+    var version = info && typeof info.version === 'string' ? info.version.trim() : '';
+    if (!version) {
+        $msg.hide().text('');
+        return;
+    }
+    var available = parseVersion(version);
+    if (!installedVersion || !isNewerVersion(installedVersion, available)) {
         $msg.hide().text('');
         return;
     }
