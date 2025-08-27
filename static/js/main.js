@@ -58,6 +58,7 @@ map.on('zoomend', function() {
 var polyline = null;
 var pendingPath = null;
 var lastDataTimestamp = null;
+var installedVersion = null;
 var CONFIG = {};
 var HIGHLIGHT_BLUE = false;
 var OFFLINE_TEXT = 'Das Fahrzeug ist offline und schläft - Bitte nicht wecken! - Die Daten sind die zuletzt bekannten und somit nicht aktuell!';
@@ -68,6 +69,22 @@ var smsNameInput = $('#sms-name');
 var smsInput = $('#sms-text');
 var smsButton = $('#sms-send');
 var smsStatus = $('#sms-status');
+
+function parseVersion(str) {
+    return str ? str.split(' ')[0] : null;
+}
+
+function isNewerVersion(installed, available) {
+    var instParts = installed.split('.').map(Number);
+    var availParts = available.split('.').map(Number);
+    for (var i = 0; i < Math.max(instParts.length, availParts.length); i++) {
+        var a = availParts[i] || 0;
+        var b = instParts[i] || 0;
+        if (a > b) return true;
+        if (a < b) return false;
+    }
+    return false;
+}
 
 function parseAnnouncements(text) {
     var arr = [];
@@ -218,7 +235,8 @@ function updateHeader(data) {
         }
         var version = data.vehicle_state && data.vehicle_state.car_version;
         if (version) {
-            version = version.split(' ')[0];
+            version = parseVersion(version);
+            installedVersion = version;
             info += ' (V ' + version + ')';
         }
     }
@@ -1102,26 +1120,23 @@ function updateVehicleState(state) {
 
 function updateSoftwareUpdate(info) {
     var $msg = $('#software-update');
-    if (info && (info.status || info.version ||
-                 typeof info.download_perc === 'number' ||
-                 typeof info.install_perc === 'number' ||
-                 typeof info.expected_duration_sec === 'number')) {
-        var parts = [];
-        if (info.version) parts.push('Version: ' + info.version);
-        if (info.status) parts.push('Status: ' + info.status);
-        if (typeof info.download_perc === 'number') {
-            parts.push('Download: ' + info.download_perc + '%');
-        }
-        if (typeof info.install_perc === 'number') {
-            parts.push('Installation: ' + info.install_perc + '%');
-        }
-        if (typeof info.expected_duration_sec === 'number') {
-            parts.push('Dauer: ' + info.expected_duration_sec + 's');
-        }
-        $msg.text('Software-Update – ' + parts.join(', ')).show();
-    } else {
+    var available = info && info.version ? parseVersion(info.version) : null;
+    if (!info || !available || !installedVersion || !isNewerVersion(installedVersion, available)) {
         $msg.hide().text('');
+        return;
     }
+    var parts = ['Version: ' + available];
+    if (info.status) parts.push('Status: ' + info.status);
+    if (typeof info.download_perc === 'number') {
+        parts.push('Download: ' + info.download_perc + '%');
+    }
+    if (typeof info.install_perc === 'number') {
+        parts.push('Installation: ' + info.install_perc + '%');
+    }
+    if (typeof info.expected_duration_sec === 'number') {
+        parts.push('Dauer: ' + info.expected_duration_sec + 's');
+    }
+    $msg.text('Software-Update – ' + parts.join(', ')).show();
 }
 
 function updateOfflineInfo(state, serviceMode, serviceModePlus) {
