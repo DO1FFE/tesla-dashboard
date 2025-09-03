@@ -11,6 +11,8 @@
     <style>
         table { border-collapse: collapse; }
         th, td { padding: 4px 8px; border: 1px solid #444; }
+        tr.current-day { background-color: #fffae6; }
+        td.current-state { background-color: #ffe0e0; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -28,11 +30,12 @@
     <table>
         <tr><th>Datum</th><th>Online %</th><th>Offline %</th><th>Asleep %</th><th>Gefahrene km</th><th>Höchste Geschwindigkeit (km/h)</th><th>Hinzugefügte Energie (kWh)</th></tr>
         {% for row in rows %}
-        <tr>
+        {% set is_today = (row.date == today) %}
+        <tr{% if is_today %} class="current-day"{% endif %}>
             <td>{{ row.date }}</td>
-            <td>{{ row.online }}</td>
-            <td>{{ row.offline }}</td>
-            <td>{{ row.asleep }}</td>
+            <td{% if is_today and current_state == 'online' %} class="current-state"{% endif %}>{{ row.online }}</td>
+            <td{% if is_today and current_state == 'offline' %} class="current-state"{% endif %}>{{ row.offline }}</td>
+            <td{% if is_today and current_state == 'asleep' %} class="current-state"{% endif %}>{{ row.asleep }}</td>
             <td>{{ row.km }}</td>
             <td>{{ row.speed }}</td>
             <td>{{ row.energy }}</td>

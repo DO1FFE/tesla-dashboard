@@ -2681,9 +2681,23 @@ def statistics_page():
         total = summary["online"] + summary["offline"] + summary["asleep"]
         diff = round(100.0 - total, 2)
         summary["offline"] = round(summary["offline"] + diff, 2)
+    # highlight today's statistics and current vehicle state
+    today = datetime.now(LOCAL_TZ).date().isoformat()
+    vid = str(_default_vehicle_id or "default")
+    state = last_vehicle_state.get(vid)
+    if state is None and last_vehicle_state:
+        # fall back to any known state if default ID is missing
+        state = next(iter(last_vehicle_state.values()))
 
     cfg = load_config()
-    return render_template("statistik.html", rows=rows, summary=summary, config=cfg)
+    return render_template(
+        "statistik.html",
+        rows=rows,
+        summary=summary,
+        config=cfg,
+        today=today,
+        current_state=state,
+    )
 
 
 @app.route("/api/errors")
