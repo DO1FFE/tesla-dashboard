@@ -23,6 +23,20 @@
             {% endfor %}
         </section>
 
+        {% if vehicles %}
+        <section class="config-section">
+            <h2>Fahrzeug</h2>
+            <label>
+                Fahrzeug auswählen
+                <select name="vehicle_id">
+                    {% for v in vehicles %}
+                    <option value="{{ v.id }}" {% if v.id == selected_vehicle_id %}selected{% endif %}>{{ v.display_name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        </section>
+        {% endif %}
+
         <section class="config-section">
             <h2>APRS</h2>
             <label>
