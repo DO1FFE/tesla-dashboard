@@ -1632,9 +1632,14 @@ def _cached_vehicle_list(tesla, ttl=86400):
 
 
 def default_vehicle_id():
-    """Return the first vehicle ID or None if unavailable."""
+    """Return the configured vehicle ID or the first available."""
     global _default_vehicle_id
     if _default_vehicle_id is not None:
+        return _default_vehicle_id
+    cfg = load_config()
+    vid = cfg.get("vehicle_id")
+    if vid:
+        _default_vehicle_id = str(vid)
         return _default_vehicle_id
     tesla = get_tesla()
     if tesla is None:
@@ -2425,7 +2430,9 @@ def api_sms():
 @app.route("/config", methods=["GET", "POST"])
 @requires_auth
 def config_page():
+    global _default_vehicle_id
     cfg = load_config()
+    vehicles = get_vehicle_list()
     if request.method == "POST":
         for item in CONFIG_ITEMS:
             cfg[item["id"]] = item["id"] in request.form
@@ -2453,10 +2460,12 @@ def config_page():
         tariff_34 = request.form.get("tariff_34", "").replace(",", ".").strip()
         tariff_5 = request.form.get("tariff_5", "").replace(",", ".").strip()
         wait_price = request.form.get("wait_price", "").replace(",", ".").strip()
+        selected_vehicle = request.form.get("vehicle_id", "").strip()
         if "refresh_vehicle_list" in request.form:
             tesla = get_tesla()
             if tesla is not None:
                 _cached_vehicle_list(tesla, ttl=0)
+                vehicles = get_vehicle_list()
         if callsign:
             cfg["aprs_callsign"] = callsign
         elif "aprs_callsign" in cfg:
@@ -2510,6 +2519,12 @@ def config_page():
             cfg.pop("sms_sender_id")
         cfg["sms_enabled"] = sms_enabled
         cfg["sms_drive_only"] = sms_drive_only
+        if selected_vehicle:
+            cfg["vehicle_id"] = selected_vehicle
+            _default_vehicle_id = selected_vehicle
+        elif "vehicle_id" in cfg:
+            cfg.pop("vehicle_id")
+            _default_vehicle_id = None
 
         def _to_float(val):
             try:
@@ -2549,7 +2564,16 @@ def config_page():
         elif "api_interval_idle" in cfg:
             cfg.pop("api_interval_idle")
         save_config(cfg)
-    return render_template("config.html", items=CONFIG_ITEMS, config=cfg)
+    selected_vehicle_id = cfg.get("vehicle_id") or (
+        vehicles[0]["id"] if vehicles else None
+    )
+    return render_template(
+        "config.html",
+        items=CONFIG_ITEMS,
+        config=cfg,
+        vehicles=vehicles,
+        selected_vehicle_id=selected_vehicle_id,
+    )
 
 
 @app.route("/images/<path:filename>")

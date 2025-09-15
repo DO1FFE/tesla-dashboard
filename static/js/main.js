@@ -264,6 +264,8 @@ function fetchVehicles() {
         }
         if (!currentVehicle && vehicles.length > 0) {
             currentVehicle = vehicles[0].id;
+        }
+        if (currentVehicle) {
             $select.val(currentVehicle);
             startStreamIfOnline();
         }
@@ -1300,14 +1302,17 @@ function startStreamIfOnline() {
     });
 }
 
-fetchVehicles();
 $.getJSON('/api/config', function(cfg) {
     applyConfig(cfg);
     lastConfigJSON = JSON.stringify(cfg || {});
     if (cfg) {
         lastApiInterval = cfg.api_interval;
         lastApiIntervalIdle = cfg.api_interval_idle;
+        if (cfg.vehicle_id) {
+            currentVehicle = cfg.vehicle_id;
+        }
     }
+    fetchVehicles();
 });
 
 function fetchConfig() {
@@ -1315,7 +1320,8 @@ function fetchConfig() {
         var json = JSON.stringify(cfg || {});
         if (json !== lastConfigJSON) {
             if (cfg && (cfg.api_interval !== lastApiInterval ||
-                        cfg.api_interval_idle !== lastApiIntervalIdle)) {
+                        cfg.api_interval_idle !== lastApiIntervalIdle ||
+                        cfg.vehicle_id !== currentVehicle)) {
                 location.reload(true);
                 return;
             }
