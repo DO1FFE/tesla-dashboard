@@ -237,6 +237,8 @@
         window.APP_VERSION = "{{ version }}";
     </script>
     <script src="/static/js/main.js"></script>
+    {% if config.get('ptt-controls', True) %}
     <script src="/static/js/ptt.js"></script>
+    {% endif %}
 </body>
 </html>
