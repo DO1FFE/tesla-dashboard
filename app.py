@@ -681,6 +681,13 @@ def save_config(cfg):
         pass
 
 
+def is_ptt_enabled():
+    """Return whether push-to-talk controls are enabled in the config."""
+
+    cfg = load_config()
+    return bool(cfg.get("ptt-controls", True))
+
+
 def get_taximeter_tariff():
     cfg = load_config()
     default = {
@@ -3061,12 +3068,25 @@ def debug_info():
 
 
 def _client_id():
-    return request.cookies.get("client_id")
+    """Return a stable client identifier for the current connection."""
+
+    cid = request.cookies.get("client_id")
+    if cid:
+        return cid
+    # ``SocketIOTestClient`` and some real-time connections may not trigger the
+    # Flask ``before_request`` handlers that set the ``client_id`` cookie.  Fall
+    # back to the Socket.IO session id so that every connection gets a unique
+    # identifier and cannot unintentionally acquire the push-to-talk lock of
+    # another client.
+    return request.sid
 
 
 def _flush_audio_buffer():
     """Send and clear buffered audio if available."""
     global audio_buffer
+    if not is_ptt_enabled():
+        audio_buffer.clear()
+        return
     if audio_buffer:
         socketio.emit("play_audio", bytes(audio_buffer), include_self=False)
         audio_buffer.clear()
@@ -3094,6 +3114,9 @@ def start_speaking():
     global current_speaker_id, ptt_timer, audio_buffer
     cid = _client_id()
     sid = request.sid
+    if not is_ptt_enabled():
+        emit("start_denied", room=sid)
+        return
     if current_speaker_id is None:
         current_speaker_id = cid
         audio_buffer.clear()
@@ -3113,6 +3136,14 @@ def start_speaking():
 def stop_speaking():
     """Release the PTT lock when a client stops speaking."""
     global current_speaker_id, ptt_timer
+    if not is_ptt_enabled():
+        if current_speaker_id is not None:
+            _flush_audio_buffer()
+            current_speaker_id = None
+            if ptt_timer:
+                ptt_timer.cancel()
+                ptt_timer = None
+        return
     if _client_id() == current_speaker_id:
         _flush_audio_buffer()
         current_speaker_id = None
@@ -3125,6 +3156,8 @@ def stop_speaking():
 @socketio.on("audio_chunk")
 def handle_audio_chunk(data):
     """Forward audio data from the active speaker to all listeners."""
+    if not is_ptt_enabled():
+        return
     if _client_id() == current_speaker_id:
         global audio_buffer
         try:
@@ -3142,6 +3175,14 @@ def handle_audio_chunk(data):
 def handle_disconnect():
     """Ensure lock is released if the speaker disconnects."""
     global current_speaker_id, ptt_timer
+    if not is_ptt_enabled():
+        if current_speaker_id is not None:
+            _flush_audio_buffer()
+            current_speaker_id = None
+            if ptt_timer:
+                ptt_timer.cancel()
+                ptt_timer = None
+        return
     if _client_id() == current_speaker_id:
         _flush_audio_buffer()
         current_speaker_id = None
