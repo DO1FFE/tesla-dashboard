@@ -1281,6 +1281,53 @@ def _load_trip(filename):
     return points
 
 
+def _load_last_trip_point(filename):
+    """Return the last valid latitude/longitude entry from ``filename``."""
+
+    def _parse(parts):
+        if len(parts) < 3:
+            return None
+        try:
+            lat = float(parts[1])
+            lon = float(parts[2])
+        except Exception:
+            return None
+        return lat, lon
+
+    try:
+        with open(filename, "r", encoding="utf-8") as f:
+            lines = [line.strip() for line in f if line.strip()]
+        for line in reversed(lines):
+            parts = line.split(",")
+            coords = _parse(parts)
+            if coords is not None:
+                return coords
+    except Exception:
+        pass
+    return None
+
+
+def _load_last_history_position(vehicle_id=None):
+    """Return the last recorded position from stored trip histories."""
+
+    def _files_for_vehicle(vid):
+        if vid is None:
+            return _get_trip_files()
+        return _get_trip_files(vid)
+
+    files = list(_files_for_vehicle(vehicle_id))
+    for path in reversed(files):
+        coords = _load_last_trip_point(path)
+        if coords is not None:
+            return coords
+
+    fallback = os.path.join(DATA_DIR, "trip_history.csv")
+    coords = _load_last_trip_point(fallback)
+    if coords is not None:
+        return coords
+    return None
+
+
 def _bearing(p1, p2):
     """Compute heading in degrees from p1 to p2."""
     from math import atan2, cos, sin, radians, degrees
@@ -1985,9 +2032,16 @@ def _fetch_data_once(vehicle_id="default"):
                 data["location_address"] = entry["address"]
             else:
                 data.pop("location_address", None)
+            data.pop("history_position", None)
         else:
             address_cache.pop(cache_id, None)
             data.pop("location_address", None)
+            try:
+                history_pos = _load_last_history_position(vid if vid is not None else None)
+            except Exception:
+                history_pos = None
+            if history_pos is not None:
+                data["history_position"] = list(history_pos)
 
     if isinstance(data, dict):
         data["_live"] = live
@@ -2180,6 +2234,20 @@ def api_data_vehicle(vehicle_id):
     if data is None:
         data = _fetch_data_once(vehicle_id)
     return jsonify(data)
+
+
+@app.route("/api/history/last-position")
+def api_history_last_position():
+    """Return the last recorded map position from trip history files."""
+
+    vehicle_id = request.args.get("vehicle_id")
+    if vehicle_id == "":
+        vehicle_id = None
+    coords = _load_last_history_position(vehicle_id if vehicle_id is not None else None)
+    if coords is None:
+        return jsonify({"position": None})
+    lat, lon = coords
+    return jsonify({"position": [lat, lon]})
 
 
 @app.route("/stream")

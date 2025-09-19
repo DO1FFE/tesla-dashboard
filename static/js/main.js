@@ -14,99 +14,105 @@ var PARK_GRACE_MS = 5 * 60 * 1000;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 18;
-var LAST_POSITION_STORAGE_KEY = 'tesla-dashboard:last-position';
 var lastKnownPosition = null;
+var map = null;
+var marker = null;
+var mapResizeObserver = null;
+var polyline = null;
+var pendingPath = null;
+var mapReady = null;
 
 function hasValidCoordinate(value) {
     return typeof value === 'number' && isFinite(value);
 }
 
-function loadLastKnownPosition() {
-    if (!window.localStorage) {
-        return null;
-    }
-    try {
-        var raw = window.localStorage.getItem(LAST_POSITION_STORAGE_KEY);
-        if (!raw) {
-            return null;
-        }
-        var parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length === 2) {
-            var lat = parseFloat(parsed[0]);
-            var lng = parseFloat(parsed[1]);
-            if (hasValidCoordinate(lat) && hasValidCoordinate(lng)) {
-                return [lat, lng];
-            }
-        }
-    } catch (err) {
-        // Ignore storage parsing errors and fall back to default coordinates.
-    }
-    return null;
-}
-
-function storeLastKnownPosition(lat, lng) {
+function updateLastKnownPosition(lat, lng) {
     if (!hasValidCoordinate(lat) || !hasValidCoordinate(lng)) {
         return;
     }
     lastKnownPosition = [lat, lng];
-    if (!window.localStorage) {
-        return;
-    }
-    try {
-        window.localStorage.setItem(
-            LAST_POSITION_STORAGE_KEY,
-            JSON.stringify(lastKnownPosition)
-        );
-    } catch (err) {
-        // Ignore storage errors so the UI keeps working even if localStorage
-        // is unavailable (e.g., in private browsing modes).
-    }
 }
 
-lastKnownPosition = loadLastKnownPosition();
-// Initialize the map using the most recent known position when available.
-var initialMapPosition = lastKnownPosition || DEFAULT_POS;
-var map = L.map('map').setView(initialMapPosition, DEFAULT_ZOOM);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
-}).addTo(map);
-// Adjust map when the viewport size changes (e.g., on mobile rotation)
-$(window).on('resize', function() {
-    map.invalidateSize();
-});
-// Keep marker centered if the map container size changes (e.g., side panels)
-var mapEl = document.getElementById('map');
-if (window.ResizeObserver && mapEl) {
-    var mapResizeObserver = new ResizeObserver(function() {
-        map.invalidateSize();
-        if (typeof marker !== 'undefined' && marker.getLatLng) {
-            zoomSetByApp = true;
-            map.setView(marker.getLatLng(), map.getZoom(), {animate: false});
+function fetchLastPositionFromHistory() {
+    var deferred = $.Deferred();
+    $.getJSON('/api/history/last-position', function(resp) {
+        if (resp && Array.isArray(resp.position) && resp.position.length === 2) {
+            var lat = parseFloat(resp.position[0]);
+            var lng = parseFloat(resp.position[1]);
+            if (hasValidCoordinate(lat) && hasValidCoordinate(lng)) {
+                deferred.resolve([lat, lng]);
+                return;
+            }
         }
+        deferred.resolve(null);
+    }).fail(function() {
+        deferred.resolve(null);
     });
-    mapResizeObserver.observe(mapEl);
+    return deferred.promise();
 }
-// Track when the user last changed the zoom level
+
 var lastUserZoom = 0;
 var USER_ZOOM_PRIORITY_MS = 30 * 1000;
 var zoomSetByApp = false;
 var $zoomLevel = $('#zoom-level');
 function updateZoomDisplay() {
-    if ($zoomLevel.length) {
+    if ($zoomLevel.length && map) {
         $zoomLevel.text('Zoom: ' + map.getZoom());
     }
 }
-updateZoomDisplay();
-map.on('zoomend', function() {
-    if (zoomSetByApp) {
-        zoomSetByApp = false;
-    } else {
-        lastUserZoom = Date.now();
+
+function initializeMap(initialPosition) {
+    var start = Array.isArray(initialPosition) && initialPosition.length === 2
+        ? initialPosition
+        : DEFAULT_POS;
+    map = L.map('map').setView(start, DEFAULT_ZOOM);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
+    }).addTo(map);
+    $(window).on('resize', function() {
+        if (map) {
+            map.invalidateSize();
+        }
+    });
+    var mapEl = document.getElementById('map');
+    if (window.ResizeObserver && mapEl) {
+        mapResizeObserver = new ResizeObserver(function() {
+            if (!map) {
+                return;
+            }
+            map.invalidateSize();
+            if (marker && marker.getLatLng) {
+                zoomSetByApp = true;
+                map.setView(marker.getLatLng(), map.getZoom(), {animate: false});
+            }
+        });
+        mapResizeObserver.observe(mapEl);
     }
+    map.on('zoomend', function() {
+        if (zoomSetByApp) {
+            zoomSetByApp = false;
+        } else {
+            lastUserZoom = Date.now();
+        }
+        updateZoomDisplay();
+    });
+    marker = L.marker(start, {
+        icon: arrowIcon,
+        rotationAngle: 0,
+        rotationOrigin: 'center center'
+    }).addTo(map);
+    marker.on('moveend', function() {
+        if (Array.isArray(pendingPath)) {
+            if (polyline) {
+                polyline.setLatLngs(pendingPath);
+            } else {
+                polyline = L.polyline(pendingPath, { color: 'blue' }).addTo(map);
+            }
+            pendingPath = null;
+        }
+    });
     updateZoomDisplay();
-});
-var polyline = null;
-var pendingPath = null;
+}
 var lastDataTimestamp = null;
 var installedVersion = null;
 var CONFIG = {};
@@ -185,7 +191,9 @@ function showConfigured() {
     });
     $('#dashboard-content').show();
     // Recalculate map dimensions when the content becomes visible.
-    map.invalidateSize();
+    if (map) {
+        map.invalidateSize();
+    }
     updateSmsForm();
 }
 
@@ -382,11 +390,11 @@ function handleData(data) {
     var lng = drive.longitude;
     var slide = false;
     if (hasValidCoordinate(lat) && hasValidCoordinate(lng)) {
-        storeLastKnownPosition(lat, lng);
-        if (typeof marker.slideTo === 'function') {
+        updateLastKnownPosition(lat, lng);
+        if (marker && typeof marker.slideTo === 'function') {
             marker.slideTo([lat, lng], {duration: 1000});
             slide = true;
-        } else {
+        } else if (marker) {
             marker.setLatLng([lat, lng]);
         }
         var speedVal = parseFloat(drive.speed);
@@ -400,17 +408,32 @@ function handleData(data) {
         zoomSetByApp = true;
         map.flyTo([lat, lng], zoom);
         updateZoomDisplay();
-        if (typeof drive.heading === 'number') {
+        if (marker && typeof drive.heading === 'number' && typeof marker.setRotationAngle === 'function') {
             marker.setRotationAngle(drive.heading);
         }
     } else {
         // Fall back to the previously stored coordinates or the default view
+        var fallbackPos = null;
+        if (Array.isArray(data.history_position) && data.history_position.length === 2) {
+            var histLat = parseFloat(data.history_position[0]);
+            var histLng = parseFloat(data.history_position[1]);
+            if (hasValidCoordinate(histLat) && hasValidCoordinate(histLng)) {
+                fallbackPos = [histLat, histLng];
+                updateLastKnownPosition(histLat, histLng);
+            }
+        }
         var zoom = DEFAULT_ZOOM;
         if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
             zoom = map.getZoom();
         }
         zoomSetByApp = true;
-        map.setView(lastKnownPosition || DEFAULT_POS, zoom);
+        var targetPos = fallbackPos || lastKnownPosition || DEFAULT_POS;
+        map.setView(targetPos, zoom);
+        if (marker && fallbackPos) {
+            marker.setLatLng(fallbackPos);
+        } else if (marker && lastKnownPosition) {
+            marker.setLatLng(lastKnownPosition);
+        }
         updateZoomDisplay();
     }
 
@@ -1321,13 +1344,19 @@ function startStream() {
             });
         });
         // Ensure the map shows the last known position if no cached data was found
-        var zoom = DEFAULT_ZOOM;
-        if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
-            zoom = map.getZoom();
+        if (map) {
+            var zoom = DEFAULT_ZOOM;
+            if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
+                zoom = map.getZoom();
+            }
+            zoomSetByApp = true;
+            var fallback = lastKnownPosition || DEFAULT_POS;
+            map.setView(fallback, zoom);
+            if (marker && lastKnownPosition) {
+                marker.setLatLng(lastKnownPosition);
+            }
+            updateZoomDisplay();
         }
-        zoomSetByApp = true;
-        map.setView(lastKnownPosition || DEFAULT_POS, zoom);
-        updateZoomDisplay();
         // Attempt to reconnect after a short delay in case the browser has
         // suspended the connection while running in the background.
         setTimeout(startStreamIfOnline, 5000);
@@ -1352,19 +1381,6 @@ function startStreamIfOnline() {
         });
     });
 }
-
-$.getJSON('/api/config', function(cfg) {
-    applyConfig(cfg);
-    lastConfigJSON = JSON.stringify(cfg || {});
-    if (cfg) {
-        lastApiInterval = cfg.api_interval;
-        lastApiIntervalIdle = cfg.api_interval_idle;
-        if (cfg.vehicle_id) {
-            currentVehicle = cfg.vehicle_id;
-        }
-    }
-    fetchVehicles();
-});
 
 function fetchConfig() {
     $.getJSON('/api/config', function(cfg) {
@@ -1394,10 +1410,40 @@ function checkAppVersion() {
     });
 }
 
-setInterval(checkAppVersion, 60000);
-setInterval(function() { updateDataAge(); }, 1000);
-setInterval(updateClientCount, 5000);
-setInterval(fetchAnnouncement, 15000);
+function bootApplication() {
+    $.getJSON('/api/config', function(cfg) {
+        applyConfig(cfg);
+        lastConfigJSON = JSON.stringify(cfg || {});
+        if (cfg) {
+            lastApiInterval = cfg.api_interval;
+            lastApiIntervalIdle = cfg.api_interval_idle;
+            if (cfg.vehicle_id) {
+                currentVehicle = cfg.vehicle_id;
+            }
+        }
+        fetchVehicles();
+    });
+    setInterval(checkAppVersion, 60000);
+    setInterval(function() { updateDataAge(); }, 1000);
+    setInterval(updateClientCount, 5000);
+    setInterval(fetchAnnouncement, 15000);
+    fetchAnnouncement();
+}
+
+mapReady = fetchLastPositionFromHistory()
+    .done(function(position) {
+        if (Array.isArray(position) && position.length === 2) {
+            var lat = parseFloat(position[0]);
+            var lng = parseFloat(position[1]);
+            if (hasValidCoordinate(lat) && hasValidCoordinate(lng)) {
+                updateLastKnownPosition(lat, lng);
+            }
+        }
+    })
+    .always(function() {
+        initializeMap(lastKnownPosition || DEFAULT_POS);
+        bootApplication();
+    });
 setInterval(fetchConfig, 15000);
 setInterval(displayParkTime, 60000);
 updateClientCount();
