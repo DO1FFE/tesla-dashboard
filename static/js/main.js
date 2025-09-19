@@ -14,9 +14,59 @@ var PARK_GRACE_MS = 5 * 60 * 1000;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 18;
-// Initialize the map roughly centered on Essen with a high zoom until
-// coordinates from the API are received.
-var map = L.map('map').setView(DEFAULT_POS, DEFAULT_ZOOM);
+var LAST_POSITION_STORAGE_KEY = 'tesla-dashboard:last-position';
+var lastKnownPosition = null;
+
+function hasValidCoordinate(value) {
+    return typeof value === 'number' && isFinite(value);
+}
+
+function loadLastKnownPosition() {
+    if (!window.localStorage) {
+        return null;
+    }
+    try {
+        var raw = window.localStorage.getItem(LAST_POSITION_STORAGE_KEY);
+        if (!raw) {
+            return null;
+        }
+        var parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length === 2) {
+            var lat = parseFloat(parsed[0]);
+            var lng = parseFloat(parsed[1]);
+            if (hasValidCoordinate(lat) && hasValidCoordinate(lng)) {
+                return [lat, lng];
+            }
+        }
+    } catch (err) {
+        // Ignore storage parsing errors and fall back to default coordinates.
+    }
+    return null;
+}
+
+function storeLastKnownPosition(lat, lng) {
+    if (!hasValidCoordinate(lat) || !hasValidCoordinate(lng)) {
+        return;
+    }
+    lastKnownPosition = [lat, lng];
+    if (!window.localStorage) {
+        return;
+    }
+    try {
+        window.localStorage.setItem(
+            LAST_POSITION_STORAGE_KEY,
+            JSON.stringify(lastKnownPosition)
+        );
+    } catch (err) {
+        // Ignore storage errors so the UI keeps working even if localStorage
+        // is unavailable (e.g., in private browsing modes).
+    }
+}
+
+lastKnownPosition = loadLastKnownPosition();
+// Initialize the map using the most recent known position when available.
+var initialMapPosition = lastKnownPosition || DEFAULT_POS;
+var map = L.map('map').setView(initialMapPosition, DEFAULT_ZOOM);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
 }).addTo(map);
@@ -206,7 +256,7 @@ var arrowIcon = L.divIcon({
     iconAnchor: [15, 15]
 });
 
-var marker = L.marker(DEFAULT_POS, {
+var marker = L.marker(initialMapPosition, {
     icon: arrowIcon,
     rotationAngle: 0,
     rotationOrigin: 'center center'
@@ -331,7 +381,8 @@ function handleData(data) {
     var lat = drive.latitude;
     var lng = drive.longitude;
     var slide = false;
-    if (lat && lng) {
+    if (hasValidCoordinate(lat) && hasValidCoordinate(lng)) {
+        storeLastKnownPosition(lat, lng);
         if (typeof marker.slideTo === 'function') {
             marker.slideTo([lat, lng], {duration: 1000});
             slide = true;
@@ -353,13 +404,13 @@ function handleData(data) {
             marker.setRotationAngle(drive.heading);
         }
     } else {
-        // Fall back to Essen if no coordinates are available
+        // Fall back to the previously stored coordinates or the default view
         var zoom = DEFAULT_ZOOM;
         if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
             zoom = map.getZoom();
         }
         zoomSetByApp = true;
-        map.setView(DEFAULT_POS, zoom);
+        map.setView(lastKnownPosition || DEFAULT_POS, zoom);
         updateZoomDisplay();
     }
 
@@ -1269,13 +1320,13 @@ function startStream() {
                 }
             });
         });
-        // Ensure the map shows Essen if no cached data was found
+        // Ensure the map shows the last known position if no cached data was found
         var zoom = DEFAULT_ZOOM;
         if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
             zoom = map.getZoom();
         }
         zoomSetByApp = true;
-        map.setView(DEFAULT_POS, zoom);
+        map.setView(lastKnownPosition || DEFAULT_POS, zoom);
         updateZoomDisplay();
         // Attempt to reconnect after a short delay in case the browser has
         // suspended the connection while running in the background.
