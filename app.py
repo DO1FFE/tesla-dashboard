@@ -1009,12 +1009,101 @@ def _last_logged_energy(vehicle_id):
 
 
 def _log_energy(vehicle_id, amount):
-    """Store the last added energy in ``energy.log`` using local time."""
+    """Store the last added energy in ``energy.log`` using local time.
+
+    Within a 30 minute window only a single entry per vehicle is kept. When
+    multiple values are recorded in that interval the most recent log entry is
+    rewritten so that it contains the highest value while earlier entries from
+    the same window are removed.
+    """
+
+    def _extract_recent_entries(lines, cutoff_dt):
+        keep = []
+        values = []
+        for line in lines:
+            idx = line.find("{")
+            if idx == -1:
+                keep.append(line)
+                continue
+            ts_str = line[:idx].strip()
+            ts_dt = _parse_log_time(ts_str)
+            if ts_dt is None:
+                keep.append(line)
+                continue
+            try:
+                data = json.loads(line[idx:])
+            except Exception:
+                keep.append(line)
+                continue
+            if data.get("vehicle_id") != vehicle_id:
+                keep.append(line)
+                continue
+            try:
+                val = float(data.get("added_energy", 0.0))
+            except Exception:
+                keep.append(line)
+                continue
+            if ts_dt >= cutoff_dt:
+                values.append(val)
+                continue
+            keep.append(line)
+        return keep, values
+
     try:
         last = _last_logged_energy(vehicle_id)
-        if last is None or abs(last - amount) > 0.001:
-            entry = json.dumps({"vehicle_id": vehicle_id, "added_energy": amount})
-            energy_logger.info(entry)
+        if last is not None and abs(last - amount) <= 0.001:
+            return
+
+        now = datetime.now(LOCAL_TZ)
+        cutoff = now - timedelta(minutes=30)
+        filename = os.path.join(DATA_DIR, "energy.log")
+        line_tpl = "{ts} {msg}\n"
+        ts_str = now.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+        keep_lines = []
+        recent_values = []
+
+        handler = energy_logger.handlers[0] if energy_logger.handlers else None
+        stream = getattr(handler, "stream", None)
+
+        if handler is not None and stream is not None:
+            handler.acquire()
+            try:
+                handler.flush()
+                stream.seek(0)
+                lines = stream.readlines()
+                keep_lines, recent_values = _extract_recent_entries(lines, cutoff)
+                recent_values.append(float(amount))
+                final_amount = max(recent_values)
+                entry = json.dumps(
+                    {"vehicle_id": vehicle_id, "added_energy": final_amount}
+                )
+                stream.seek(0)
+                stream.truncate()
+                stream.writelines(keep_lines)
+                stream.write(line_tpl.format(ts=ts_str, msg=entry))
+                stream.flush()
+                return
+            finally:
+                handler.release()
+
+        try:
+            with open(filename, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            lines = []
+        except Exception:
+            lines = []
+
+        keep_lines, recent_values = _extract_recent_entries(lines, cutoff)
+        recent_values.append(float(amount))
+        final_amount = max(recent_values)
+        entry = json.dumps({"vehicle_id": vehicle_id, "added_energy": final_amount})
+        try:
+            with open(filename, "w", encoding="utf-8") as f:
+                f.writelines(keep_lines)
+                f.write(line_tpl.format(ts=ts_str, msg=entry))
+        except Exception:
+            pass
     except Exception:
         pass
 
