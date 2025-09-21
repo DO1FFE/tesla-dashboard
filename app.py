@@ -24,6 +24,7 @@ from flask import (
     url_for,
     redirect,
     g,
+    make_response,
 )
 from taximeter import Taximeter
 import requests
@@ -2229,18 +2230,22 @@ def trip_history():
             heading = _bearing(path[0][:2], path[1][:2])
     weekly, monthly = compute_trip_summaries()
     cfg = load_config()
-    return render_template(
-        "history.html",
-        path=path,
-        heading=heading,
-        files=files,
-        weeks=weeks,
-        months=months,
-        selected=selected,
-        weekly=weekly,
-        monthly=monthly,
-        config=cfg,
+    response = make_response(
+        render_template(
+            "history.html",
+            path=path,
+            heading=heading,
+            files=files,
+            weeks=weeks,
+            months=months,
+            selected=selected,
+            weekly=weekly,
+            monthly=monthly,
+            config=cfg,
+        )
     )
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
 
 
 @app.route("/daten")
