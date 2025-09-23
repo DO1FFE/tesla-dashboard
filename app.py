@@ -13,6 +13,7 @@ import uuid
 from urllib.parse import urlparse
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
+from io import UnsupportedOperation
 from flask import (
     Flask,
     render_template,
@@ -439,7 +440,7 @@ if not state_logger.handlers:
 energy_logger = logging.getLogger("energy_logger")
 if not energy_logger.handlers:
     handler = logging.FileHandler(
-        os.path.join(DATA_DIR, "energy.log"), encoding="utf-8"
+        os.path.join(DATA_DIR, "energy.log"), mode="a+", encoding="utf-8"
     )
     formatter = logging.Formatter("%(asctime)s %(message)s")
     formatter.converter = lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
@@ -1070,20 +1071,29 @@ def _log_energy(vehicle_id, amount):
             handler.acquire()
             try:
                 handler.flush()
-                stream.seek(0)
-                lines = stream.readlines()
-                keep_lines, recent_values = _extract_recent_entries(lines, cutoff)
-                recent_values.append(float(amount))
-                final_amount = max(recent_values)
-                entry = json.dumps(
-                    {"vehicle_id": vehicle_id, "added_energy": final_amount}
-                )
-                stream.seek(0)
-                stream.truncate()
-                stream.writelines(keep_lines)
-                stream.write(line_tpl.format(ts=ts_str, msg=entry))
-                stream.flush()
-                return
+                readable = getattr(stream, "readable", lambda: False)()
+                seekable = getattr(stream, "seekable", lambda: False)()
+                if readable and seekable:
+                    stream.seek(0)
+                    lines = stream.readlines()
+                    keep_lines, recent_values = _extract_recent_entries(
+                        lines, cutoff
+                    )
+                    recent_values.append(float(amount))
+                    final_amount = max(recent_values)
+                    entry = json.dumps(
+                        {"vehicle_id": vehicle_id, "added_energy": final_amount}
+                    )
+                    stream.seek(0)
+                    stream.truncate()
+                    stream.writelines(keep_lines)
+                    stream.write(line_tpl.format(ts=ts_str, msg=entry))
+                    stream.flush()
+                    return
+            except UnsupportedOperation:
+                pass
+            except Exception:
+                pass
             finally:
                 handler.release()
 
