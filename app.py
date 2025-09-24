@@ -61,6 +61,7 @@ Compress(app)
 socketio = SocketIO(app, async_mode="eventlet")
 __version__ = get_version()
 CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
+RECEIPT_TIME_FORMAT = "%d.%m.%Y %H:%M"
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
 TESLA_REQUEST_TIMEOUT = float(os.getenv("TESLA_REQUEST_TIMEOUT", "5"))
 CLIENT_TIMEOUT = int(os.getenv("CLIENT_TIMEOUT", "60"))
@@ -718,12 +719,17 @@ def get_taxi_slogan():
     return cfg.get("taxi_slogan", "Wir lassen Sie nicht im Regen stehen.")
 
 
-def format_receipt(company, breakdown, distance=0.0, slogan=""):
+def format_receipt(company, breakdown, distance=0.0, slogan="", printed_at=None):
+    if printed_at is None:
+        printed_at = datetime.now(LOCAL_TZ).strftime(RECEIPT_TIME_FORMAT)
     lines = []
     if company:
         lines.append(company)
         if slogan:
             lines.append(slogan)
+        lines.append("")
+    if printed_at:
+        lines.append(f"Datum: {printed_at}")
         lines.append("")
     lines.append(f"Grundpreis:{breakdown['base']:>7.2f} €")
     if breakdown.get('km_1_2', 0) > 0:
@@ -2964,7 +2970,14 @@ def api_taxameter_stop():
     if result:
         company = get_taxi_company()
         slogan = get_taxi_slogan()
-        text = format_receipt(company, result.get("breakdown", {}), result.get("distance", 0.0), slogan)
+        printed_at = datetime.now(LOCAL_TZ).strftime(RECEIPT_TIME_FORMAT)
+        text = format_receipt(
+            company,
+            result.get("breakdown", {}),
+            result.get("distance", 0.0),
+            slogan,
+            printed_at=printed_at,
+        )
         rdir = receipt_dir()
         ride_id = result.get("ride_id")
         if ride_id is not None:
@@ -2980,6 +2993,7 @@ def api_taxameter_stop():
                         "breakdown": result.get("breakdown", {}),
                         "distance": result.get("distance", 0.0),
                         "qr_code": f"/receipts/{ride_id}.png",
+                        "printed_at": printed_at,
                     },
                     f,
                 )
@@ -2989,6 +3003,7 @@ def api_taxameter_stop():
             img.save(img_path)
             result["qr_code"] = f"/receipts/{ride_id}.png"
             result["receipt_url"] = url
+        result["printed_at"] = printed_at
         result["company"] = company
         result["slogan"] = slogan
     return jsonify(result or {"active": False})
@@ -3041,6 +3056,7 @@ def taxameter_receipt(ride_id):
         try:
             with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            data.setdefault("printed_at", datetime.now(LOCAL_TZ).strftime(RECEIPT_TIME_FORMAT))
             return render_template("taxameter_receipt.html", **data)
         except Exception:
             pass
@@ -3096,6 +3112,7 @@ def taxameter_trip_receipt():
     breakdown = tm._calc_breakdown(dist)
     company = get_taxi_company()
     slogan = get_taxi_slogan()
+    printed_at = datetime.now(LOCAL_TZ).strftime(RECEIPT_TIME_FORMAT)
     return render_template(
         "taxameter_receipt.html",
         company=company,
@@ -3103,6 +3120,7 @@ def taxameter_trip_receipt():
         breakdown=breakdown,
         distance=dist,
         qr_code=None,
+        printed_at=printed_at,
     )
 
 
