@@ -19,6 +19,9 @@
                 {% endif %}
                 {% endif %}
             </div>
+            {% if printed_at %}
+            <div class="receipt-meta">Datum: {{ printed_at }}</div>
+            {% endif %}
             <table id="receipt-table">
                 <tr><td>Grundpreis:</td><td class="num">{{ '%.2f'|format(breakdown.base) }} €</td></tr>
                 {% if breakdown.km_1_2 > 0 %}
