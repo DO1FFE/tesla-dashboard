@@ -1575,6 +1575,8 @@ def _compute_energy_stats(filename=os.path.join(DATA_DIR, "energy.log")):
     """Return per-day added energy in kWh based on ``energy.log``."""
     energy = {}
     last_vals = {}
+    last_times = {}
+    eps = 0.001
     try:
         with open(filename, "r", encoding="utf-8") as f:
             for line in f:
@@ -1585,19 +1587,35 @@ def _compute_energy_stats(filename=os.path.join(DATA_DIR, "energy.log")):
                 ts_dt = _parse_log_time(ts_str)
                 if ts_dt is None:
                     continue
-                day = ts_dt.date().isoformat()
                 try:
                     entry = json.loads(line[idx:])
                     vid = entry.get("vehicle_id")
                     val = float(entry.get("added_energy", 0.0))
                 except Exception:
                     continue
-                if vid is not None:
-                    last = last_vals.get(vid)
-                    if last is not None and abs(last - val) < 0.001:
-                        continue
-                    last_vals[vid] = val
-                energy[day] = energy.get(day, 0.0) + val
+
+                # Use vehicle specific keys to track cumulative values.
+                key = vid if vid is not None else "__default__"
+                prev_val = last_vals.get(key)
+                prev_ts = last_times.get(key)
+
+                if prev_val is not None and val + eps < prev_val:
+                    # added_energy has reset for this vehicle (new charging session)
+                    prev_val = None
+                    prev_ts = None
+
+                if prev_val is None or prev_ts is None:
+                    if val > eps:
+                        day = ts_dt.date().isoformat()
+                        energy[day] = energy.get(day, 0.0) + val
+                else:
+                    delta = val - prev_val
+                    if delta > eps:
+                        day = prev_ts.date().isoformat()
+                        energy[day] = energy.get(day, 0.0) + delta
+
+                last_vals[key] = val
+                last_times[key] = ts_dt
     except Exception:
         pass
     return energy
