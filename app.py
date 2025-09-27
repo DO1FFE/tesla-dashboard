@@ -1028,6 +1028,8 @@ def _log_energy(vehicle_id, amount):
     def _extract_recent_entries(lines, cutoff_dt):
         keep = []
         values = []
+        earliest_ts = None
+        earliest_ts_str = None
         for line in lines:
             idx = line.find("{")
             if idx == -1:
@@ -1053,9 +1055,12 @@ def _log_energy(vehicle_id, amount):
                 continue
             if ts_dt >= cutoff_dt:
                 values.append(val)
+                if earliest_ts is None or ts_dt < earliest_ts:
+                    earliest_ts = ts_dt
+                    earliest_ts_str = ts_str
                 continue
             keep.append(line)
-        return keep, values
+        return keep, values, earliest_ts_str
 
     try:
         last = _last_logged_energy(vehicle_id)
@@ -1069,6 +1074,7 @@ def _log_energy(vehicle_id, amount):
         ts_str = now.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
         keep_lines = []
         recent_values = []
+        preserved_ts = None
 
         handler = energy_logger.handlers[0] if energy_logger.handlers else None
         stream = getattr(handler, "stream", None)
@@ -1082,7 +1088,7 @@ def _log_energy(vehicle_id, amount):
                 if readable and seekable:
                     stream.seek(0)
                     lines = stream.readlines()
-                    keep_lines, recent_values = _extract_recent_entries(
+                    keep_lines, recent_values, preserved_ts = _extract_recent_entries(
                         lines, cutoff
                     )
                     recent_values.append(float(amount))
@@ -1090,10 +1096,11 @@ def _log_energy(vehicle_id, amount):
                     entry = json.dumps(
                         {"vehicle_id": vehicle_id, "added_energy": final_amount}
                     )
+                    ts_value = preserved_ts or ts_str
                     stream.seek(0)
                     stream.truncate()
                     stream.writelines(keep_lines)
-                    stream.write(line_tpl.format(ts=ts_str, msg=entry))
+                    stream.write(line_tpl.format(ts=ts_value, msg=entry))
                     stream.flush()
                     return
             except UnsupportedOperation:
@@ -1111,14 +1118,17 @@ def _log_energy(vehicle_id, amount):
         except Exception:
             lines = []
 
-        keep_lines, recent_values = _extract_recent_entries(lines, cutoff)
+        keep_lines, recent_values, preserved_ts = _extract_recent_entries(
+            lines, cutoff
+        )
         recent_values.append(float(amount))
         final_amount = max(recent_values)
         entry = json.dumps({"vehicle_id": vehicle_id, "added_energy": final_amount})
         try:
             with open(filename, "w", encoding="utf-8") as f:
                 f.writelines(keep_lines)
-                f.write(line_tpl.format(ts=ts_str, msg=entry))
+                ts_value = preserved_ts or ts_str
+                f.write(line_tpl.format(ts=ts_value, msg=entry))
         except Exception:
             pass
     except Exception:
@@ -1579,6 +1589,7 @@ def _compute_energy_stats(filename=os.path.join(DATA_DIR, "energy.log")):
     eps = 0.001
     try:
         with open(filename, "r", encoding="utf-8") as f:
+            session_days = {}
             for line in f:
                 idx = line.find("{")
                 if idx == -1:
@@ -1598,24 +1609,30 @@ def _compute_energy_stats(filename=os.path.join(DATA_DIR, "energy.log")):
                 key = vid if vid is not None else "__default__"
                 prev_val = last_vals.get(key)
                 prev_ts = last_times.get(key)
+                session_day = session_days.get(key)
 
                 if prev_val is not None and val + eps < prev_val:
                     # added_energy has reset for this vehicle (new charging session)
                     prev_val = None
                     prev_ts = None
+                    session_day = None
 
                 if prev_val is None or prev_ts is None:
                     if val > eps:
-                        day = ts_dt.date().isoformat()
+                        session_day = ts_dt.date()
+                        day = session_day.isoformat()
                         energy[day] = energy.get(day, 0.0) + val
                 else:
                     delta = val - prev_val
                     if delta > eps:
-                        day = prev_ts.date().isoformat()
+                        if session_day is None:
+                            session_day = prev_ts.date()
+                        day = session_day.isoformat()
                         energy[day] = energy.get(day, 0.0) + delta
 
                 last_vals[key] = val
                 last_times[key] = ts_dt
+                session_days[key] = session_day
     except Exception:
         pass
     return energy
