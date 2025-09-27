@@ -1016,18 +1016,24 @@ def _last_logged_energy(vehicle_id):
     return None
 
 
-def _log_energy(vehicle_id, amount):
+def _log_energy(vehicle_id, amount, timestamp=None):
     """Store the last added energy in ``energy.log`` using local time.
 
     Within a 30 minute window only a single entry per vehicle is kept. When
     multiple values are recorded in that interval the most recent log entry is
     rewritten so that it contains the highest value while earlier entries from
     the same window are removed.
+
+    When ``timestamp`` is provided it is used as the log timestamp so that
+    energy is associated with the start of the charging session rather than the
+    completion time.
     """
 
     def _extract_recent_entries(lines, cutoff_dt):
         keep = []
         values = []
+        earliest_ts = None
+        earliest_ts_str = None
         for line in lines:
             idx = line.find("{")
             if idx == -1:
@@ -1053,9 +1059,12 @@ def _log_energy(vehicle_id, amount):
                 continue
             if ts_dt >= cutoff_dt:
                 values.append(val)
+                if earliest_ts is None or ts_dt < earliest_ts:
+                    earliest_ts = ts_dt
+                    earliest_ts_str = ts_str
                 continue
             keep.append(line)
-        return keep, values
+        return keep, values, earliest_ts_str
 
     try:
         last = _last_logged_energy(vehicle_id)
@@ -1064,11 +1073,21 @@ def _log_energy(vehicle_id, amount):
 
         now = datetime.now(LOCAL_TZ)
         cutoff = now - timedelta(minutes=30)
+        ts_dt = timestamp
+        if isinstance(ts_dt, (int, float)):
+            ts_dt = datetime.fromtimestamp(ts_dt, LOCAL_TZ)
+        if ts_dt is not None and ts_dt.tzinfo is None:
+            ts_dt = ts_dt.replace(tzinfo=LOCAL_TZ)
+        if ts_dt is None:
+            ts_dt = now
+        else:
+            ts_dt = ts_dt.astimezone(LOCAL_TZ)
         filename = os.path.join(DATA_DIR, "energy.log")
         line_tpl = "{ts} {msg}\n"
-        ts_str = now.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+        ts_str = ts_dt.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
         keep_lines = []
         recent_values = []
+        preserved_ts = None
 
         handler = energy_logger.handlers[0] if energy_logger.handlers else None
         stream = getattr(handler, "stream", None)
@@ -1082,7 +1101,7 @@ def _log_energy(vehicle_id, amount):
                 if readable and seekable:
                     stream.seek(0)
                     lines = stream.readlines()
-                    keep_lines, recent_values = _extract_recent_entries(
+                    keep_lines, recent_values, preserved_ts = _extract_recent_entries(
                         lines, cutoff
                     )
                     recent_values.append(float(amount))
@@ -1090,10 +1109,11 @@ def _log_energy(vehicle_id, amount):
                     entry = json.dumps(
                         {"vehicle_id": vehicle_id, "added_energy": final_amount}
                     )
+                    ts_value = preserved_ts or ts_str
                     stream.seek(0)
                     stream.truncate()
                     stream.writelines(keep_lines)
-                    stream.write(line_tpl.format(ts=ts_str, msg=entry))
+                    stream.write(line_tpl.format(ts=ts_value, msg=entry))
                     stream.flush()
                     return
             except UnsupportedOperation:
@@ -1111,14 +1131,17 @@ def _log_energy(vehicle_id, amount):
         except Exception:
             lines = []
 
-        keep_lines, recent_values = _extract_recent_entries(lines, cutoff)
+        keep_lines, recent_values, preserved_ts = _extract_recent_entries(
+            lines, cutoff
+        )
         recent_values.append(float(amount))
         final_amount = max(recent_values)
         entry = json.dumps({"vehicle_id": vehicle_id, "added_energy": final_amount})
         try:
             with open(filename, "w", encoding="utf-8") as f:
                 f.writelines(keep_lines)
-                f.write(line_tpl.format(ts=ts_str, msg=entry))
+                ts_value = preserved_ts or ts_str
+                f.write(line_tpl.format(ts=ts_value, msg=entry))
         except Exception:
             pass
     except Exception:
@@ -1175,6 +1198,59 @@ def _save_last_energy(vehicle_id, value):
     try:
         with open(_last_energy_file(vehicle_id), "w", encoding="utf-8") as f:
             f.write(str(value))
+    except Exception:
+        pass
+
+
+_charging_session_start = {}
+
+
+def _session_start_file(vehicle_id):
+    """Return filename that stores the current charging session start time."""
+    return os.path.join(vehicle_dir(vehicle_id), "charge_session_start.txt")
+
+
+def _load_session_start(vehicle_id):
+    """Return stored charging session start timestamp for ``vehicle_id``."""
+    start = _charging_session_start.get(vehicle_id)
+    if start is not None:
+        return start
+    try:
+        with open(_session_start_file(vehicle_id), "r", encoding="utf-8") as f:
+            ts_str = f.read().strip()
+        if not ts_str:
+            return None
+        dt = datetime.fromisoformat(ts_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=LOCAL_TZ)
+        else:
+            dt = dt.astimezone(LOCAL_TZ)
+        _charging_session_start[vehicle_id] = dt
+        return dt
+    except Exception:
+        return None
+
+
+def _save_session_start(vehicle_id, start_dt):
+    """Persist the charging session start timestamp for ``vehicle_id``."""
+    if start_dt is None:
+        return
+    try:
+        os.makedirs(vehicle_dir(vehicle_id), exist_ok=True)
+        with open(_session_start_file(vehicle_id), "w", encoding="utf-8") as f:
+            f.write(start_dt.astimezone(LOCAL_TZ).isoformat())
+        _charging_session_start[vehicle_id] = start_dt.astimezone(LOCAL_TZ)
+    except Exception:
+        pass
+
+
+def _clear_session_start(vehicle_id):
+    """Remove persisted start timestamp for ``vehicle_id`` if present."""
+    _charging_session_start.pop(vehicle_id, None)
+    try:
+        os.remove(_session_start_file(vehicle_id))
+    except FileNotFoundError:
+        pass
     except Exception:
         pass
 
@@ -1579,6 +1655,7 @@ def _compute_energy_stats(filename=os.path.join(DATA_DIR, "energy.log")):
     eps = 0.001
     try:
         with open(filename, "r", encoding="utf-8") as f:
+            session_days = {}
             for line in f:
                 idx = line.find("{")
                 if idx == -1:
@@ -1598,24 +1675,30 @@ def _compute_energy_stats(filename=os.path.join(DATA_DIR, "energy.log")):
                 key = vid if vid is not None else "__default__"
                 prev_val = last_vals.get(key)
                 prev_ts = last_times.get(key)
+                session_day = session_days.get(key)
 
                 if prev_val is not None and val + eps < prev_val:
                     # added_energy has reset for this vehicle (new charging session)
                     prev_val = None
                     prev_ts = None
+                    session_day = None
 
                 if prev_val is None or prev_ts is None:
                     if val > eps:
-                        day = ts_dt.date().isoformat()
+                        session_day = ts_dt.date()
+                        day = session_day.isoformat()
                         energy[day] = energy.get(day, 0.0) + val
                 else:
                     delta = val - prev_val
                     if delta > eps:
-                        day = prev_ts.date().isoformat()
+                        if session_day is None:
+                            session_day = prev_ts.date()
+                        day = session_day.isoformat()
                         energy[day] = energy.get(day, 0.0) + delta
 
                 last_vals[key] = val
                 last_times[key] = ts_dt
+                session_days[key] = session_day
     except Exception:
         pass
     return energy
@@ -2056,28 +2139,54 @@ def _fetch_data_once(vehicle_id="default"):
 
         charge = data.get("charge_state", {})
         val = charge.get("charge_energy_added")
+        charging_state = charge.get("charging_state")
         saved_val = last_val
+        now = datetime.now(LOCAL_TZ)
+
+        session_start = _charging_session_start.get(cache_id)
+        if session_start is None:
+            session_start = _load_session_start(cache_id)
+
+        if charging_state == "Charging" and session_start is None:
+            session_start = now
+            _save_session_start(cache_id, session_start)
 
         if val is not None:
             if last_val is not None and val < last_val:
                 # Finish previous session before counter resets
+                prev_start = session_start or _load_session_start(cache_id)
                 if last_val > 0:
-                    _log_energy(cache_id, last_val)
+                    _log_energy(cache_id, last_val, timestamp=prev_start)
+                _clear_session_start(cache_id)
                 _save_last_energy(cache_id, last_val)
                 saved_val = last_val
+                session_start = None
+                if charging_state == "Charging":
+                    session_start = now
+                    _save_session_start(cache_id, session_start)
             last_val = val
 
-            end_state = charge.get("charging_state")
-            if end_state in ("Complete", "Disconnected"):
-                if val > 0:
-                    _log_energy(cache_id, val)
-                _save_last_energy(cache_id, val)
-                saved_val = val
-        elif charge.get("charging_state") in ("Complete", "Disconnected") and last_val is not None:
-            if last_val > 0:
-                _log_energy(cache_id, last_val)
-            _save_last_energy(cache_id, last_val)
-            saved_val = last_val
+        value_to_log = None
+        if charging_state in ("Complete", "Disconnected"):
+            if val is not None and val > 0:
+                value_to_log = val
+            elif val is None and last_val is not None and last_val > 0:
+                value_to_log = last_val
+            if value_to_log is not None:
+                start_time = session_start or _load_session_start(cache_id)
+                _log_energy(cache_id, value_to_log, timestamp=start_time)
+                _clear_session_start(cache_id)
+                _save_last_energy(cache_id, value_to_log)
+                saved_val = value_to_log
+                session_start = None
+
+        if (
+            charging_state == "Charging"
+            and session_start is None
+            and (val is None or val >= 0)
+        ):
+            session_start = now
+            _save_session_start(cache_id, session_start)
 
         if saved_val is not None:
             data["last_charge_energy_added"] = saved_val
