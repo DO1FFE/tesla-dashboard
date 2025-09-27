@@ -482,23 +482,7 @@ def _load_last_state(filename=os.path.join(DATA_DIR, "state.log")):
     return result
 
 
-# Tools to build an aggregated list of API keys ------------------------------
-
-
-def _collect_keys(data, prefix="", keys=None):
-    """Recursively gather dotted key names from the given data."""
-    if keys is None:
-        keys = set()
-    if isinstance(data, dict):
-        for k, v in data.items():
-            key = f"{prefix}.{k}" if prefix else k
-            keys.add(key)
-            _collect_keys(v, key, keys)
-    elif isinstance(data, list):
-        for item in data:
-            _collect_keys(item, prefix, keys)
-    return keys
-
+# Tools to build an aggregated list of API values ----------------------------
 
 def _collect_key_values(data, prefix="", result=None):
     """Recursively gather key/value pairs in the order provided by the API."""

@@ -29,10 +29,6 @@ class Taximeter:
         self.wait_cost = 0.0
         self.waiting = False
 
-    def _is_night(self, timestamp):
-        hour = datetime.fromtimestamp(timestamp, LOCAL_TZ).hour
-        return hour >= 22 or hour < 6
-
     def start(self):
         with self.lock:
             if self.active:
