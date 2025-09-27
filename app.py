@@ -1020,59 +1020,53 @@ def _log_energy(vehicle_id, amount, timestamp=None):
     """Store the last added energy in ``energy.log`` using local time.
 
     Within a 30 minute window only a single entry per vehicle is kept. When
-    multiple values are recorded in that interval the most recent log entry is
-    rewritten so that it contains the highest value while earlier entries from
-    the same window are removed.
+    multiple values are recorded in that interval follow-up writes are ignored
+    so that the first persisted session value remains unchanged.
+
+    Additional writes are blocked until a new charging session starts to avoid
+    moving logged energy to a different day.
 
     When ``timestamp`` is provided it is used as the log timestamp so that
     energy is associated with the start of the charging session rather than the
     completion time.
     """
 
-    def _extract_recent_entries(lines, cutoff_dt):
-        keep = []
-        values = []
-        earliest_ts = None
-        earliest_ts_str = None
+    def _has_recent_entry(lines, reference_dt):
         for line in lines:
             idx = line.find("{")
             if idx == -1:
-                keep.append(line)
                 continue
             ts_str = line[:idx].strip()
             ts_dt = _parse_log_time(ts_str)
             if ts_dt is None:
-                keep.append(line)
                 continue
             try:
                 data = json.loads(line[idx:])
             except Exception:
-                keep.append(line)
                 continue
             if data.get("vehicle_id") != vehicle_id:
-                keep.append(line)
                 continue
+            if reference_dt is None:
+                return True
+            if ts_dt >= reference_dt:
+                return True
             try:
-                val = float(data.get("added_energy", 0.0))
+                delta = (reference_dt - ts_dt).total_seconds()
             except Exception:
-                keep.append(line)
                 continue
-            if ts_dt >= cutoff_dt:
-                values.append(val)
-                if earliest_ts is None or ts_dt < earliest_ts:
-                    earliest_ts = ts_dt
-                    earliest_ts_str = ts_str
-                continue
-            keep.append(line)
-        return keep, values, earliest_ts_str
+            if 0 <= delta <= 30 * 60:
+                return True
+        return False
 
     try:
+        if vehicle_id in _recently_logged_sessions:
+            return
+
         last = _last_logged_energy(vehicle_id)
         if last is not None and abs(last - amount) <= 0.001:
             return
 
         now = datetime.now(LOCAL_TZ)
-        cutoff = now - timedelta(minutes=30)
         ts_dt = timestamp
         if isinstance(ts_dt, (int, float)):
             ts_dt = datetime.fromtimestamp(ts_dt, LOCAL_TZ)
@@ -1085,9 +1079,7 @@ def _log_energy(vehicle_id, amount, timestamp=None):
         filename = os.path.join(DATA_DIR, "energy.log")
         line_tpl = "{ts} {msg}\n"
         ts_str = ts_dt.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-        keep_lines = []
-        recent_values = []
-        preserved_ts = None
+        has_recent_entry = False
 
         handler = energy_logger.handlers[0] if energy_logger.handlers else None
         stream = getattr(handler, "stream", None)
@@ -1101,21 +1093,7 @@ def _log_energy(vehicle_id, amount, timestamp=None):
                 if readable and seekable:
                     stream.seek(0)
                     lines = stream.readlines()
-                    keep_lines, recent_values, preserved_ts = _extract_recent_entries(
-                        lines, cutoff
-                    )
-                    recent_values.append(float(amount))
-                    final_amount = max(recent_values)
-                    entry = json.dumps(
-                        {"vehicle_id": vehicle_id, "added_energy": final_amount}
-                    )
-                    ts_value = preserved_ts or ts_str
-                    stream.seek(0)
-                    stream.truncate()
-                    stream.writelines(keep_lines)
-                    stream.write(line_tpl.format(ts=ts_value, msg=entry))
-                    stream.flush()
-                    return
+                    has_recent_entry = _has_recent_entry(lines, ts_dt)
             except UnsupportedOperation:
                 pass
             except Exception:
@@ -1123,27 +1101,51 @@ def _log_energy(vehicle_id, amount, timestamp=None):
             finally:
                 handler.release()
 
-        try:
-            with open(filename, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-        except FileNotFoundError:
-            lines = []
-        except Exception:
-            lines = []
+        if not has_recent_entry:
+            try:
+                with open(filename, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+            except FileNotFoundError:
+                lines = []
+            except Exception:
+                lines = []
 
-        keep_lines, recent_values, preserved_ts = _extract_recent_entries(
-            lines, cutoff
-        )
-        recent_values.append(float(amount))
-        final_amount = max(recent_values)
-        entry = json.dumps({"vehicle_id": vehicle_id, "added_energy": final_amount})
-        try:
-            with open(filename, "w", encoding="utf-8") as f:
-                f.writelines(keep_lines)
-                ts_value = preserved_ts or ts_str
-                f.write(line_tpl.format(ts=ts_value, msg=entry))
-        except Exception:
-            pass
+            has_recent_entry = _has_recent_entry(lines, ts_dt)
+
+        if has_recent_entry:
+            return
+
+        entry = json.dumps({"vehicle_id": vehicle_id, "added_energy": float(amount)})
+        line = line_tpl.format(ts=ts_str, msg=entry)
+        written = False
+
+        if handler is not None and stream is not None:
+            handler.acquire()
+            try:
+                writable = getattr(stream, "writable", lambda: False)()
+                seekable = getattr(stream, "seekable", lambda: False)()
+                if writable and seekable:
+                    stream.seek(0, os.SEEK_END)
+                    stream.write(line)
+                    stream.flush()
+                    written = True
+            except UnsupportedOperation:
+                pass
+            except Exception:
+                pass
+            finally:
+                handler.release()
+
+        if not written:
+            try:
+                with open(filename, "a", encoding="utf-8") as f:
+                    f.write(line)
+                written = True
+            except Exception:
+                pass
+
+        if written:
+            _recently_logged_sessions.add(vehicle_id)
     except Exception:
         pass
 
@@ -1203,6 +1205,7 @@ def _save_last_energy(vehicle_id, value):
 
 
 _charging_session_start = {}
+_recently_logged_sessions = set()
 
 
 def _session_start_file(vehicle_id):
@@ -1235,6 +1238,7 @@ def _save_session_start(vehicle_id, start_dt):
     """Persist the charging session start timestamp for ``vehicle_id``."""
     if start_dt is None:
         return
+    _recently_logged_sessions.discard(vehicle_id)
     try:
         os.makedirs(vehicle_dir(vehicle_id), exist_ok=True)
         with open(_session_start_file(vehicle_id), "w", encoding="utf-8") as f:
