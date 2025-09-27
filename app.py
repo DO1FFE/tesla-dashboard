@@ -1043,93 +1043,94 @@ def _log_energy(vehicle_id, amount, timestamp=None):
         return False
 
     try:
-        if vehicle_id in _recently_logged_sessions:
-            return
+        with _energy_log_lock:
+            if vehicle_id in _recently_logged_sessions:
+                return
 
-        last = _last_logged_energy(vehicle_id)
-        if last is not None and abs(last - amount) <= 0.001:
-            return
+            last = _last_logged_energy(vehicle_id)
+            if last is not None and abs(last - amount) <= 0.001:
+                return
 
-        now = datetime.now(LOCAL_TZ)
-        ts_dt = timestamp
-        if isinstance(ts_dt, (int, float)):
-            ts_dt = datetime.fromtimestamp(ts_dt, LOCAL_TZ)
-        if ts_dt is not None and ts_dt.tzinfo is None:
-            ts_dt = ts_dt.replace(tzinfo=LOCAL_TZ)
-        if ts_dt is None:
-            ts_dt = now
-        else:
-            ts_dt = ts_dt.astimezone(LOCAL_TZ)
-        filename = os.path.join(DATA_DIR, "energy.log")
-        line_tpl = "{ts} {msg}\n"
-        ts_str = ts_dt.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-        has_recent_entry = False
+            now = datetime.now(LOCAL_TZ)
+            ts_dt = timestamp
+            if isinstance(ts_dt, (int, float)):
+                ts_dt = datetime.fromtimestamp(ts_dt, LOCAL_TZ)
+            if ts_dt is not None and ts_dt.tzinfo is None:
+                ts_dt = ts_dt.replace(tzinfo=LOCAL_TZ)
+            if ts_dt is None:
+                ts_dt = now
+            else:
+                ts_dt = ts_dt.astimezone(LOCAL_TZ)
+            filename = os.path.join(DATA_DIR, "energy.log")
+            line_tpl = "{ts} {msg}\n"
+            ts_str = ts_dt.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+            has_recent_entry = False
 
-        handler = energy_logger.handlers[0] if energy_logger.handlers else None
-        stream = getattr(handler, "stream", None)
+            handler = energy_logger.handlers[0] if energy_logger.handlers else None
+            stream = getattr(handler, "stream", None)
 
-        if handler is not None and stream is not None:
-            handler.acquire()
-            try:
-                handler.flush()
-                readable = getattr(stream, "readable", lambda: False)()
-                seekable = getattr(stream, "seekable", lambda: False)()
-                if readable and seekable:
-                    stream.seek(0)
-                    lines = stream.readlines()
-                    has_recent_entry = _has_recent_entry(lines, ts_dt)
-            except UnsupportedOperation:
-                pass
-            except Exception:
-                pass
-            finally:
-                handler.release()
+            if handler is not None and stream is not None:
+                handler.acquire()
+                try:
+                    handler.flush()
+                    readable = getattr(stream, "readable", lambda: False)()
+                    seekable = getattr(stream, "seekable", lambda: False)()
+                    if readable and seekable:
+                        stream.seek(0)
+                        lines = stream.readlines()
+                        has_recent_entry = _has_recent_entry(lines, ts_dt)
+                except UnsupportedOperation:
+                    pass
+                except Exception:
+                    pass
+                finally:
+                    handler.release()
 
-        if not has_recent_entry:
-            try:
-                with open(filename, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-            except FileNotFoundError:
-                lines = []
-            except Exception:
-                lines = []
+            if not has_recent_entry:
+                try:
+                    with open(filename, "r", encoding="utf-8") as f:
+                        lines = f.readlines()
+                except FileNotFoundError:
+                    lines = []
+                except Exception:
+                    lines = []
 
-            has_recent_entry = _has_recent_entry(lines, ts_dt)
+                has_recent_entry = _has_recent_entry(lines, ts_dt)
 
-        if has_recent_entry:
-            return
+            if has_recent_entry:
+                return
 
-        entry = json.dumps({"vehicle_id": vehicle_id, "added_energy": float(amount)})
-        line = line_tpl.format(ts=ts_str, msg=entry)
-        written = False
+            entry = json.dumps({"vehicle_id": vehicle_id, "added_energy": float(amount)})
+            line = line_tpl.format(ts=ts_str, msg=entry)
+            written = False
 
-        if handler is not None and stream is not None:
-            handler.acquire()
-            try:
-                writable = getattr(stream, "writable", lambda: False)()
-                seekable = getattr(stream, "seekable", lambda: False)()
-                if writable and seekable:
-                    stream.seek(0, os.SEEK_END)
-                    stream.write(line)
-                    stream.flush()
+            if handler is not None and stream is not None:
+                handler.acquire()
+                try:
+                    writable = getattr(stream, "writable", lambda: False)()
+                    seekable = getattr(stream, "seekable", lambda: False)()
+                    if writable and seekable:
+                        stream.seek(0, os.SEEK_END)
+                        stream.write(line)
+                        stream.flush()
+                        written = True
+                except UnsupportedOperation:
+                    pass
+                except Exception:
+                    pass
+                finally:
+                    handler.release()
+
+            if not written:
+                try:
+                    with open(filename, "a", encoding="utf-8") as f:
+                        f.write(line)
                     written = True
-            except UnsupportedOperation:
-                pass
-            except Exception:
-                pass
-            finally:
-                handler.release()
+                except Exception:
+                    pass
 
-        if not written:
-            try:
-                with open(filename, "a", encoding="utf-8") as f:
-                    f.write(line)
-                written = True
-            except Exception:
-                pass
-
-        if written:
-            _recently_logged_sessions.add(vehicle_id)
+            if written:
+                _recently_logged_sessions.add(vehicle_id)
     except Exception:
         pass
 
@@ -1190,6 +1191,7 @@ def _save_last_energy(vehicle_id, value):
 
 _charging_session_start = {}
 _recently_logged_sessions = set()
+_energy_log_lock = threading.Lock()
 
 
 def _session_start_file(vehicle_id):
