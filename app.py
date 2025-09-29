@@ -165,9 +165,24 @@ ptt_timer = None
 audio_buffer = bytearray()
 
 
+def _client_ip():
+    """Return the originating client IP taking proxy headers into account."""
+
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        for part in forwarded.split(","):
+            candidate = part.strip()
+            if candidate:
+                return candidate
+    return request.remote_addr or ""
+
+
 @lru_cache(maxsize=256)
 def _ipinfo_data(ip):
     """Return cached JSON data from ipinfo.io for ``ip``."""
+
+    if not ip:
+        return {}
     try:
         resp = requests.get(f"https://ipinfo.io/{ip}/json", timeout=1)
         if resp.ok:
@@ -225,13 +240,14 @@ def parse_user_agent(ua):
 @app.before_request
 def _track_client():
     """Collect information about the connecting client."""
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    ip = _client_ip()
     ua = request.headers.get("User-Agent", "")
     hostname = ""
-    try:
-        hostname = socket.gethostbyaddr(ip)[0]
-    except Exception:
-        pass
+    if ip:
+        try:
+            hostname = socket.gethostbyaddr(ip)[0]
+        except Exception:
+            pass
     now = time.time()
     info = active_clients.get(ip)
     if info is None:
@@ -239,8 +255,8 @@ def _track_client():
         info = {
             "ip": ip,
             "hostname": hostname,
-            "location": lookup_location(ip),
-            "provider": lookup_provider(ip),
+            "location": lookup_location(ip) if ip else "",
+            "provider": lookup_provider(ip) if ip else "",
             "user_agent": ua,
             "browser": browser,
             "os": os_name,
@@ -254,9 +270,9 @@ def _track_client():
         info["user_agent"] = ua
         info["hostname"] = hostname
         info["browser"], info["os"] = parse_user_agent(ua)
-        if not info.get("location"):
+        if ip and not info.get("location"):
             info["location"] = lookup_location(ip)
-        if not info.get("provider"):
+        if ip and not info.get("provider"):
             info["provider"] = lookup_provider(ip)
     if not request.path.startswith("/static/") and not request.path.startswith("/images/"):
         page_path = request.path
@@ -298,7 +314,7 @@ def block_ip_clients():
         blocked = [ip.strip() for ip in raw if isinstance(ip, str) and ip.strip()]
     else:
         blocked = []
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    ip = _client_ip()
     if (
         blocked
         and ip in blocked
@@ -2414,7 +2430,7 @@ def api_data_vehicle(vehicle_id):
 def stream_vehicle(vehicle_id="default"):
     """Stream vehicle data to the client using Server-Sent Events."""
     _start_thread(vehicle_id)
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    ip = _client_ip()
 
     def gen():
         q = queue.Queue()
