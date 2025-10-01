@@ -132,3 +132,22 @@ def test_compute_energy_stats_respects_data_dir(tmp_path, monkeypatch):
 
     stats = app._compute_energy_stats()
     assert stats == {"2024-02-25": 12.3}
+
+
+def test_compute_energy_stats_resets_on_new_day(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    energy_file = tmp_path / "energy.log"
+    energy_file.write_text(
+        "\n".join(
+            [
+                '2024-03-01 23:45:00 {"vehicle_id": "veh", "added_energy": 4.0}',
+                '2024-03-02 00:15:00 {"vehicle_id": "veh", "added_energy": 6.5}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    stats = app._compute_energy_stats()
+    assert stats == {"2024-03-01": 4.0, "2024-03-02": 2.5}

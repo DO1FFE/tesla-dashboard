@@ -1693,9 +1693,11 @@ def _compute_energy_stats(filename=None):
                     prev_ts = None
                     session_day = None
 
+                current_day = ts_dt.date()
+
                 if prev_val is None or prev_ts is None:
                     if val > eps:
-                        session_day = ts_dt.date()
+                        session_day = current_day
                         day = session_day.isoformat()
                         energy[day] = energy.get(day, 0.0) + val
                 else:
@@ -1703,6 +1705,10 @@ def _compute_energy_stats(filename=None):
                     if delta > eps:
                         if session_day is None:
                             session_day = prev_ts.date()
+
+                        if session_day != current_day:
+                            session_day = current_day
+
                         day = session_day.isoformat()
                         energy[day] = energy.get(day, 0.0) + delta
 
