@@ -1659,13 +1659,19 @@ def _compute_energy_stats(filename=None):
     """Return per-day added energy in kWh based on ``energy.log``."""
     if filename is None:
         filename = os.path.join(DATA_DIR, "energy.log")
+
+    def _finalize_session(state):
+        total = state.get("total", 0.0)
+        day = state.get("day")
+        if total > eps and day is not None:
+            iso = day.isoformat()
+            energy[iso] = energy.get(iso, 0.0) + total
+
     energy = {}
-    last_vals = {}
-    last_times = {}
+    sessions = {}
     eps = 0.001
     try:
         with open(filename, "r", encoding="utf-8") as f:
-            session_days = {}
             for line in f:
                 idx = line.find("{")
                 if idx == -1:
@@ -1681,42 +1687,26 @@ def _compute_energy_stats(filename=None):
                 except Exception:
                     continue
 
-                # Use vehicle specific keys to track cumulative values.
                 key = vid if vid is not None else "__default__"
-                prev_val = last_vals.get(key)
-                prev_ts = last_times.get(key)
-                session_day = session_days.get(key)
+                state = sessions.get(key, {"last_val": None, "total": 0.0, "day": None})
+                prev_val = state.get("last_val")
 
                 if prev_val is not None and val + eps < prev_val:
-                    # added_energy has reset for this vehicle (new charging session)
-                    prev_val = None
-                    prev_ts = None
-                    session_day = None
+                    _finalize_session(state)
+                    state = {"last_val": None, "total": 0.0, "day": None}
 
-                current_day = ts_dt.date()
+                if val > eps:
+                    state["total"] = val
+                    state["day"] = ts_dt.date()
 
-                if prev_val is None or prev_ts is None:
-                    if val > eps:
-                        session_day = current_day
-                        day = session_day.isoformat()
-                        energy[day] = energy.get(day, 0.0) + val
-                else:
-                    delta = val - prev_val
-                    if delta > eps:
-                        if session_day is None:
-                            session_day = prev_ts.date()
-
-                        if session_day != current_day:
-                            session_day = current_day
-
-                        day = session_day.isoformat()
-                        energy[day] = energy.get(day, 0.0) + delta
-
-                last_vals[key] = val
-                last_times[key] = ts_dt
-                session_days[key] = session_day
+                state["last_val"] = val
+                sessions[key] = state
     except Exception:
         pass
+
+    for state in sessions.values():
+        _finalize_session(state)
+
     return energy
 
 
