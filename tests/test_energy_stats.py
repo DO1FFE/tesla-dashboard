@@ -119,3 +119,16 @@ def test_clear_session_allows_follow_up_logging(tmp_path, monkeypatch):
     assert len(lines) == 2
     assert '"added_energy": 8.5' in lines[0]
     assert '"added_energy": 12.0' in lines[1]
+
+
+def test_compute_energy_stats_respects_data_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    energy_file = tmp_path / "energy.log"
+    energy_file.write_text(
+        '2024-02-25 08:00:00 {"vehicle_id": "veh", "added_energy": 12.3}\n',
+        encoding="utf-8",
+    )
+
+    stats = app._compute_energy_stats()
+    assert stats == {"2024-02-25": 12.3}
