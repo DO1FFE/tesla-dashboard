@@ -1655,8 +1655,10 @@ def _compute_state_stats(entries):
     return stats
 
 
-def _compute_energy_stats(filename=os.path.join(DATA_DIR, "energy.log")):
+def _compute_energy_stats(filename=None):
     """Return per-day added energy in kWh based on ``energy.log``."""
+    if filename is None:
+        filename = os.path.join(DATA_DIR, "energy.log")
     energy = {}
     last_vals = {}
     last_times = {}
