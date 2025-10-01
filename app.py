@@ -1254,6 +1254,7 @@ def _save_session_start(vehicle_id, start_dt):
 def _clear_session_start(vehicle_id):
     """Remove persisted start timestamp for ``vehicle_id`` if present."""
     _charging_session_start.pop(vehicle_id, None)
+    _recently_logged_sessions.discard(vehicle_id)
     try:
         os.remove(_session_start_file(vehicle_id))
     except FileNotFoundError:
