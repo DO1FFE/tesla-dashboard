@@ -65,6 +65,7 @@ RECEIPT_TIME_FORMAT = "%d.%m.%Y %H:%M"
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
 TESLA_REQUEST_TIMEOUT = float(os.getenv("TESLA_REQUEST_TIMEOUT", "5"))
 CLIENT_TIMEOUT = int(os.getenv("CLIENT_TIMEOUT", "60"))
+SECRET_PLACEHOLDER = "********"
 
 """Utilities for serving a compatible Socket.IO client script.
 
@@ -2688,6 +2689,9 @@ def config_page():
             cfg[item["id"]] = item["id"] in request.form
         callsign = request.form.get("aprs_callsign", "").strip()
         passcode = request.form.get("aprs_passcode", "").strip()
+        keep_passcode = passcode == SECRET_PLACEHOLDER
+        if keep_passcode:
+            passcode = ""
         wx_callsign = request.form.get("aprs_wx_callsign", "").strip()
         wx_enabled = "aprs_wx_enabled" in request.form
         aprs_comment = request.form.get("aprs_comment", "").strip()
@@ -2699,6 +2703,9 @@ def config_page():
         if phone_number:
             phone_number = _format_phone(phone_number) or phone_number
         infobip_api_key = request.form.get("infobip_api_key", "").strip()
+        keep_infobip_api_key = infobip_api_key == SECRET_PLACEHOLDER
+        if keep_infobip_api_key:
+            infobip_api_key = ""
         infobip_base_url = request.form.get("infobip_base_url", "").strip()
         sms_sender_id = request.form.get("sms_sender_id", "").strip()
         sms_enabled = "sms_enabled" in request.form
@@ -2722,7 +2729,7 @@ def config_page():
             cfg.pop("aprs_callsign")
         if passcode:
             cfg["aprs_passcode"] = passcode
-        elif "aprs_passcode" in cfg:
+        elif not keep_passcode and "aprs_passcode" in cfg:
             cfg.pop("aprs_passcode")
         if wx_callsign:
             cfg["aprs_wx_callsign"] = wx_callsign
@@ -2757,7 +2764,7 @@ def config_page():
             cfg.pop("phone_number")
         if infobip_api_key:
             cfg["infobip_api_key"] = infobip_api_key
-        elif "infobip_api_key" in cfg:
+        elif not keep_infobip_api_key and "infobip_api_key" in cfg:
             cfg.pop("infobip_api_key")
         if infobip_base_url:
             cfg["infobip_base_url"] = infobip_base_url
@@ -2817,10 +2824,15 @@ def config_page():
     selected_vehicle_id = cfg.get("vehicle_id") or (
         vehicles[0]["id"] if vehicles else None
     )
+    display_cfg = dict(cfg)
+    if display_cfg.get("aprs_passcode"):
+        display_cfg["aprs_passcode"] = SECRET_PLACEHOLDER
+    if display_cfg.get("infobip_api_key"):
+        display_cfg["infobip_api_key"] = SECRET_PLACEHOLDER
     return render_template(
         "config.html",
         items=CONFIG_ITEMS,
-        config=cfg,
+        config=display_cfg,
         vehicles=vehicles,
         selected_vehicle_id=selected_vehicle_id,
     )

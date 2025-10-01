@@ -45,7 +45,7 @@
             </label>
             <label>
                 APRS Passcode
-                <input type="text" name="aprs_passcode" value="{{ config.get('aprs_passcode','') }}">
+                <input type="password" name="aprs_passcode" value="{{ config.get('aprs_passcode','') }}" autocomplete="new-password" placeholder="Neuen Passcode eingeben">
             </label>
             <label class="checkbox">
                 <input type="checkbox" name="aprs_wx_enabled" value="1" {% if config.get('aprs_wx_enabled', True) %}checked{% endif %}>
@@ -97,7 +97,7 @@
             </label>
             <label>
                 Infobip API Key
-                <input type="text" name="infobip_api_key" value="{{ config.get('infobip_api_key','') }}">
+                <input type="password" name="infobip_api_key" value="{{ config.get('infobip_api_key','') }}" autocomplete="new-password" placeholder="Neuen API Key eingeben">
             </label>
             <label>
                 Infobip Basis-URL
