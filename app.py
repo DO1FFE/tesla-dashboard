@@ -1000,6 +1000,12 @@ def log_vehicle_state(vehicle_id, state):
 
 def _last_logged_energy(vehicle_id):
     """Return the last logged energy value for ``vehicle_id`` or ``None``."""
+    _ts, value = _last_logged_energy_entry(vehicle_id)
+    return value
+
+
+def _last_logged_energy_entry(vehicle_id):
+    """Return the timestamp and value of the last energy entry for a vehicle."""
     try:
         with open(os.path.join(DATA_DIR, "energy.log"), "r", encoding="utf-8") as f:
             lines = f.readlines()
@@ -1009,12 +1015,15 @@ def _last_logged_energy(vehicle_id):
                 try:
                     entry = json.loads(line[idx:])
                     if entry.get("vehicle_id") == vehicle_id:
-                        return float(entry.get("added_energy", 0.0))
+                        ts_str = line[:idx].strip()
+                        ts_dt = _parse_log_time(ts_str)
+                        val = float(entry.get("added_energy", 0.0))
+                        return ts_dt, val
                 except Exception:
                     continue
     except Exception:
         pass
-    return None
+    return None, None
 
 
 def _log_energy(vehicle_id, amount, timestamp=None):
@@ -1032,7 +1041,7 @@ def _log_energy(vehicle_id, amount, timestamp=None):
     completion time.
     """
 
-    def _has_recent_entry(lines, reference_dt):
+    def _has_recent_entry(lines, reference_dt, vehicle, amount, eps):
         for line in lines:
             idx = line.find("{")
             if idx == -1:
@@ -1045,7 +1054,20 @@ def _log_energy(vehicle_id, amount, timestamp=None):
                 data = json.loads(line[idx:])
             except Exception:
                 continue
-            if data.get("vehicle_id") != vehicle_id:
+            if data.get("vehicle_id") != vehicle:
+                continue
+            logged_amount = None
+            try:
+                logged_amount = float(data.get("added_energy", 0.0))
+            except Exception:
+                logged_amount = None
+            if (
+                logged_amount is not None
+                and amount is not None
+                and logged_amount + eps < amount
+            ):
+                # Allow session updates with higher energy values to be
+                # recorded immediately.
                 continue
             if reference_dt is None:
                 return True
@@ -1061,11 +1083,15 @@ def _log_energy(vehicle_id, amount, timestamp=None):
 
     try:
         with _energy_log_lock:
-            if vehicle_id in _recently_logged_sessions:
-                return
-
-            last = _last_logged_energy(vehicle_id)
-            if last is not None and abs(last - amount) <= 0.001:
+            eps = 0.001
+            last_ts, last = _last_logged_energy_entry(vehicle_id)
+            try:
+                amount_val = float(amount)
+            except (TypeError, ValueError):
+                amount_val = None
+            except Exception:
+                amount_val = None
+            if amount_val is None:
                 return
 
             now = datetime.now(LOCAL_TZ)
@@ -1078,6 +1104,20 @@ def _log_energy(vehicle_id, amount, timestamp=None):
                 ts_dt = now
             else:
                 ts_dt = ts_dt.astimezone(LOCAL_TZ)
+
+            allow_update = (
+                last is not None
+                and last_ts is not None
+                and amount_val > last + eps
+                and ts_dt >= last_ts
+            )
+            if vehicle_id in _recently_logged_sessions and not (
+                allow_update
+            ):
+                return
+
+            if last is not None and amount_val is not None and amount_val <= last + eps:
+                return
             filename = os.path.join(DATA_DIR, "energy.log")
             line_tpl = "{ts} {msg}\n"
             ts_str = ts_dt.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
@@ -1095,7 +1135,9 @@ def _log_energy(vehicle_id, amount, timestamp=None):
                     if readable and seekable:
                         stream.seek(0)
                         lines = stream.readlines()
-                        has_recent_entry = _has_recent_entry(lines, ts_dt)
+                        has_recent_entry = _has_recent_entry(
+                            lines, ts_dt, vehicle_id, amount_val, eps
+                        )
                 except UnsupportedOperation:
                     pass
                 except Exception:
@@ -1112,12 +1154,14 @@ def _log_energy(vehicle_id, amount, timestamp=None):
                 except Exception:
                     lines = []
 
-                has_recent_entry = _has_recent_entry(lines, ts_dt)
+                has_recent_entry = _has_recent_entry(
+                    lines, ts_dt, vehicle_id, amount_val, eps
+                )
 
             if has_recent_entry:
                 return
 
-            entry = json.dumps({"vehicle_id": vehicle_id, "added_energy": float(amount)})
+            entry = json.dumps({"vehicle_id": vehicle_id, "added_energy": amount_val})
             line = line_tpl.format(ts=ts_str, msg=entry)
             written = False
 

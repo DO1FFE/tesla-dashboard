@@ -121,6 +121,41 @@ def test_clear_session_allows_follow_up_logging(tmp_path, monkeypatch):
     assert '"added_energy": 12.0' in lines[1]
 
 
+def test_log_energy_updates_running_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    old_handlers = list(app.energy_logger.handlers)
+    for handler in old_handlers:
+        app.energy_logger.removeHandler(handler)
+
+    energy_file = tmp_path / "energy.log"
+    handler = logging.FileHandler(energy_file, mode="w", encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    app.energy_logger.addHandler(handler)
+    app._recently_logged_sessions.clear()
+
+    vehicle_id = "veh"
+
+    try:
+        start_ts = datetime(2024, 2, 5, 19, 0, tzinfo=app.LOCAL_TZ)
+
+        app._log_energy(vehicle_id, 6.0, timestamp=start_ts)
+        app._log_energy(vehicle_id, 8.0, timestamp=start_ts)
+        handler.flush()
+    finally:
+        app.energy_logger.removeHandler(handler)
+        handler.close()
+        for original in old_handlers:
+            app.energy_logger.addHandler(original)
+
+    lines = [line for line in energy_file.read_text(encoding="utf-8").splitlines() if line]
+    assert len(lines) == 2
+    assert '"added_energy": 8.0' in lines[-1]
+
+    stats = app._compute_energy_stats(str(energy_file))
+    assert stats == {start_ts.date().isoformat(): 8.0}
+
+
 def test_compute_energy_stats_respects_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
 
