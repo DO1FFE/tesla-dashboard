@@ -29,6 +29,17 @@
     {% endif %}
     <table>
         <tr><th>Datum</th><th>Online %</th><th>Offline %</th><th>Asleep %</th><th>Gefahrene km</th><th>Höchste Geschwindigkeit (km/h)</th><th>Hinzugefügte Energie (kWh)</th></tr>
+        {% if summary %}
+        <tr>
+            <td><strong>{{ summary.date }} Summe</strong></td>
+            <td>{{ summary.online }}</td>
+            <td>{{ summary.offline }}</td>
+            <td>{{ summary.asleep }}</td>
+            <td>{{ summary.km }}</td>
+            <td>{{ summary.speed }}</td>
+            <td>{{ summary.energy }}</td>
+        </tr>
+        {% endif %}
         {% for row in rows|reverse %}
         {% set is_today = (row.date == today) %}
         <tr{% if is_today %} class="current-day"{% endif %}>
@@ -41,17 +52,6 @@
             <td>{{ row.energy }}</td>
         </tr>
         {% endfor %}
-        {% if summary %}
-        <tr>
-            <td><strong>{{ summary.date }} Summe</strong></td>
-            <td>{{ summary.online }}</td>
-            <td>{{ summary.offline }}</td>
-            <td>{{ summary.asleep }}</td>
-            <td>{{ summary.km }}</td>
-            <td>{{ summary.speed }}</td>
-            <td>{{ summary.energy }}</td>
-        </tr>
-        {% endif %}
     </table>
 </body>
 </html>
