@@ -29,7 +29,7 @@
     {% endif %}
     <table>
         <tr><th>Datum</th><th>Online %</th><th>Offline %</th><th>Asleep %</th><th>Gefahrene km</th><th>Höchste Geschwindigkeit (km/h)</th><th>Hinzugefügte Energie (kWh)</th></tr>
-        {% for row in rows %}
+        {% for row in rows|reverse %}
         {% set is_today = (row.date == today) %}
         <tr{% if is_today %} class="current-day"{% endif %}>
             <td>{{ row.date }}</td>
