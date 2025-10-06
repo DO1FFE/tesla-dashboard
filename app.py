@@ -1029,16 +1029,19 @@ def _last_logged_energy_entry(vehicle_id):
 def _log_energy(vehicle_id, amount, timestamp=None):
     """Store the last added energy in ``energy.log`` using local time.
 
-    Within a 30 minute window only a single entry per vehicle is kept. When
-    multiple values are recorded in that interval follow-up writes are ignored
-    so that the first persisted session value remains unchanged.
+    Within a 30 minute window duplicate entries for the same vehicle are
+    suppressed. When multiple distinct values are recorded in that interval the
+    new amount is logged so every reported session value is preserved.
 
-    Additional writes are blocked until a new charging session starts to avoid
-    moving logged energy to a different day.
+    Additional writes are blocked until a new charging session starts unless
+    the new value differs from the last persisted amount. This prevents moving
+    logged energy to a different day while still keeping all reported values.
 
     When ``timestamp`` is provided it is used as the log timestamp so that
     energy is associated with the start of the charging session rather than the
     completion time.
+
+    Returns ``True`` when a new entry was written and ``False`` otherwise.
     """
 
     def _has_recent_entry(lines, reference_dt, vehicle, amount, eps):
@@ -1064,9 +1067,9 @@ def _log_energy(vehicle_id, amount, timestamp=None):
             if (
                 logged_amount is not None
                 and amount is not None
-                and logged_amount + eps < amount
+                and abs(logged_amount - amount) > eps
             ):
-                # Allow session updates with higher energy values to be
+                # Allow session updates with different energy values to be
                 # recorded immediately.
                 continue
             if reference_dt is None:
@@ -1081,6 +1084,7 @@ def _log_energy(vehicle_id, amount, timestamp=None):
                 return True
         return False
 
+    written = False
     try:
         with _energy_log_lock:
             eps = 0.001
@@ -1092,7 +1096,7 @@ def _log_energy(vehicle_id, amount, timestamp=None):
             except Exception:
                 amount_val = None
             if amount_val is None:
-                return
+                return False
 
             now = datetime.now(LOCAL_TZ)
             ts_dt = timestamp
@@ -1108,16 +1112,22 @@ def _log_energy(vehicle_id, amount, timestamp=None):
             allow_update = (
                 last is not None
                 and last_ts is not None
-                and amount_val > last + eps
+                and amount_val is not None
+                and ts_dt is not None
                 and ts_dt >= last_ts
+                and abs(amount_val - last) > eps
             )
             if vehicle_id in _recently_logged_sessions and not (
                 allow_update
             ):
-                return
+                return False
 
-            if last is not None and amount_val is not None and amount_val <= last + eps:
-                return
+            if (
+                last is not None
+                and amount_val is not None
+                and abs(amount_val - last) <= eps
+            ):
+                return False
             filename = os.path.join(DATA_DIR, "energy.log")
             line_tpl = "{ts} {msg}\n"
             ts_str = ts_dt.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
@@ -1159,11 +1169,10 @@ def _log_energy(vehicle_id, amount, timestamp=None):
                 )
 
             if has_recent_entry:
-                return
+                return False
 
             entry = json.dumps({"vehicle_id": vehicle_id, "added_energy": amount_val})
             line = line_tpl.format(ts=ts_str, msg=entry)
-            written = False
 
             if handler is not None and stream is not None:
                 handler.acquire()
@@ -1193,7 +1202,8 @@ def _log_energy(vehicle_id, amount, timestamp=None):
             if written:
                 _recently_logged_sessions.add(vehicle_id)
     except Exception:
-        pass
+        return False
+    return written
 
 
 def _log_sms(message, success):
@@ -2206,10 +2216,11 @@ def _fetch_data_once(vehicle_id="default"):
                 # Finish previous session before counter resets
                 prev_start = session_start or _load_session_start(cache_id)
                 if last_val > 0:
-                    _log_energy(cache_id, last_val, timestamp=prev_start)
+                    logged = _log_energy(cache_id, last_val, timestamp=prev_start)
+                    if logged:
+                        _save_last_energy(cache_id, last_val)
+                        saved_val = last_val
                 _clear_session_start(cache_id)
-                _save_last_energy(cache_id, last_val)
-                saved_val = last_val
                 session_start = None
                 if charging_state == "Charging":
                     session_start = now
@@ -2224,10 +2235,11 @@ def _fetch_data_once(vehicle_id="default"):
                 value_to_log = last_val
             if value_to_log is not None:
                 start_time = session_start or _load_session_start(cache_id)
-                _log_energy(cache_id, value_to_log, timestamp=start_time)
+                logged = _log_energy(cache_id, value_to_log, timestamp=start_time)
                 _clear_session_start(cache_id)
-                _save_last_energy(cache_id, value_to_log)
-                saved_val = value_to_log
+                if logged:
+                    _save_last_energy(cache_id, value_to_log)
+                    saved_val = value_to_log
                 session_start = None
 
         if (
