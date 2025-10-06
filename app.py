@@ -1714,16 +1714,9 @@ def _compute_energy_stats(filename=None):
     if filename is None:
         filename = os.path.join(DATA_DIR, "energy.log")
 
-    def _finalize_session(state):
-        total = state.get("total", 0.0)
-        day = state.get("day")
-        if total > eps and day is not None:
-            iso = day.isoformat()
-            energy[iso] = energy.get(iso, 0.0) + total
-
-    energy = {}
-    sessions = {}
     eps = 0.001
+    daily_sessions = {}
+
     try:
         with open(filename, "r", encoding="utf-8") as f:
             for line in f:
@@ -1741,25 +1734,27 @@ def _compute_energy_stats(filename=None):
                 except Exception:
                     continue
 
-                key = vid if vid is not None else "__default__"
-                state = sessions.get(key, {"last_val": None, "total": 0.0, "day": None})
-                prev_val = state.get("last_val")
+                if val <= eps:
+                    continue
 
-                if prev_val is not None and val + eps < prev_val:
-                    _finalize_session(state)
-                    state = {"last_val": None, "total": 0.0, "day": None}
+                day = ts_dt.date().isoformat()
+                session_key = (
+                    vid if vid is not None else "__default__",
+                    ts_dt.isoformat(),
+                )
 
-                if val > eps:
-                    state["total"] = val
-                    state["day"] = ts_dt.date()
-
-                state["last_val"] = val
-                sessions[key] = state
+                sessions = daily_sessions.setdefault(day, {})
+                previous = sessions.get(session_key)
+                if previous is None or val > previous:
+                    sessions[session_key] = val
     except Exception:
         pass
 
-    for state in sessions.values():
-        _finalize_session(state)
+    energy = {}
+    for day, sessions in daily_sessions.items():
+        total = sum(sessions.values())
+        if total > eps:
+            energy[day] = round(total, 6)
 
     return energy
 

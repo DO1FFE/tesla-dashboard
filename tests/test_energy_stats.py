@@ -185,4 +185,44 @@ def test_compute_energy_stats_assigns_session_to_last_day(tmp_path, monkeypatch)
     )
 
     stats = app._compute_energy_stats()
-    assert stats == {"2024-03-02": 6.5}
+    assert stats == {"2024-03-01": 4.0, "2024-03-02": 6.5}
+
+
+def test_compute_energy_stats_sums_same_day_entries(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    energy_file = tmp_path / "energy.log"
+    energy_file.write_text(
+        "\n".join(
+            [
+                '2024-04-01 08:00:00 {"vehicle_id": "veh", "added_energy": 4.0}',
+                '2024-04-01 12:30:00 {"vehicle_id": "veh", "added_energy": 6.5}',
+                '2024-04-01 18:00:00 {"vehicle_id": "veh2", "added_energy": 3.5}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    stats = app._compute_energy_stats()
+    assert stats == {"2024-04-01": 14.0}
+
+
+def test_compute_energy_stats_uses_latest_value_per_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    energy_file = tmp_path / "energy.log"
+    energy_file.write_text(
+        "\n".join(
+            [
+                '2024-05-01 10:00:00 {"vehicle_id": "veh", "added_energy": 5.0}',
+                '2024-05-01 10:00:00 {"vehicle_id": "veh", "added_energy": 6.5}',
+                '2024-05-01 21:15:00 {"vehicle_id": "veh", "added_energy": 4.0}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    stats = app._compute_energy_stats()
+    assert stats == {"2024-05-01": 10.5}
