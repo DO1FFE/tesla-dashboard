@@ -1089,6 +1089,8 @@ def _log_energy(vehicle_id, amount, timestamp=None):
         with _energy_log_lock:
             eps = 0.001
             last_ts, last = _last_logged_energy_entry(vehicle_id)
+            marker_before = _current_last_energy_marker(vehicle_id)
+            stored_marker = _last_energy_markers.get(vehicle_id)
             try:
                 amount_val = float(amount)
             except (TypeError, ValueError):
@@ -1127,6 +1129,12 @@ def _log_energy(vehicle_id, amount, timestamp=None):
                 and amount_val is not None
                 and abs(amount_val - last) <= eps
             ):
+                if (
+                    marker_before is not None
+                    and stored_marker is not None
+                    and marker_before == stored_marker
+                ):
+                    return False
                 if not (
                     last_ts is not None
                     and ts_dt is not None
@@ -1214,6 +1222,8 @@ def _log_energy(vehicle_id, amount, timestamp=None):
 
             if written:
                 _recently_logged_sessions.add(vehicle_id)
+                if marker_before is not None:
+                    _last_energy_markers[vehicle_id] = marker_before
     except Exception:
         return False
     return written
@@ -1269,6 +1279,9 @@ def _save_last_energy(vehicle_id, value):
     try:
         with open(_last_energy_file(vehicle_id), "w", encoding="utf-8") as f:
             f.write(str(value))
+        marker = _current_last_energy_marker(vehicle_id)
+        if marker is not None:
+            _last_energy_markers[vehicle_id] = marker
     except Exception:
         pass
 
@@ -1276,6 +1289,20 @@ def _save_last_energy(vehicle_id, value):
 _charging_session_start = {}
 _recently_logged_sessions = set()
 _energy_log_lock = threading.Lock()
+_last_energy_markers = {}
+
+
+def _current_last_energy_marker(vehicle_id):
+    """Return a marker tuple for ``last_energy.txt`` of ``vehicle_id``."""
+
+    try:
+        path = _last_energy_file(vehicle_id)
+        stat = os.stat(path)
+        return (stat.st_mtime_ns, stat.st_size)
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
 
 
 def _session_start_file(vehicle_id):
