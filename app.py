@@ -1127,7 +1127,12 @@ def _log_energy(vehicle_id, amount, timestamp=None):
                 and amount_val is not None
                 and abs(amount_val - last) <= eps
             ):
-                return False
+                if not (
+                    last_ts is not None
+                    and ts_dt is not None
+                    and ts_dt > last_ts
+                ):
+                    return False
             filename = os.path.join(DATA_DIR, "energy.log")
             line_tpl = "{ts} {msg}\n"
             ts_str = ts_dt.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
@@ -1167,6 +1172,14 @@ def _log_energy(vehicle_id, amount, timestamp=None):
                 has_recent_entry = _has_recent_entry(
                     lines, ts_dt, vehicle_id, amount_val, eps
                 )
+
+            if (
+                has_recent_entry
+                and last_ts is not None
+                and ts_dt is not None
+                and ts_dt > last_ts
+            ):
+                has_recent_entry = False
 
             if has_recent_entry:
                 return False
