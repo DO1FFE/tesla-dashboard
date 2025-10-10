@@ -1,4 +1,5 @@
 import logging
+import os
 import pathlib
 import sys
 from datetime import datetime, timedelta
@@ -192,6 +193,77 @@ def test_log_energy_allows_new_session_with_same_amount(tmp_path, monkeypatch):
     assert len(lines) == 2
     assert '"added_energy": 5.0' in lines[0]
     assert '"added_energy": 5.0' in lines[1]
+
+
+def test_fetch_data_logs_session_and_updates_last_energy(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    os.makedirs(app.DATA_DIR, exist_ok=True)
+
+    old_handlers = list(app.energy_logger.handlers)
+    for handler in old_handlers:
+        app.energy_logger.removeHandler(handler)
+
+    energy_file = tmp_path / "energy.log"
+    handler = logging.FileHandler(energy_file, mode="w", encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    app.energy_logger.addHandler(handler)
+
+    app._charging_session_start.clear()
+    app._recently_logged_sessions.clear()
+
+    vehicle_id = "veh"
+
+    state_responses = iter([
+        {"state": "online"},
+        {"state": "online"},
+    ])
+    data_responses = iter(
+        [
+            {
+                "state": "online",
+                "charge_state": {
+                    "charging_state": "Charging",
+                    "charge_energy_added": 7.25,
+                },
+                "drive_state": {},
+            },
+            {
+                "state": "online",
+                "charge_state": {
+                    "charging_state": "Complete",
+                    "charge_energy_added": 7.25,
+                },
+                "drive_state": {},
+            },
+        ]
+    )
+
+    monkeypatch.setattr(app, "get_vehicle_state", lambda vid: next(state_responses))
+    monkeypatch.setattr(
+        app, "get_vehicle_data", lambda vid, state=None: next(data_responses)
+    )
+    monkeypatch.setattr(app, "_load_cached", lambda vehicle_id: None)
+    monkeypatch.setattr(app, "_save_cached", lambda vehicle_id, data: None)
+
+    try:
+        app._fetch_data_once(vehicle_id)
+        app._fetch_data_once(vehicle_id)
+        handler.flush()
+    finally:
+        app.energy_logger.removeHandler(handler)
+        handler.close()
+        for original in old_handlers:
+            app.energy_logger.addHandler(original)
+
+    energy_lines = [
+        line for line in energy_file.read_text(encoding="utf-8").splitlines() if line
+    ]
+    assert len(energy_lines) == 1
+    assert '"added_energy": 7.25' in energy_lines[0]
+
+    last_energy_file = pathlib.Path(app.vehicle_dir(vehicle_id)) / "last_energy.txt"
+    assert last_energy_file.exists()
+    assert last_energy_file.read_text(encoding="utf-8").strip() == "7.25"
 
 
 def test_compute_energy_stats_respects_data_dir(tmp_path, monkeypatch):
