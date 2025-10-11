@@ -1337,10 +1337,19 @@ def _save_session_start(vehicle_id, start_dt):
         return
     _recently_logged_sessions.discard(vehicle_id)
     try:
+        if isinstance(start_dt, (int, float)):
+            start_dt = datetime.fromtimestamp(start_dt, LOCAL_TZ)
+        elif isinstance(start_dt, datetime):
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=LOCAL_TZ)
+            else:
+                start_dt = start_dt.astimezone(LOCAL_TZ)
+        else:
+            return
         os.makedirs(vehicle_dir(vehicle_id), exist_ok=True)
         with open(_session_start_file(vehicle_id), "w", encoding="utf-8") as f:
-            f.write(start_dt.astimezone(LOCAL_TZ).isoformat())
-        _charging_session_start[vehicle_id] = start_dt.astimezone(LOCAL_TZ)
+            f.write(start_dt.isoformat())
+        _charging_session_start[vehicle_id] = start_dt
     except Exception:
         pass
 

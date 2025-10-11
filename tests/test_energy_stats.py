@@ -122,6 +122,22 @@ def test_clear_session_allows_follow_up_logging(tmp_path, monkeypatch):
     assert '"added_energy": 12.0' in lines[1]
 
 
+def test_save_session_start_handles_naive_datetime(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    app._charging_session_start.clear()
+    app._recently_logged_sessions.clear()
+
+    vehicle_id = "veh"
+    naive_start = datetime(2024, 1, 5, 8, 30)
+
+    app._save_session_start(vehicle_id, naive_start)
+
+    loaded = app._load_session_start(vehicle_id)
+    assert loaded is not None
+    assert loaded.tzinfo == app.LOCAL_TZ
+    assert loaded.replace(tzinfo=None) == naive_start
+
+
 def test_log_energy_updates_running_session(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
 
