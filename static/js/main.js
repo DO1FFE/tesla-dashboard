@@ -287,9 +287,9 @@ function handleData(data) {
     updateGearShift(drive.shift_state);
     updateParkTime(data.park_start);
     updateNavBar(drive);
-    updateSpeedometer(drive.speed, drive.power);
-    updateOdometer(vehicle.odometer);
     var charge = data.charge_state || {};
+    updateSpeedometer(drive.speed, drive.power, charge.charging_state);
+    updateOdometer(vehicle.odometer);
     var rangeMiles = charge.ideal_battery_range;
     if (rangeMiles == null) {
         rangeMiles = charge.est_battery_range;
@@ -729,7 +729,7 @@ function computeZoomForSpeed(speedKmh) {
     return zoom;
 }
 
-function updateSpeedometer(speed, power) {
+function updateSpeedometer(speed, power, chargingState) {
     if (speed == null) speed = 0;
     if (power == null) power = 0;
     var kmh = Math.round(speed * MILES_TO_KM);
@@ -737,7 +737,9 @@ function updateSpeedometer(speed, power) {
     $('#speedometer-needle').attr('transform', 'rotate(' + angle + ' 60 50)');
     $('#speed-value').text(kmh + ' km/h');
     var text = Math.round(power) + ' kW';
-    if (power < 0) {
+    if (chargingState === 'Charging') {
+        text += ' (Ladeleistung)';
+    } else if (power < 0) {
         text += ' (Rekuperation)';
     }
     $('#power-value').text(text);
