@@ -1808,10 +1808,155 @@ def _compute_energy_stats(filename=None):
     return energy
 
 
+def _compute_parking_losses(filename=None):
+    """Return per-day energy percentage and range losses while parked."""
+
+    if filename is None:
+        filename = os.path.join(DATA_DIR, "api.log")
+
+    totals = {}
+    sessions = {}
+
+    def _add_loss(day, pct_loss, km_loss):
+        if pct_loss <= 0 and km_loss <= 0:
+            return
+        entry = totals.setdefault(day, {"energy_pct": 0.0, "km": 0.0})
+        if pct_loss > 0:
+            entry["energy_pct"] += pct_loss
+        if km_loss > 0:
+            entry["km"] += km_loss
+
+    def _as_float(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _range_to_km(value):
+        rng = _as_float(value)
+        if rng is None:
+            return None
+        return rng * MILES_TO_KM
+
+    files = []
+
+    # Include rotated API logs when using the default filename.
+    if filename == os.path.join(DATA_DIR, "api.log"):
+        rotated = []
+        for path in glob.glob(f"{filename}.*"):
+            suffix = path.rsplit(".", 1)[-1]
+            if suffix.isdigit():
+                rotated.append((int(suffix), path))
+        files.extend(path for _idx, path in sorted(rotated))
+
+    if filename and os.path.exists(filename):
+        files.append(filename)
+
+    for path in files:
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    idx = line.find("{")
+                    if idx == -1:
+                        continue
+                    ts_str = line[:idx].strip()
+                    ts_dt = _parse_log_time(ts_str)
+                    if ts_dt is None:
+                        continue
+                    try:
+                        payload = json.loads(line[idx:])
+                    except Exception:
+                        continue
+                    if not isinstance(payload, dict):
+                        continue
+                    if payload.get("endpoint") != "get_vehicle_data":
+                        continue
+                    data = payload.get("data")
+                    if not isinstance(data, dict):
+                        continue
+
+                    vid = data.get("id_s") or data.get("vehicle_id") or "default"
+                    vid = str(vid)
+
+                    charge_state = data.get("charge_state") or {}
+                    drive_state = data.get("drive_state") or {}
+                    shift = drive_state.get("shift_state")
+                    charging_state = str(charge_state.get("charging_state") or "")
+
+                    pct = charge_state.get("usable_battery_level")
+                    if pct is None:
+                        pct = charge_state.get("battery_level")
+                    pct = _as_float(pct)
+
+                    rng = charge_state.get("ideal_battery_range")
+                    if rng is None:
+                        rng = charge_state.get("battery_range")
+                    rng_km = _range_to_km(rng)
+
+                    parked = shift in (None, "P", "Park")
+                    charging = charging_state in {"Charging", "Starting"}
+
+                    session = sessions.get(vid)
+
+                    if parked and not charging:
+                        if session is None:
+                            sessions[vid] = {
+                                "pct": pct,
+                                "range": rng_km,
+                            }
+                            continue
+
+                        last_pct = session.get("pct")
+                        last_range = session.get("range")
+                        pct_loss = 0.0
+                        range_loss = 0.0
+                        if pct is not None and last_pct is not None:
+                            pct_loss = last_pct - pct
+                            if pct_loss < 0:
+                                pct_loss = 0.0
+                        if rng_km is not None and last_range is not None:
+                            range_loss = last_range - rng_km
+                            if range_loss < 0:
+                                range_loss = 0.0
+                        if pct_loss > 0 or range_loss > 0:
+                            _add_loss(ts_dt.date().isoformat(), pct_loss, range_loss)
+                        if pct is not None:
+                            session["pct"] = pct
+                        if rng_km is not None:
+                            session["range"] = rng_km
+                        continue
+
+                    if session is None:
+                        continue
+
+                    pct_loss = 0.0
+                    range_loss = 0.0
+                    last_pct = session.get("pct")
+                    last_range = session.get("range")
+                    if pct is not None and last_pct is not None:
+                        pct_loss = last_pct - pct
+                        if pct_loss < 0:
+                            pct_loss = 0.0
+                    if rng_km is not None and last_range is not None:
+                        range_loss = last_range - rng_km
+                        if range_loss < 0:
+                            range_loss = 0.0
+                    if pct_loss > 0 or range_loss > 0:
+                        _add_loss(ts_dt.date().isoformat(), pct_loss, range_loss)
+                    sessions.pop(vid, None)
+        except FileNotFoundError:
+            continue
+        except Exception:
+            continue
+
+    return totals
+
+
 def compute_statistics():
     """Compute daily statistics and save them to ``STAT_FILE``."""
     stats = _compute_state_stats(_load_state_entries())
     energy = _compute_energy_stats()
+    parking = _compute_parking_losses()
     for path in _get_trip_files():
         fname = os.path.basename(path)
         date_str = fname.split("_")[-1].split(".")[0]
@@ -1829,6 +1974,10 @@ def compute_statistics():
     for day, val in energy.items():
         stats.setdefault(day, {"online": 0.0, "offline": 0.0, "asleep": 0.0})
         stats[day]["energy"] = round(val, 2)
+    for day, loss in parking.items():
+        stats.setdefault(day, {"online": 0.0, "offline": 0.0, "asleep": 0.0})
+        stats[day]["park_energy_pct"] = round(loss.get("energy_pct", 0.0), 2)
+        stats[day]["park_km"] = round(loss.get("km", 0.0), 2)
     for day, val in stats.items():
         total = 24 * 3600
         online = round(val.get("online", 0.0) / total * 100, 2)
@@ -1842,6 +1991,8 @@ def compute_statistics():
         val.setdefault("km", 0.0)
         val.setdefault("speed", 0.0)
         val.setdefault("energy", 0.0)
+        val.setdefault("park_energy_pct", 0.0)
+        val.setdefault("park_km", 0.0)
     try:
         os.makedirs(os.path.dirname(STAT_FILE), exist_ok=True)
         with open(STAT_FILE, "w", encoding="utf-8") as f:
@@ -2984,6 +3135,8 @@ def statistics_page():
         "km": 0.0,
         "speed": 0.0,
         "energy": 0.0,
+        "park_energy_pct": 0.0,
+        "park_km": 0.0,
         "count": 0,
     }
     for day in sorted(stats.keys()):
@@ -2997,6 +3150,8 @@ def statistics_page():
                 "km": round(entry.get("km", 0.0), 2),
                 "speed": int(round(entry.get("speed", 0.0))),
                 "energy": round(entry.get("energy", 0.0), 2),
+                "park_energy_pct": round(entry.get("park_energy_pct", 0.0), 2),
+                "park_km": round(entry.get("park_km", 0.0), 2),
             }
             total = row["online"] + row["offline"] + row["asleep"]
             diff = round(100.0 - total, 2)
@@ -3007,6 +3162,8 @@ def statistics_page():
             current["asleep_sum"] += entry.get("asleep", 0.0)
             current["km"] += entry.get("km", 0.0)
             current["energy"] += entry.get("energy", 0.0)
+            current["park_energy_pct"] += entry.get("park_energy_pct", 0.0)
+            current["park_km"] += entry.get("park_km", 0.0)
             current["speed"] = max(current["speed"], entry.get("speed", 0.0))
             current["count"] += 1
             continue
@@ -3020,6 +3177,8 @@ def statistics_page():
                 "km": 0.0,
                 "speed": 0.0,
                 "energy": 0.0,
+                "park_energy_pct": 0.0,
+                "park_km": 0.0,
                 "count": 0,
             },
         )
@@ -3028,6 +3187,8 @@ def statistics_page():
         m["asleep_sum"] += entry.get("asleep", 0.0)
         m["km"] += entry.get("km", 0.0)
         m["energy"] += entry.get("energy", 0.0)
+        m["park_energy_pct"] += entry.get("park_energy_pct", 0.0)
+        m["park_km"] += entry.get("park_km", 0.0)
         m["speed"] = max(m["speed"], entry.get("speed", 0.0))
         m["count"] += 1
 
@@ -3043,6 +3204,8 @@ def statistics_page():
             "km": round(data["km"], 2),
             "speed": int(round(data["speed"])),
             "energy": round(data["energy"], 2),
+            "park_energy_pct": round(data["park_energy_pct"], 2),
+            "park_km": round(data["park_km"], 2),
         }
         total = row["online"] + row["offline"] + row["asleep"]
         diff = round(100.0 - total, 2)
@@ -3062,6 +3225,8 @@ def statistics_page():
             "km": round(current["km"], 2),
             "speed": int(round(current["speed"])),
             "energy": round(current["energy"], 2),
+            "park_energy_pct": round(current["park_energy_pct"], 2),
+            "park_km": round(current["park_km"], 2),
         }
         total = summary["online"] + summary["offline"] + summary["asleep"]
         diff = round(100.0 - total, 2)
