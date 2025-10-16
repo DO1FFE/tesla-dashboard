@@ -161,3 +161,44 @@ def test_compute_statistics_preserves_existing_parking_data(tmp_path, monkeypatc
     second = app.compute_statistics()
     assert second[day]["park_energy_pct"] == 4.2
     assert second[day]["park_km"] == 8.4
+
+
+def test_compute_statistics_accumulates_incremental_parking_data(tmp_path, monkeypatch):
+    import app
+
+    stat_path = tmp_path / "statistics.json"
+    monkeypatch.setattr(app, "STAT_FILE", str(stat_path))
+
+    day = "2024-04-05"
+
+    def fake_state(_entries):
+        return {day: {"online": 3600.0, "offline": 0.0, "asleep": 0.0}}
+
+    monkeypatch.setattr(app, "_compute_state_stats", fake_state)
+    monkeypatch.setattr(app, "_load_state_entries", lambda: [])
+    monkeypatch.setattr(app, "_compute_energy_stats", lambda: {})
+    monkeypatch.setattr(app, "_get_trip_files", lambda: [])
+
+    monkeypatch.setattr(
+        app,
+        "_compute_parking_losses",
+        lambda filename=None: {day: {"energy_pct": 1.5, "km": 3.0}},
+    )
+
+    first = app.compute_statistics()
+    assert first[day]["park_energy_pct"] == 1.5
+    assert first[day]["park_km"] == 3.0
+
+    monkeypatch.setattr(
+        app,
+        "_compute_parking_losses",
+        lambda filename=None: {day: {"energy_pct": 0.4, "km": 1.0}},
+    )
+
+    second = app.compute_statistics()
+    assert second[day]["park_energy_pct"] == 1.9
+    assert second[day]["park_km"] == 4.0
+
+    third = app.compute_statistics()
+    assert third[day]["park_energy_pct"] == 1.9
+    assert third[day]["park_km"] == 4.0
