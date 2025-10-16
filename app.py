@@ -839,6 +839,8 @@ _vehicle_list_lock = threading.Lock()
 api_errors = []
 api_errors_lock = threading.Lock()
 state_lock = threading.Lock()
+_statistics_cache_lock = threading.Lock()
+_statistics_cache = {"signature": None, "data": None}
 last_vehicle_state = _load_last_state()
 occupant_present = False
 _default_vehicle_id = None
@@ -2150,6 +2152,43 @@ def compute_statistics():
     return stats
 
 
+def _statistics_dependency_signature():
+    """Return a signature describing inputs used for statistics generation."""
+
+    files = [
+        os.path.join(DATA_DIR, "state.log"),
+        os.path.join(DATA_DIR, "energy.log"),
+        os.path.join(DATA_DIR, "api.log"),
+    ]
+    files.extend(_get_trip_files())
+
+    signature = []
+    for path in files:
+        try:
+            stat = os.stat(path)
+        except OSError:
+            signature.append((path, None, None))
+            continue
+        signature.append((path, stat.st_mtime, stat.st_size))
+    return tuple(signature)
+
+
+def _load_cached_statistics():
+    """Return cached statistics if inputs are unchanged."""
+
+    signature = _statistics_dependency_signature()
+    with _statistics_cache_lock:
+        cached = _statistics_cache.get("data")
+        cached_signature = _statistics_cache.get("signature")
+        if cached is not None and cached_signature == signature:
+            return cached
+
+        stats = compute_statistics()
+        _statistics_cache["data"] = stats
+        _statistics_cache["signature"] = _statistics_dependency_signature()
+        return stats
+
+
 def compute_trip_summaries():
     """Return weekly and monthly distance summaries."""
     weekly = {}
@@ -3295,7 +3334,7 @@ def error_page():
 
 def _prepare_statistics_payload():
     """Build the statistics payload used by both HTML and JSON views."""
-    stats = compute_statistics()
+    stats = _load_cached_statistics()
     current_month = datetime.now(LOCAL_TZ).strftime("%Y-%m")
     monthly = {}
     rows = []
