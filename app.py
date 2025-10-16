@@ -1964,8 +1964,25 @@ def _compute_parking_losses(filename=None):
     return totals
 
 
+def _load_existing_statistics(filename=None):
+    """Return previously computed statistics from ``STAT_FILE`` if available."""
+
+    if filename is None:
+        filename = STAT_FILE
+
+    try:
+        with open(filename, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
+
 def compute_statistics():
     """Compute daily statistics and save them to ``STAT_FILE``."""
+    previous = _load_existing_statistics()
     stats = _compute_state_stats(_load_state_entries())
     energy = _compute_energy_stats()
     parking = _compute_parking_losses()
@@ -2005,6 +2022,18 @@ def compute_statistics():
         val.setdefault("energy", 0.0)
         val.setdefault("park_energy_pct", 0.0)
         val.setdefault("park_km", 0.0)
+
+    parking_days = set(parking.keys())
+    for day, old in previous.items():
+        current = stats.get(day)
+        if current is None:
+            stats[day] = dict(old)
+            continue
+        if day not in parking_days:
+            if old.get("park_energy_pct"):
+                current["park_energy_pct"] = old.get("park_energy_pct", 0.0)
+            if old.get("park_km"):
+                current["park_km"] = old.get("park_km", 0.0)
     try:
         os.makedirs(os.path.dirname(STAT_FILE), exist_ok=True)
         with open(STAT_FILE, "w", encoding="utf-8") as f:
