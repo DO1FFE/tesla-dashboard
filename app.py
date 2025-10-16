@@ -2897,14 +2897,45 @@ def stream_vehicle(vehicle_id="default"):
     def gen():
         q = queue.Queue()
         subscribers.setdefault(vehicle_id, []).append(q)
+        last_path_len = 0
         try:
             # Send the latest data immediately if available
             if vehicle_id in latest_data:
-                yield f"data: {json.dumps(latest_data[vehicle_id])}\n\n"
+                initial = latest_data[vehicle_id]
+                if isinstance(initial, dict):
+                    path = initial.get("path")
+                    if isinstance(path, list):
+                        last_path_len = len(path)
+                yield f"data: {json.dumps(initial)}\n\n"
             while True:
                 try:
                     data = q.get(timeout=15)
-                    msg = f"data: {json.dumps(data)}\n\n"
+                    payload = data
+                    if isinstance(data, dict):
+                        payload = dict(data)
+                        path = payload.get("path")
+                        if isinstance(path, list):
+                            previous_len = last_path_len
+                            path_len = len(path)
+                            path_reset = path_len < previous_len
+                            if path_reset:
+                                payload["path_reset"] = True
+                                previous_len = 0
+                            delta = path[previous_len:path_len]
+                            if path_reset:
+                                # When the path resets we send the full path once
+                                payload["path"] = path
+                            elif delta:
+                                payload.pop("path", None)
+                            else:
+                                payload.pop("path", None)
+                            if delta:
+                                payload["path_delta"] = delta
+                            last_path_len = path_len
+                        else:
+                            payload.pop("path", None)
+                            last_path_len = 0
+                    msg = f"data: {json.dumps(payload)}\n\n"
                 except queue.Empty:
                     # Periodically send a comment to keep the connection alive
                     msg = ": ping\n\n"
