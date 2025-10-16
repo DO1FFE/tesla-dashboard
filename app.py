@@ -3246,9 +3246,8 @@ def error_page():
     return render_template("errors.html", errors=errors)
 
 
-@app.route("/statistik")
-def statistics_page():
-    """Display statistics of vehicle state and distance."""
+def _prepare_statistics_payload():
+    """Build the statistics payload used by both HTML and JSON views."""
     stats = compute_statistics()
     current_month = datetime.now(LOCAL_TZ).strftime("%Y-%m")
     monthly = {}
@@ -3364,15 +3363,27 @@ def statistics_page():
         # fall back to any known state if default ID is missing
         state = next(iter(last_vehicle_state.values()))
 
+    return {
+        "rows": rows,
+        "summary": summary,
+        "today": today,
+        "current_state": state,
+    }
+
+
+@app.route("/statistik")
+def statistics_page():
+    """Display statistics of vehicle state and distance."""
+    payload = _prepare_statistics_payload()
     cfg = load_config()
-    return render_template(
-        "statistik.html",
-        rows=rows,
-        summary=summary,
-        config=cfg,
-        today=today,
-        current_state=state,
-    )
+    return render_template("statistik.html", config=cfg, **payload)
+
+
+@app.route("/api/statistik")
+def api_statistics():
+    """Provide statistics data as JSON for live updates."""
+    payload = _prepare_statistics_payload()
+    return jsonify(payload)
 
 
 @app.route("/api/errors")

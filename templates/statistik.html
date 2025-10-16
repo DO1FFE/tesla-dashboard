@@ -28,32 +28,138 @@
     </nav>
     {% endif %}
     <table>
-        <tr><th>Datum</th><th>Online %</th><th>Offline %</th><th>Asleep %</th><th>Gefahrene km</th><th>Höchste Geschwindigkeit (km/h)</th><th>Hinzugefügte Energie (kWh)</th><th>Park-Verbrauch (% / km)</th></tr>
-        {% if summary %}
-        <tr>
-            <td><strong>{{ summary.date }} Summe</strong></td>
-            <td>{{ summary.online }}</td>
-            <td>{{ summary.offline }}</td>
-            <td>{{ summary.asleep }}</td>
-            <td>{{ summary.km }}</td>
-            <td>{{ summary.speed }}</td>
-            <td>{{ summary.energy }}</td>
-            <td>{{ "%.2f"|format(summary.park_energy_pct) }} % / {{ "%.2f"|format(summary.park_km) }} km</td>
-        </tr>
-        {% endif %}
-        {% for row in rows|reverse %}
-        {% set is_today = (row.date == today) %}
-        <tr{% if is_today %} class="current-day"{% endif %}>
-            <td>{{ row.date }}</td>
-            <td{% if is_today and current_state == 'online' %} class="current-state"{% endif %}>{{ row.online }}</td>
-            <td{% if is_today and current_state == 'offline' %} class="current-state"{% endif %}>{{ row.offline }}</td>
-            <td{% if is_today and current_state == 'asleep' %} class="current-state"{% endif %}>{{ row.asleep }}</td>
-            <td>{{ row.km }}</td>
-            <td>{{ row.speed }}</td>
-            <td>{{ row.energy }}</td>
-            <td>{{ "%.2f"|format(row.park_energy_pct) }} % / {{ "%.2f"|format(row.park_km) }} km</td>
-        </tr>
-        {% endfor %}
+        <thead>
+            <tr>
+                <th>Datum</th>
+                <th>Online %</th>
+                <th>Offline %</th>
+                <th>Asleep %</th>
+                <th>Gefahrene km</th>
+                <th>Höchste Geschwindigkeit (km/h)</th>
+                <th>Hinzugefügte Energie (kWh)</th>
+                <th>Park-Verbrauch (% / km)</th>
+            </tr>
+        </thead>
+        <tbody id="statistik-summary">
+            {% if summary %}
+            <tr>
+                <td><strong>{{ summary.date }} Summe</strong></td>
+                <td>{{ summary.online }}</td>
+                <td>{{ summary.offline }}</td>
+                <td>{{ summary.asleep }}</td>
+                <td>{{ summary.km }}</td>
+                <td>{{ summary.speed }}</td>
+                <td>{{ summary.energy }}</td>
+                <td>{{ "%.2f"|format(summary.park_energy_pct) }} % / {{ "%.2f"|format(summary.park_km) }} km</td>
+            </tr>
+            {% endif %}
+        </tbody>
+        <tbody id="statistik-rows">
+            {% for row in rows|reverse %}
+            {% set is_today = (row.date == today) %}
+            <tr{% if is_today %} class="current-day"{% endif %}>
+                <td>{{ row.date }}</td>
+                <td{% if is_today and current_state == 'online' %} class="current-state"{% endif %}>{{ row.online }}</td>
+                <td{% if is_today and current_state == 'offline' %} class="current-state"{% endif %}>{{ row.offline }}</td>
+                <td{% if is_today and current_state == 'asleep' %} class="current-state"{% endif %}>{{ row.asleep }}</td>
+                <td>{{ row.km }}</td>
+                <td>{{ row.speed }}</td>
+                <td>{{ row.energy }}</td>
+                <td>{{ "%.2f"|format(row.park_energy_pct) }} % / {{ "%.2f"|format(row.park_km) }} km</td>
+            </tr>
+            {% endfor %}
+        </tbody>
     </table>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const summaryBody = document.getElementById('statistik-summary');
+            const rowsBody = document.getElementById('statistik-rows');
+
+            function formatPark(entry) {
+                const energy = Number(entry.park_energy_pct || 0).toFixed(2);
+                const km = Number(entry.park_km || 0).toFixed(2);
+                return `${energy} % / ${km} km`;
+            }
+
+            function createCell(text, extraClass = null) {
+                const cell = document.createElement('td');
+                cell.textContent = text;
+                if (extraClass) {
+                    cell.classList.add(extraClass);
+                }
+                return cell;
+            }
+
+            function renderSummary(data) {
+                summaryBody.innerHTML = '';
+                if (!data.summary) {
+                    return;
+                }
+                const row = document.createElement('tr');
+                const summary = data.summary;
+                const labelCell = document.createElement('td');
+                const strong = document.createElement('strong');
+                strong.textContent = `${summary.date} Summe`;
+                labelCell.appendChild(strong);
+                row.appendChild(labelCell);
+                row.appendChild(createCell(summary.online));
+                row.appendChild(createCell(summary.offline));
+                row.appendChild(createCell(summary.asleep));
+                row.appendChild(createCell(summary.km));
+                row.appendChild(createCell(summary.speed));
+                row.appendChild(createCell(summary.energy));
+                row.appendChild(createCell(formatPark(summary)));
+                summaryBody.appendChild(row);
+            }
+
+            function renderRows(data) {
+                rowsBody.innerHTML = '';
+                const today = data.today;
+                const currentState = data.current_state;
+                const rows = (data.rows || []).slice().reverse();
+                for (const entry of rows) {
+                    const tr = document.createElement('tr');
+                    if (entry.date === today) {
+                        tr.classList.add('current-day');
+                    }
+                    const dateCell = createCell(entry.date);
+                    tr.appendChild(dateCell);
+
+                    const states = ['online', 'offline', 'asleep'];
+                    for (const state of states) {
+                        const highlight = entry.date === today && currentState === state ? 'current-state' : null;
+                        tr.appendChild(createCell(entry[state], highlight));
+                    }
+                    tr.appendChild(createCell(entry.km));
+                    tr.appendChild(createCell(entry.speed));
+                    tr.appendChild(createCell(entry.energy));
+                    tr.appendChild(createCell(formatPark(entry)));
+                    rowsBody.appendChild(tr);
+                }
+            }
+
+            async function fetchStatistics() {
+                try {
+                    const response = await fetch('/api/statistik', { cache: 'no-store' });
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    const data = await response.json();
+                    renderSummary(data);
+                    renderRows(data);
+                } catch (error) {
+                    console.error('Aktualisierung der Statistik fehlgeschlagen:', error);
+                }
+            }
+
+            fetchStatistics();
+            setInterval(fetchStatistics, 30000);
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) {
+                    fetchStatistics();
+                }
+            });
+        });
+    </script>
 </body>
 </html>
