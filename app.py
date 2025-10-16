@@ -2440,14 +2440,38 @@ def _fetch_data_once(vehicle_id="default"):
                 value_to_log = val
             elif val is None and last_val is not None and last_val > 0:
                 value_to_log = last_val
-            if value_to_log is not None:
-                start_time = session_start or _load_session_start(cache_id)
+        if value_to_log is not None:
+            start_time = session_start or _load_session_start(cache_id)
+            should_log = True
+            if start_time is None:
+                try:
+                    prev_amount = float(saved_val)
+                except (TypeError, ValueError):
+                    prev_amount = None
+                except Exception:
+                    prev_amount = None
+                try:
+                    current_amount = float(value_to_log)
+                except (TypeError, ValueError):
+                    current_amount = None
+                except Exception:
+                    current_amount = None
+                if (
+                    prev_amount is not None
+                    and current_amount is not None
+                    and abs(current_amount - prev_amount) <= 0.001
+                ):
+                    should_log = False
+
+            if should_log:
                 logged = _log_energy(cache_id, value_to_log, timestamp=start_time)
-                _clear_session_start(cache_id)
-                if logged:
-                    _save_last_energy(cache_id, value_to_log)
-                    saved_val = value_to_log
-                session_start = None
+            else:
+                logged = False
+            _clear_session_start(cache_id)
+            if logged:
+                _save_last_energy(cache_id, value_to_log)
+                saved_val = value_to_log
+            session_start = None
 
         if (
             charging_state == "Charging"
