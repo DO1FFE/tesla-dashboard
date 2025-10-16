@@ -1894,7 +1894,12 @@ def _compute_parking_losses(filename=None):
                     rng_km = _range_to_km(rng)
 
                     parked = shift in (None, "P", "Park")
-                    charging = charging_state in {"Charging", "Starting"}
+                    charging = charging_state in {
+                        "Charging",
+                        "Starting",
+                        "Stopped",
+                        "NoPower",
+                    }
 
                     session = sessions.get(vid)
 
@@ -1927,6 +1932,13 @@ def _compute_parking_losses(filename=None):
                         continue
 
                     if session is None:
+                        continue
+
+                    if charging:
+                        if pct is not None:
+                            session["pct"] = pct
+                        if rng_km is not None:
+                            session["range"] = rng_km
                         continue
 
                     pct_loss = 0.0

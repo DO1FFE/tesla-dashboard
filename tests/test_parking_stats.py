@@ -66,6 +66,48 @@ def test_compute_parking_losses_tracks_energy_and_range(tmp_path, monkeypatch):
     assert day["km"] == pytest.approx(5 * app.MILES_TO_KM)
 
 
+def test_compute_parking_losses_ignores_charging_sessions(tmp_path, monkeypatch):
+    import app
+
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    ts_base = datetime(2024, 2, 1, 6, 0, 0, tzinfo=app.LOCAL_TZ)
+    entries = [
+        {
+            "endpoint": "get_vehicle_data",
+            "data": {
+                "id_s": "veh",
+                "drive_state": {"shift_state": "P"},
+                "charge_state": {
+                    "battery_level": 75,
+                    "ideal_battery_range": 190,
+                    "charging_state": "Stopped",
+                },
+            },
+        },
+        {
+            "endpoint": "get_vehicle_data",
+            "data": {
+                "id_s": "veh",
+                "drive_state": {"shift_state": "P"},
+                "charge_state": {
+                    "battery_level": 73,
+                    "ideal_battery_range": 186,
+                    "charging_state": "Stopped",
+                },
+            },
+        },
+    ]
+
+    log_path = tmp_path / "api.log"
+    with log_path.open("w", encoding="utf-8") as handle:
+        for idx, payload in enumerate(entries):
+            handle.write(_log_line(ts_base.replace(minute=idx * 30), payload))
+
+    result = app._compute_parking_losses(str(log_path))
+    assert result == {}
+
+
 def test_compute_statistics_includes_parking_losses(tmp_path, monkeypatch):
     import app
 
