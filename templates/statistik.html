@@ -153,7 +153,7 @@
             }
 
             fetchStatistics();
-            setInterval(fetchStatistics, 30000);
+            setInterval(fetchStatistics, 5000);
             document.addEventListener('visibilitychange', () => {
                 if (!document.hidden) {
                     fetchStatistics();
