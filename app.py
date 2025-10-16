@@ -1826,6 +1826,50 @@ def _compute_parking_losses(filename=None):
         if km_loss > 0:
             entry["km"] += km_loss
 
+    def _distribute_loss(start_ts, end_ts, pct_loss, range_loss):
+        if pct_loss <= 0 and range_loss <= 0:
+            return
+        if start_ts is None and end_ts is None:
+            return
+
+        if start_ts is None:
+            _add_loss(end_ts.date().isoformat(), pct_loss, range_loss)
+            return
+
+        if end_ts is None or end_ts <= start_ts:
+            _add_loss(start_ts.date().isoformat(), pct_loss, range_loss)
+            return
+
+        total_seconds = (end_ts - start_ts).total_seconds()
+        if total_seconds <= 0:
+            _add_loss(start_ts.date().isoformat(), pct_loss, range_loss)
+            return
+
+        allocated_pct = 0.0
+        allocated_range = 0.0
+        cursor = start_ts
+
+        while cursor.date() < end_ts.date():
+            next_midnight = datetime.combine(
+                cursor.date() + timedelta(days=1),
+                datetime.min.time(),
+                tzinfo=cursor.tzinfo,
+            )
+            span = (next_midnight - cursor).total_seconds()
+            if span <= 0:
+                break
+            share = span / total_seconds
+            share_pct = pct_loss * share
+            share_range = range_loss * share
+            _add_loss(cursor.date().isoformat(), share_pct, share_range)
+            allocated_pct += share_pct
+            allocated_range += share_range
+            cursor = next_midnight
+
+        remaining_pct = max(pct_loss - allocated_pct, 0.0)
+        remaining_range = max(range_loss - allocated_range, 0.0)
+        _add_loss(end_ts.date().isoformat(), remaining_pct, remaining_range)
+
     def _as_float(value):
         try:
             return float(value)
@@ -1908,6 +1952,7 @@ def _compute_parking_losses(filename=None):
                             sessions[vid] = {
                                 "pct": pct,
                                 "range": rng_km,
+                                "ts": ts_dt,
                             }
                             continue
 
@@ -1924,11 +1969,12 @@ def _compute_parking_losses(filename=None):
                             if range_loss < 0:
                                 range_loss = 0.0
                         if pct_loss > 0 or range_loss > 0:
-                            _add_loss(ts_dt.date().isoformat(), pct_loss, range_loss)
+                            _distribute_loss(session.get("ts"), ts_dt, pct_loss, range_loss)
                         if pct is not None:
                             session["pct"] = pct
                         if rng_km is not None:
                             session["range"] = rng_km
+                        session["ts"] = ts_dt
                         continue
 
                     if session is None:
@@ -1939,6 +1985,7 @@ def _compute_parking_losses(filename=None):
                             session["pct"] = pct
                         if rng_km is not None:
                             session["range"] = rng_km
+                        session["ts"] = ts_dt
                         continue
 
                     pct_loss = 0.0
@@ -1954,7 +2001,7 @@ def _compute_parking_losses(filename=None):
                         if range_loss < 0:
                             range_loss = 0.0
                     if pct_loss > 0 or range_loss > 0:
-                        _add_loss(ts_dt.date().isoformat(), pct_loss, range_loss)
+                        _distribute_loss(session.get("ts"), ts_dt, pct_loss, range_loss)
                     sessions.pop(vid, None)
         except FileNotFoundError:
             continue

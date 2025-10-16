@@ -8,6 +8,68 @@ def _log_line(ts, payload):
     return f"{ts.strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} {json.dumps(payload)}\n"
 
 
+def test_compute_parking_losses_splits_losses_across_midnight(tmp_path, monkeypatch):
+    import app
+
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    ts_start = datetime(2024, 1, 1, 22, 0, 0, tzinfo=app.LOCAL_TZ)
+    entries = [
+        {
+            "endpoint": "get_vehicle_data",
+            "data": {
+                "id_s": "veh",
+                "drive_state": {"shift_state": "P"},
+                "charge_state": {
+                    "battery_level": 80,
+                    "ideal_battery_range": 210,
+                    "charging_state": "Disconnected",
+                },
+            },
+        },
+        {
+            "endpoint": "get_vehicle_data",
+            "data": {
+                "id_s": "veh",
+                "drive_state": {"shift_state": "P"},
+                "charge_state": {
+                    "battery_level": 77,
+                    "ideal_battery_range": 201,
+                    "charging_state": "Disconnected",
+                },
+            },
+        },
+    ]
+
+    log_path = tmp_path / "api.log"
+    with log_path.open("w", encoding="utf-8") as handle:
+        handle.write(_log_line(ts_start, entries[0]))
+        handle.write(_log_line(ts_start.replace(day=2, hour=2), entries[1]))
+
+    result = app._compute_parking_losses(str(log_path))
+    first_day = result["2024-01-01"]
+    second_day = result["2024-01-02"]
+
+    total_drop_pct = 3.0
+    total_drop_miles = 9.0
+
+    end_ts = ts_start.replace(day=2, hour=2)
+    midnight = datetime(2024, 1, 2, 0, 0, 0, tzinfo=app.LOCAL_TZ)
+    total_seconds = (end_ts - ts_start).total_seconds()
+    before_midnight = max((midnight - ts_start).total_seconds(), 0.0)
+    after_midnight = max(total_seconds - before_midnight, 0.0)
+
+    expected_first_pct = total_drop_pct * before_midnight / total_seconds
+    expected_second_pct = total_drop_pct * after_midnight / total_seconds
+    expected_first_km = total_drop_miles * app.MILES_TO_KM * before_midnight / total_seconds
+    expected_second_km = total_drop_miles * app.MILES_TO_KM * after_midnight / total_seconds
+
+    assert first_day["energy_pct"] == pytest.approx(expected_first_pct)
+    assert second_day["energy_pct"] == pytest.approx(expected_second_pct)
+    assert first_day["km"] == pytest.approx(expected_first_km)
+    assert second_day["km"] == pytest.approx(expected_second_km)
+
+
 def test_compute_parking_losses_tracks_energy_and_range(tmp_path, monkeypatch):
     import app
 
