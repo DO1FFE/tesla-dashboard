@@ -81,6 +81,35 @@
                 return `${energy} % / ${km} km`;
             }
 
+            function formatFloat(value) {
+                const num = Number(value);
+                if (!Number.isFinite(num)) {
+                    return value ?? '';
+                }
+                const str = num.toFixed(2);
+                return str.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '.0');
+            }
+
+            function formatValue(key, value) {
+                if (value === null || value === undefined) {
+                    return '';
+                }
+                switch (key) {
+                    case 'online':
+                    case 'offline':
+                    case 'asleep':
+                    case 'km':
+                    case 'energy':
+                        return formatFloat(value);
+                    case 'speed':
+                        return Number.isFinite(Number(value))
+                            ? String(Math.round(Number(value)))
+                            : value;
+                    default:
+                        return value;
+                }
+            }
+
             function createCell(text, extraClass = null) {
                 const cell = document.createElement('td');
                 cell.textContent = text;
@@ -102,12 +131,12 @@
                 strong.textContent = `${summary.date} Summe`;
                 labelCell.appendChild(strong);
                 row.appendChild(labelCell);
-                row.appendChild(createCell(summary.online));
-                row.appendChild(createCell(summary.offline));
-                row.appendChild(createCell(summary.asleep));
-                row.appendChild(createCell(summary.km));
-                row.appendChild(createCell(summary.speed));
-                row.appendChild(createCell(summary.energy));
+                row.appendChild(createCell(formatValue('online', summary.online)));
+                row.appendChild(createCell(formatValue('offline', summary.offline)));
+                row.appendChild(createCell(formatValue('asleep', summary.asleep)));
+                row.appendChild(createCell(formatValue('km', summary.km)));
+                row.appendChild(createCell(formatValue('speed', summary.speed)));
+                row.appendChild(createCell(formatValue('energy', summary.energy)));
                 row.appendChild(createCell(formatPark(summary)));
                 summaryBody.appendChild(row);
             }
@@ -128,11 +157,11 @@
                     const states = ['online', 'offline', 'asleep'];
                     for (const state of states) {
                         const highlight = entry.date === today && currentState === state ? 'current-state' : null;
-                        tr.appendChild(createCell(entry[state], highlight));
+                        tr.appendChild(createCell(formatValue(state, entry[state]), highlight));
                     }
-                    tr.appendChild(createCell(entry.km));
-                    tr.appendChild(createCell(entry.speed));
-                    tr.appendChild(createCell(entry.energy));
+                    tr.appendChild(createCell(formatValue('km', entry.km)));
+                    tr.appendChild(createCell(formatValue('speed', entry.speed)));
+                    tr.appendChild(createCell(formatValue('energy', entry.energy)));
                     tr.appendChild(createCell(formatPark(entry)));
                     rowsBody.appendChild(tr);
                 }
