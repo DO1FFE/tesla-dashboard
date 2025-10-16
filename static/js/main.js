@@ -61,6 +61,7 @@ var lastDataTimestamp = null;
 var installedVersion = null;
 var CONFIG = {};
 var HIGHLIGHT_BLUE = false;
+var currentPath = [];
 var OFFLINE_TEXT = 'Das Fahrzeug ist offline und schläft - Bitte nicht wecken! - Die Daten sind die zuletzt bekannten und somit nicht aktuell!';
 var SERVICE_MODE_TEXT = 'Fahrzeug befindet sich im Service Mode.';
 var SERVICE_MODE_PLUS_TEXT = 'Fahrzeug befindet sich im Service Mode Plus.';
@@ -222,6 +223,33 @@ marker.on('moveend', function() {
     }
 });
 var eventSource = null;
+
+function updatePathPoints(data) {
+    if (data && data.path_reset) {
+        if (Array.isArray(data.path)) {
+            currentPath = data.path.slice();
+        } else {
+            currentPath = [];
+        }
+    } else if (data && Array.isArray(data.path)) {
+        currentPath = data.path.slice();
+    }
+    if (data && Array.isArray(data.path_delta) && data.path_delta.length) {
+        if (!Array.isArray(currentPath)) {
+            currentPath = [];
+        }
+        data.path_delta.forEach(function(pt) {
+            if (!Array.isArray(pt) || pt.length < 2) {
+                return;
+            }
+            var last = currentPath[currentPath.length - 1];
+            if (!last || last[0] !== pt[0] || last[1] !== pt[1]) {
+                currentPath.push(pt);
+            }
+        });
+    }
+    return Array.isArray(currentPath) ? currentPath : [];
+}
 
 function updateHeader(data) {
     var info = '';
@@ -398,13 +426,14 @@ function handleData(data) {
             destLine = null;
         }
     }
-    if (data.path && data.path.length > 1) {
+    var pathPoints = updatePathPoints(data);
+    if (pathPoints.length > 1) {
         if (!polyline) {
-            polyline = L.polyline(data.path, { color: 'blue' }).addTo(map);
+            polyline = L.polyline(pathPoints, { color: 'blue' }).addTo(map);
         } else if (slide) {
-            pendingPath = data.path;
+            pendingPath = pathPoints.slice();
         } else {
-            polyline.setLatLngs(data.path);
+            polyline.setLatLngs(pathPoints);
         }
     } else if (polyline) {
         map.removeLayer(polyline);
