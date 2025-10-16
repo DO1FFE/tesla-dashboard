@@ -1980,6 +1980,37 @@ def _load_existing_statistics(filename=None):
     return {}
 
 
+def _merge_parking_value(prev_total, prev_source, new_raw, tolerance=0.01):
+    """Combine previously stored parking metrics with a new measurement."""
+
+    def _to_float(value, default=0.0):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    prev_total = _to_float(prev_total, 0.0)
+    prev_source = prev_total if prev_source is None else _to_float(prev_source, prev_total)
+    new_raw = _to_float(new_raw, 0.0)
+
+    if new_raw <= 0.0:
+        return prev_total, prev_source
+
+    if new_raw >= prev_total - tolerance:
+        combined = new_raw
+        source = new_raw
+    elif abs(new_raw - prev_source) <= tolerance:
+        combined = prev_total
+        source = prev_source
+    else:
+        combined = prev_total + new_raw
+        source = new_raw
+
+    if combined < prev_total:
+        combined = prev_total
+    return combined, source
+
+
 def compute_statistics():
     """Compute daily statistics and save them to ``STAT_FILE``."""
     previous = _load_existing_statistics()
@@ -2005,8 +2036,23 @@ def compute_statistics():
         stats[day]["energy"] = round(val, 2)
     for day, loss in parking.items():
         stats.setdefault(day, {"online": 0.0, "offline": 0.0, "asleep": 0.0})
-        stats[day]["park_energy_pct"] = round(loss.get("energy_pct", 0.0), 2)
-        stats[day]["park_km"] = round(loss.get("km", 0.0), 2)
+        previous_entry = previous.get(day, {})
+        prev_pct_total = previous_entry.get("_park_energy_pct_total", previous_entry.get("park_energy_pct", 0.0))
+        prev_pct_source = previous_entry.get("_park_energy_pct_source")
+        pct_total, pct_source = _merge_parking_value(
+            prev_pct_total, prev_pct_source, loss.get("energy_pct", 0.0)
+        )
+        prev_km_total = previous_entry.get("_park_km_total", previous_entry.get("park_km", 0.0))
+        prev_km_source = previous_entry.get("_park_km_source")
+        km_total, km_source = _merge_parking_value(
+            prev_km_total, prev_km_source, loss.get("km", 0.0)
+        )
+        stats[day]["park_energy_pct"] = round(pct_total, 2)
+        stats[day]["_park_energy_pct_total"] = pct_total
+        stats[day]["_park_energy_pct_source"] = pct_source
+        stats[day]["park_km"] = round(km_total, 2)
+        stats[day]["_park_km_total"] = km_total
+        stats[day]["_park_km_source"] = km_source
     for day, val in stats.items():
         total = 24 * 3600
         online = round(val.get("online", 0.0) / total * 100, 2)
@@ -2022,6 +2068,14 @@ def compute_statistics():
         val.setdefault("energy", 0.0)
         val.setdefault("park_energy_pct", 0.0)
         val.setdefault("park_km", 0.0)
+        if "_park_energy_pct_total" not in val:
+            val["_park_energy_pct_total"] = val["park_energy_pct"]
+        if "_park_energy_pct_source" not in val:
+            val["_park_energy_pct_source"] = val["park_energy_pct"]
+        if "_park_km_total" not in val:
+            val["_park_km_total"] = val["park_km"]
+        if "_park_km_source" not in val:
+            val["_park_km_source"] = val["park_km"]
 
     parking_days = set(parking.keys())
     for day, old in previous.items():
@@ -2030,10 +2084,16 @@ def compute_statistics():
             stats[day] = dict(old)
             continue
         if day not in parking_days:
-            if old.get("park_energy_pct"):
-                current["park_energy_pct"] = old.get("park_energy_pct", 0.0)
-            if old.get("park_km"):
-                current["park_km"] = old.get("park_km", 0.0)
+            for key in (
+                "park_energy_pct",
+                "park_km",
+                "_park_energy_pct_total",
+                "_park_energy_pct_source",
+                "_park_km_total",
+                "_park_km_source",
+            ):
+                if key in old:
+                    current[key] = old[key]
     try:
         os.makedirs(os.path.dirname(STAT_FILE), exist_ok=True)
         with open(STAT_FILE, "w", encoding="utf-8") as f:
