@@ -2225,10 +2225,6 @@ def _load_cached_statistics():
     if cached is not None and cached_signature == signature:
         return cached
 
-    if cached is not None:
-        _schedule_statistics_refresh()
-        return cached
-
     stats = compute_statistics()
     with _statistics_cache_lock:
         _statistics_cache["data"] = stats
