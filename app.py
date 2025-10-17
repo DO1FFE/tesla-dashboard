@@ -1978,7 +1978,7 @@ def _compute_parking_losses(filename=None):
 
                     rng = charge_state.get("ideal_battery_range")
                     if rng is None:
-                        rng = charge_state.get("battery_range")
+                        rng = charge_state.get("est_battery_range")
                     rng_km = _range_to_km(rng)
 
                     parked = shift in (None, "P", "Park")
