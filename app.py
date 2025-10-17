@@ -1135,6 +1135,9 @@ def _log_energy(vehicle_id, amount, timestamp=None):
             last_ts, last = _last_logged_energy_entry(vehicle_id)
             marker_before = _current_last_energy_marker(vehicle_id)
             stored_marker = _last_energy_markers.get(vehicle_id)
+            if stored_marker is None and marker_before is not None:
+                _last_energy_markers[vehicle_id] = marker_before
+                stored_marker = marker_before
             try:
                 amount_val = float(amount)
             except (TypeError, ValueError):
