@@ -1979,10 +1979,16 @@ def _compute_parking_losses(filename=None):
                         pct = charge_state.get("battery_level")
                     pct = _as_float(pct)
 
-                    rng = charge_state.get("ideal_battery_range")
-                    if rng is None:
-                        rng = charge_state.get("est_battery_range")
-                    rng_km = _range_to_km(rng)
+                    rng_km = None
+                    for key in (
+                        "ideal_battery_range",
+                        "est_battery_range",
+                        "battery_range",
+                        "rated_battery_range",
+                    ):
+                        rng_km = _range_to_km(charge_state.get(key))
+                        if rng_km is not None:
+                            break
 
                     parked = shift in (None, "P", "Park")
                     charging = charging_state in {
