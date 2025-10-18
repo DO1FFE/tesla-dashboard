@@ -2082,11 +2082,69 @@ def _compute_parking_losses(filename=None):
         except Exception:
             continue
 
-    if log_entries:
+    try:
+        existing_entries = []
+        seen = set()
+        with open(log_path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                except Exception:
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                start = record.get("start")
+                end = record.get("end")
+                pct_val = _as_float(record.get("energy_pct"))
+                rng_val = _as_float(record.get("range_km"))
+                context = record.get("context") or "parked"
+                key = (
+                    start,
+                    end,
+                    round(pct_val or 0.0, 6),
+                    round(rng_val or 0.0, 6),
+                    context,
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                existing_entries.append(
+                    {
+                        "start": start,
+                        "end": end,
+                        "energy_pct": round(pct_val or 0.0, 6),
+                        "range_km": round(rng_val or 0.0, 6),
+                        "context": context,
+                    }
+                )
+    except FileNotFoundError:
+        existing_entries = []
+        seen = set()
+    except Exception:
+        existing_entries = []
+        seen = set()
+
+    new_entries = []
+    for entry in log_entries:
+        key = (
+            entry.get("start"),
+            entry.get("end"),
+            entry.get("energy_pct", 0.0),
+            entry.get("range_km", 0.0),
+            entry.get("context", "parked"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        new_entries.append(entry)
+
+    combined_entries = existing_entries + new_entries
+
+    if combined_entries:
         try:
             os.makedirs(os.path.dirname(log_path), exist_ok=True)
-            with open(log_path, "a", encoding="utf-8") as handle:
-                for entry in log_entries:
+            with open(log_path, "w", encoding="utf-8") as handle:
+                for entry in combined_entries:
                     handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
         except Exception:
             pass
