@@ -1861,8 +1861,23 @@ def _compute_parking_losses(filename=None):
     if filename is None:
         filename = os.path.join(DATA_DIR, "api.log")
 
+    log_entries = []
+    log_path = os.path.join(DATA_DIR, "park-loss.log")
+
     totals = {}
     sessions = {}
+
+    def _log_loss(start_ts, end_ts, pct_loss, range_loss, context):
+        if pct_loss <= 0 and range_loss <= 0:
+            return
+        entry = {
+            "start": start_ts.isoformat() if isinstance(start_ts, datetime) else None,
+            "end": end_ts.isoformat() if isinstance(end_ts, datetime) else None,
+            "energy_pct": round(float(pct_loss), 6),
+            "range_km": round(float(range_loss), 6),
+            "context": context,
+        }
+        log_entries.append(entry)
 
     def _add_loss(day, pct_loss, km_loss):
         if pct_loss <= 0 and km_loss <= 0:
@@ -1873,11 +1888,13 @@ def _compute_parking_losses(filename=None):
         if km_loss > 0:
             entry["km"] += km_loss
 
-    def _distribute_loss(start_ts, end_ts, pct_loss, range_loss):
+    def _distribute_loss(start_ts, end_ts, pct_loss, range_loss, context="parked"):
         if pct_loss <= 0 and range_loss <= 0:
             return
         if start_ts is None and end_ts is None:
             return
+
+        _log_loss(start_ts, end_ts, pct_loss, range_loss, context)
 
         if start_ts is None:
             _add_loss(end_ts.date().isoformat(), pct_loss, range_loss)
@@ -2033,6 +2050,10 @@ def _compute_parking_losses(filename=None):
                     if session is None:
                         continue
 
+                    if not parked:
+                        sessions.pop(vid, None)
+                        continue
+
                     if charging:
                         if pct is not None:
                             session["pct"] = pct
@@ -2060,6 +2081,15 @@ def _compute_parking_losses(filename=None):
             continue
         except Exception:
             continue
+
+    if log_entries:
+        try:
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            with open(log_path, "a", encoding="utf-8") as handle:
+                for entry in log_entries:
+                    handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
 
     return totals
 
