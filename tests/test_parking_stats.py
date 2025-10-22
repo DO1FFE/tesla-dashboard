@@ -352,6 +352,48 @@ def test_compute_parking_losses_ignores_charging_sessions(tmp_path, monkeypatch)
     assert result == {}
 
 
+def test_compute_parking_losses_requires_explicit_park_start(tmp_path, monkeypatch):
+    import app
+
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    ts_base = datetime(2024, 4, 1, 12, 0, 0, tzinfo=app.LOCAL_TZ)
+    entries = [
+        {
+            "endpoint": "get_vehicle_data",
+            "data": {
+                "id_s": "veh",
+                "drive_state": {"shift_state": None},
+                "charge_state": {
+                    "battery_level": 80,
+                    "ideal_battery_range": 200,
+                    "charging_state": "Disconnected",
+                },
+            },
+        },
+        {
+            "endpoint": "get_vehicle_data",
+            "data": {
+                "id_s": "veh",
+                "drive_state": {"shift_state": None},
+                "charge_state": {
+                    "battery_level": 79,
+                    "ideal_battery_range": 198,
+                    "charging_state": "Disconnected",
+                },
+            },
+        },
+    ]
+
+    log_path = tmp_path / "api.log"
+    with log_path.open("w", encoding="utf-8") as handle:
+        for idx, payload in enumerate(entries):
+            handle.write(_log_line(ts_base.replace(hour=12 + idx), payload))
+
+    result = app._compute_parking_losses(str(log_path))
+    assert result == {}
+
+
 def test_compute_statistics_includes_parking_losses(tmp_path, monkeypatch):
     import app
 
