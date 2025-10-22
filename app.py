@@ -2007,15 +2007,17 @@ def _compute_parking_losses(filename=None):
                         if rng_km is not None:
                             break
 
-                    parked = shift in (None, "P", "Park")
+                    session = sessions.get(vid)
+
+                    is_park = shift in ("P", "Park")
+                    is_unknown = shift is None
+                    parked = is_park or (session is not None and is_unknown)
                     charging = charging_state in {
                         "Charging",
                         "Starting",
                         "Stopped",
                         "NoPower",
                     }
-
-                    session = sessions.get(vid)
 
                     if parked and not charging:
                         if session is None:
