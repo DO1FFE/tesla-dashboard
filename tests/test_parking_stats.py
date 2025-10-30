@@ -70,6 +70,90 @@ def test_compute_parking_losses_splits_losses_across_midnight(tmp_path, monkeypa
     assert second_day["km"] == pytest.approx(expected_second_km)
 
 
+def test_compute_parking_losses_handles_offline_entries(tmp_path, monkeypatch):
+    import app
+
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(app, "update_api_list", lambda data: None)
+    monkeypatch.setattr(app, "get_tesla", lambda: object())
+    monkeypatch.setattr(
+        app, "_cached_vehicle_list", lambda tesla, ttl=86400: [{"id_s": "veh"}]
+    )
+    monkeypatch.setattr(app, "_default_vehicle_id", None)
+
+    log_path = tmp_path / "api.log"
+
+    class Recorder:
+        def __init__(self, path):
+            self.path = path
+            self.next_ts = None
+
+        def set_timestamp(self, ts):
+            self.next_ts = ts
+
+        def __call__(self, endpoint, data):
+            if self.next_ts is None:
+                raise AssertionError("Timestamp must be set before logging")
+            entry = {"endpoint": endpoint, "data": data}
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(f"{self.next_ts} {json.dumps(entry)}\n")
+            self.next_ts = None
+
+    recorder = Recorder(log_path)
+    monkeypatch.setattr(app, "log_api_data", recorder)
+
+    def _fmt(ts):
+        return ts.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+
+    ts_start = datetime(2024, 3, 1, 22, 0, 0, tzinfo=app.LOCAL_TZ)
+    ts_offline = datetime(2024, 3, 1, 23, 30, 0, tzinfo=app.LOCAL_TZ)
+    ts_end = datetime(2024, 3, 2, 1, 10, 0, tzinfo=app.LOCAL_TZ)
+
+    start_payload = {
+        "id_s": "veh",
+        "drive_state": {"shift_state": "P"},
+        "charge_state": {
+            "battery_level": 80,
+            "ideal_battery_range": 240,
+            "charging_state": "Disconnected",
+        },
+    }
+    end_payload = {
+        "id_s": "veh",
+        "drive_state": {"shift_state": "P"},
+        "charge_state": {
+            "battery_level": 79,
+            "ideal_battery_range": 237,
+            "charging_state": "Disconnected",
+        },
+    }
+
+    recorder.set_timestamp(_fmt(ts_start))
+    app.log_api_data("get_vehicle_data", start_payload)
+
+    recorder.set_timestamp(_fmt(ts_offline))
+    app.get_vehicle_data(vehicle_id="veh", state="offline")
+
+    recorder.set_timestamp(_fmt(ts_end))
+    app.log_api_data("get_vehicle_data", end_payload)
+
+    lines = log_path.read_text(encoding="utf-8").strip().splitlines()
+    assert any("\"state\": \"offline\"" in line for line in lines)
+
+    result = app._compute_parking_losses(str(log_path))
+    assert "2024-03-01" in result
+    assert "2024-03-02" in result
+
+    day_one = result["2024-03-01"]
+    day_two = result["2024-03-02"]
+
+    drop_km = 3 * app.MILES_TO_KM
+    assert day_one["energy_pct"] == pytest.approx(0.3)
+    assert day_two["energy_pct"] == pytest.approx(0.7)
+    assert day_one["km"] == pytest.approx(drop_km * 0.3)
+    assert day_two["km"] == pytest.approx(drop_km * 0.7)
+
+
 def test_compute_parking_losses_tracks_energy_and_range(tmp_path, monkeypatch):
     import app
 
