@@ -2057,11 +2057,15 @@ def _compute_parking_losses(filename=None):
                                 range_loss,
                                 context,
                             )
+                        updated_measurement = False
                         if pct is not None:
                             session["pct"] = pct
+                            updated_measurement = True
                         if rng_km is not None:
                             session["range"] = rng_km
-                        session["ts"] = ts_dt
+                            updated_measurement = True
+                        if updated_measurement or session.get("ts") is None:
+                            session["ts"] = ts_dt
                         continue
 
                     if session is None:
