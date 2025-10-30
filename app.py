@@ -2025,6 +2025,9 @@ def _compute_parking_losses(filename=None):
                                 "pct": pct,
                                 "range": rng_km,
                                 "ts": ts_dt,
+                                "last_seen": ts_dt,
+                                "shift": shift,
+                                "charging_state": charging_state,
                             }
                             continue
 
@@ -2043,6 +2046,9 @@ def _compute_parking_losses(filename=None):
                         if pct_loss > 0 or range_loss > 0:
                             _distribute_loss(session.get("ts"), ts_dt, pct_loss, range_loss)
                         updated_reading = False
+                        session["last_seen"] = ts_dt
+                        session["shift"] = shift
+                        session["charging_state"] = charging_state
                         if pct is not None:
                             session["pct"] = pct
                             updated_reading = True
@@ -2084,6 +2090,9 @@ def _compute_parking_losses(filename=None):
                             session["pct"] = pct
                         if rng_km is not None:
                             session["range"] = rng_km
+                        session["last_seen"] = ts_dt
+                        session["shift"] = shift
+                        session["charging_state"] = charging_state
                         session["ts"] = ts_dt
                         continue
         except FileNotFoundError:
