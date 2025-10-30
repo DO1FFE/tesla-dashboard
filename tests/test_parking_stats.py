@@ -148,10 +148,98 @@ def test_compute_parking_losses_handles_offline_entries(tmp_path, monkeypatch):
     day_two = result["2024-03-02"]
 
     drop_km = 3 * app.MILES_TO_KM
-    assert day_one["energy_pct"] == pytest.approx(0.3)
-    assert day_two["energy_pct"] == pytest.approx(0.7)
-    assert day_one["km"] == pytest.approx(drop_km * 0.3)
-    assert day_two["km"] == pytest.approx(drop_km * 0.7)
+    total_drop_pct = 1.0
+    total_seconds = (ts_end - ts_start).total_seconds()
+    midnight = datetime(2024, 3, 2, 0, 0, 0, tzinfo=app.LOCAL_TZ)
+    before_midnight = max((midnight - ts_start).total_seconds(), 0.0)
+    after_midnight = max(total_seconds - before_midnight, 0.0)
+
+    expected_first_pct = total_drop_pct * before_midnight / total_seconds
+    expected_second_pct = total_drop_pct * after_midnight / total_seconds
+    expected_first_km = drop_km * before_midnight / total_seconds
+    expected_second_km = drop_km * after_midnight / total_seconds
+
+    assert day_one["energy_pct"] == pytest.approx(expected_first_pct)
+    assert day_two["energy_pct"] == pytest.approx(expected_second_pct)
+    assert day_one["km"] == pytest.approx(expected_first_km)
+    assert day_two["km"] == pytest.approx(expected_second_km)
+
+
+def test_offline_entry_without_charge_data_preserves_session_start(tmp_path, monkeypatch):
+    import app
+
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    ts_start = datetime(2024, 1, 1, 22, 30, 0, tzinfo=app.LOCAL_TZ)
+    ts_offline = datetime(2024, 1, 1, 23, 50, 0, tzinfo=app.LOCAL_TZ)
+    ts_end = datetime(2024, 1, 2, 1, 10, 0, tzinfo=app.LOCAL_TZ)
+
+    entries = [
+        {
+            "endpoint": "get_vehicle_data",
+            "data": {
+                "id_s": "veh",
+                "drive_state": {"shift_state": "P"},
+                "charge_state": {
+                    "battery_level": 80,
+                    "ideal_battery_range": 210,
+                    "charging_state": "Disconnected",
+                },
+            },
+        },
+        {
+            "endpoint": "get_vehicle_data",
+            "data": {
+                "id_s": "veh",
+                "state": "offline",
+                "drive_state": {"shift_state": None},
+            },
+        },
+        {
+            "endpoint": "get_vehicle_data",
+            "data": {
+                "id_s": "veh",
+                "drive_state": {"shift_state": "P"},
+                "charge_state": {
+                    "battery_level": 79,
+                    "ideal_battery_range": 207,
+                    "charging_state": "Disconnected",
+                },
+            },
+        },
+    ]
+
+    log_path = tmp_path / "api.log"
+    with log_path.open("w", encoding="utf-8") as handle:
+        handle.write(_log_line(ts_start, entries[0]))
+        handle.write(_log_line(ts_offline, entries[1]))
+        handle.write(_log_line(ts_end, entries[2]))
+
+    result = app._compute_parking_losses(str(log_path))
+
+    assert "2024-01-01" in result
+    assert "2024-01-02" in result
+
+    total_drop_pct = 1.0
+    total_drop_miles = 3.0
+
+    total_seconds = (ts_end - ts_start).total_seconds()
+    midnight = datetime(2024, 1, 2, 0, 0, 0, tzinfo=app.LOCAL_TZ)
+    before_midnight = max((midnight - ts_start).total_seconds(), 0.0)
+    after_midnight = max(total_seconds - before_midnight, 0.0)
+
+    expected_first_pct = total_drop_pct * before_midnight / total_seconds
+    expected_second_pct = total_drop_pct * after_midnight / total_seconds
+    expected_first_km = total_drop_miles * app.MILES_TO_KM * before_midnight / total_seconds
+    expected_second_km = total_drop_miles * app.MILES_TO_KM * after_midnight / total_seconds
+
+    day_one = result["2024-01-01"]
+    day_two = result["2024-01-02"]
+
+    assert day_one["energy_pct"] == pytest.approx(expected_first_pct)
+    assert day_two["energy_pct"] == pytest.approx(expected_second_pct)
+    assert day_one["km"] == pytest.approx(expected_first_km)
+    assert day_two["km"] == pytest.approx(expected_second_km)
 
 
 def test_compute_parking_losses_tracks_energy_and_range(tmp_path, monkeypatch):
