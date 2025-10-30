@@ -2042,11 +2042,15 @@ def _compute_parking_losses(filename=None):
                                 range_loss = 0.0
                         if pct_loss > 0 or range_loss > 0:
                             _distribute_loss(session.get("ts"), ts_dt, pct_loss, range_loss)
+                        updated_reading = False
                         if pct is not None:
                             session["pct"] = pct
+                            updated_reading = True
                         if rng_km is not None:
                             session["range"] = rng_km
-                        session["ts"] = ts_dt
+                            updated_reading = True
+                        if updated_reading:
+                            session["ts"] = ts_dt
                         continue
 
                     if session is None:
