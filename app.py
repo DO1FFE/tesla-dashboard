@@ -2536,7 +2536,26 @@ def get_vehicle_data(vehicle_id=None, state=None):
             return {"error": "Vehicle unavailable", "state": "offline"}
 
     if state != "online":
-        return {"state": state}
+        vid = None
+        try:
+            if isinstance(vehicle, dict):
+                vid = vehicle.get("id_s") or vehicle.get("vehicle_id")
+            else:
+                vid = vehicle["id_s"]
+        except Exception:
+            vid = None
+
+        if vid is None and vehicle_id is not None:
+            vid = vehicle_id
+        if vid is None and _default_vehicle_id is not None:
+            vid = _default_vehicle_id
+
+        payload = {"state": state}
+        if vid is not None:
+            payload["id_s"] = str(vid)
+
+        log_api_data("get_vehicle_data", payload)
+        return payload
 
     try:
         vehicle_data = vehicle.get_vehicle_data()
