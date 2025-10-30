@@ -1991,6 +1991,10 @@ def _compute_parking_losses(filename=None):
                     shift = drive_state.get("shift_state")
                     charging_state = str(charge_state.get("charging_state") or "")
 
+                    state_value = data.get("state")
+                    if not isinstance(state_value, str) or not state_value:
+                        state_value = "parked"
+
                     pct = charge_state.get("usable_battery_level")
                     if pct is None:
                         pct = charge_state.get("battery_level")
@@ -2025,8 +2029,13 @@ def _compute_parking_losses(filename=None):
                                 "pct": pct,
                                 "range": rng_km,
                                 "ts": ts_dt,
+                                "state": state_value,
                             }
                             continue
+
+                        if state_value:
+                            session["state"] = state_value
+                        context = session.get("state") or "parked"
 
                         last_pct = session.get("pct")
                         last_range = session.get("range")
@@ -2041,7 +2050,13 @@ def _compute_parking_losses(filename=None):
                             if range_loss < 0:
                                 range_loss = 0.0
                         if pct_loss > 0 or range_loss > 0:
-                            _distribute_loss(session.get("ts"), ts_dt, pct_loss, range_loss)
+                            _distribute_loss(
+                                session.get("ts"),
+                                ts_dt,
+                                pct_loss,
+                                range_loss,
+                                context,
+                            )
                         if pct is not None:
                             session["pct"] = pct
                         if rng_km is not None:
@@ -2057,6 +2072,9 @@ def _compute_parking_losses(filename=None):
                         range_loss = 0.0
                         last_pct = session.get("pct")
                         last_range = session.get("range")
+                        if state_value:
+                            session["state"] = state_value
+                        context = session.get("state") or "parked"
                         if pct is not None and last_pct is not None:
                             pct_loss = last_pct - pct
                             if pct_loss < 0:
@@ -2071,6 +2089,7 @@ def _compute_parking_losses(filename=None):
                                 ts_dt,
                                 pct_loss,
                                 range_loss,
+                                context,
                             )
                         sessions.pop(vid, None)
                         continue
@@ -2080,6 +2099,8 @@ def _compute_parking_losses(filename=None):
                             session["pct"] = pct
                         if rng_km is not None:
                             session["range"] = rng_km
+                        if state_value:
+                            session["state"] = state_value
                         session["ts"] = ts_dt
                         continue
         except FileNotFoundError:

@@ -310,6 +310,57 @@ def test_compute_parking_losses_logs_losses(tmp_path, monkeypatch):
     assert record["range_km"] == pytest.approx(2 * app.MILES_TO_KM)
 
 
+def test_compute_parking_losses_logs_state_context(tmp_path, monkeypatch):
+    import app
+
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    ts_base = datetime(2024, 9, 1, 1, 0, 0, tzinfo=app.LOCAL_TZ)
+    entries = [
+        {
+            "endpoint": "get_vehicle_data",
+            "data": {
+                "id_s": "veh",
+                "state": "offline",
+                "drive_state": {"shift_state": "P"},
+                "charge_state": {
+                    "battery_level": 70,
+                    "ideal_battery_range": 210,
+                    "charging_state": "Disconnected",
+                },
+            },
+        },
+        {
+            "endpoint": "get_vehicle_data",
+            "data": {
+                "id_s": "veh",
+                "state": "asleep",
+                "drive_state": {"shift_state": "P"},
+                "charge_state": {
+                    "battery_level": 68,
+                    "ideal_battery_range": 204,
+                    "charging_state": "Disconnected",
+                },
+            },
+        },
+    ]
+
+    log_path = tmp_path / "api.log"
+    with log_path.open("w", encoding="utf-8") as handle:
+        for idx, payload in enumerate(entries):
+            handle.write(_log_line(ts_base.replace(minute=idx * 30), payload))
+
+    result = app._compute_parking_losses(str(log_path))
+    assert "2024-09-01" in result
+
+    park_log = tmp_path / "park-loss.log"
+    assert park_log.exists()
+    lines = park_log.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["context"] == "asleep"
+
+
 def test_compute_parking_losses_uses_battery_range_fallback(tmp_path, monkeypatch):
     import app
 
