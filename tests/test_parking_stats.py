@@ -1,56 +1,47 @@
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
 
-def _log_line(ts, payload):
+def _park_line(ts, payload):
     return f"{ts.strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} {json.dumps(payload)}\n"
 
 
 @pytest.fixture
-def rotated_api_logs(tmp_path, monkeypatch):
+def rotated_parking_logs(tmp_path, monkeypatch):
     import app
 
     monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
 
     start_ts = datetime(2024, 6, 1, 20, 0, 0, tzinfo=app.LOCAL_TZ)
     end_ts = datetime(2024, 6, 1, 22, 0, 0, tzinfo=app.LOCAL_TZ)
+    session_id = "sess-veh-1"
 
     start_payload = {
-        "endpoint": "get_vehicle_data",
-        "data": {
-            "id_s": "veh",
-            "drive_state": {"shift_state": "P"},
-            "charge_state": {
-                "battery_level": 80,
-                "ideal_battery_range": 200,
-                "charging_state": "Disconnected",
-            },
-        },
+        "vehicle_id": "veh",
+        "battery_pct": 80.0,
+        "range_km": round(200 * app.MILES_TO_KM, 6),
+        "state": "parked",
+        "session": session_id,
     }
     end_payload = {
-        "endpoint": "get_vehicle_data",
-        "data": {
-            "id_s": "veh",
-            "drive_state": {"shift_state": "P"},
-            "charge_state": {
-                "battery_level": 79,
-                "ideal_battery_range": 198,
-                "charging_state": "Disconnected",
-            },
-        },
+        "vehicle_id": "veh",
+        "battery_pct": 79.0,
+        "range_km": round(198 * app.MILES_TO_KM, 6),
+        "state": "parked",
+        "session": session_id,
     }
 
-    rotated_path = tmp_path / "api.log.2024-06-01T200000"
+    rotated_path = tmp_path / "park-ui.log.2024-06-01T200000"
     with rotated_path.open("w", encoding="utf-8") as handle:
-        handle.write(_log_line(start_ts, start_payload))
+        handle.write(_park_line(start_ts, start_payload))
     os.utime(rotated_path, (start_ts.timestamp(), start_ts.timestamp()))
 
-    main_path = tmp_path / "api.log"
+    main_path = tmp_path / "park-ui.log"
     with main_path.open("w", encoding="utf-8") as handle:
-        handle.write(_log_line(end_ts, end_payload))
+        handle.write(_park_line(end_ts, end_payload))
     os.utime(main_path, (end_ts.timestamp(), end_ts.timestamp()))
 
     return {
@@ -60,19 +51,64 @@ def rotated_api_logs(tmp_path, monkeypatch):
     }
 
 
-def test_compute_parking_losses_processes_date_rotated_logs(rotated_api_logs):
+def test_log_dashboard_parking_sample_deduplicates(tmp_path, monkeypatch):
+    import app
+
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    app._last_parking_samples.clear()
+    app._active_parking_sessions.clear()
+
+    ts = datetime(2024, 1, 1, 12, 0, 0, tzinfo=app.LOCAL_TZ)
+    session_id = "veh-dedupe"
+
+    first = app._log_dashboard_parking_sample(
+        "veh",
+        timestamp=ts,
+        battery_pct=80.0,
+        range_km=round(150 * app.MILES_TO_KM, 6),
+        state="parked",
+        session=session_id,
+    )
+    assert first is True
+
+    duplicate = app._log_dashboard_parking_sample(
+        "veh",
+        timestamp=ts + timedelta(minutes=5),
+        battery_pct=80.0,
+        range_km=round(150 * app.MILES_TO_KM, 6),
+        state="parked",
+        session=session_id,
+    )
+    assert duplicate is False
+
+    state_change = app._log_dashboard_parking_sample(
+        "veh",
+        timestamp=ts + timedelta(minutes=10),
+        battery_pct=80.0,
+        range_km=round(150 * app.MILES_TO_KM, 6),
+        state="offline",
+        session=session_id,
+    )
+    assert state_change is True
+
+    log_path = tmp_path / app.PARK_UI_LOG
+    lines = log_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 2
+
+
+def test_compute_parking_losses_processes_date_rotated_logs(rotated_parking_logs):
     import app
 
     result = app._compute_parking_losses()
 
-    day = rotated_api_logs["start_ts"].date().isoformat()
+    day = rotated_parking_logs["start_ts"].date().isoformat()
     assert day in result
 
     entry = result[day]
     assert entry["energy_pct"] == pytest.approx(1.0)
     assert entry["km"] == pytest.approx(2 * app.MILES_TO_KM)
 
-    log_path = rotated_api_logs["data_dir"] / "park-loss.log"
+    log_path = rotated_parking_logs["data_dir"] / "park-loss.log"
     assert log_path.exists()
 
     first_run = log_path.read_text(encoding="utf-8").splitlines()
@@ -90,37 +126,28 @@ def test_compute_parking_losses_splits_losses_across_midnight(tmp_path, monkeypa
     monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
 
     ts_start = datetime(2024, 1, 1, 22, 0, 0, tzinfo=app.LOCAL_TZ)
+    session_id = "veh-midnight"
     entries = [
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": "P"},
-                "charge_state": {
-                    "battery_level": 80,
-                    "ideal_battery_range": 210,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 80.0,
+            "range_km": round(210 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": session_id,
         },
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": "P"},
-                "charge_state": {
-                    "battery_level": 77,
-                    "ideal_battery_range": 201,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 77.0,
+            "range_km": round(201 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": session_id,
         },
     ]
 
-    log_path = tmp_path / "api.log"
+    log_path = tmp_path / "park-ui.log"
     with log_path.open("w", encoding="utf-8") as handle:
-        handle.write(_log_line(ts_start, entries[0]))
-        handle.write(_log_line(ts_start.replace(day=2, hour=2), entries[1]))
+        handle.write(_park_line(ts_start, entries[0]))
+        handle.write(_park_line(ts_start.replace(day=2, hour=2), entries[1]))
 
     result = app._compute_parking_losses(str(log_path))
     first_day = result["2024-01-01"]
@@ -150,71 +177,40 @@ def test_compute_parking_losses_handles_offline_entries(tmp_path, monkeypatch):
     import app
 
     monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(app, "update_api_list", lambda data: None)
-    monkeypatch.setattr(app, "get_tesla", lambda: object())
-    monkeypatch.setattr(
-        app, "_cached_vehicle_list", lambda tesla, ttl=86400: [{"id_s": "veh"}]
-    )
-    monkeypatch.setattr(app, "_default_vehicle_id", None)
-
-    log_path = tmp_path / "api.log"
-
-    class Recorder:
-        def __init__(self, path):
-            self.path = path
-            self.next_ts = None
-
-        def set_timestamp(self, ts):
-            self.next_ts = ts
-
-        def __call__(self, endpoint, data):
-            if self.next_ts is None:
-                raise AssertionError("Timestamp must be set before logging")
-            entry = {"endpoint": endpoint, "data": data}
-            with self.path.open("a", encoding="utf-8") as handle:
-                handle.write(f"{self.next_ts} {json.dumps(entry)}\n")
-            self.next_ts = None
-
-    recorder = Recorder(log_path)
-    monkeypatch.setattr(app, "log_api_data", recorder)
-
-    def _fmt(ts):
-        return ts.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-
     ts_start = datetime(2024, 3, 1, 22, 0, 0, tzinfo=app.LOCAL_TZ)
     ts_offline = datetime(2024, 3, 1, 23, 30, 0, tzinfo=app.LOCAL_TZ)
     ts_end = datetime(2024, 3, 2, 1, 10, 0, tzinfo=app.LOCAL_TZ)
 
-    start_payload = {
-        "id_s": "veh",
-        "drive_state": {"shift_state": "P"},
-        "charge_state": {
-            "battery_level": 80,
-            "ideal_battery_range": 240,
-            "charging_state": "Disconnected",
+    session_id = "veh-offline"
+    entries = [
+        {
+            "vehicle_id": "veh",
+            "battery_pct": 80.0,
+            "range_km": round(240 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": session_id,
         },
-    }
-    end_payload = {
-        "id_s": "veh",
-        "drive_state": {"shift_state": "P"},
-        "charge_state": {
-            "battery_level": 79,
-            "ideal_battery_range": 237,
-            "charging_state": "Disconnected",
+        {
+            "vehicle_id": "veh",
+            "battery_pct": None,
+            "range_km": None,
+            "state": "offline",
+            "session": session_id,
         },
-    }
+        {
+            "vehicle_id": "veh",
+            "battery_pct": 79.0,
+            "range_km": round(237 * app.MILES_TO_KM, 6),
+            "state": "offline",
+            "session": session_id,
+        },
+    ]
 
-    recorder.set_timestamp(_fmt(ts_start))
-    app.log_api_data("get_vehicle_data", start_payload)
-
-    recorder.set_timestamp(_fmt(ts_offline))
-    app.get_vehicle_data(vehicle_id="veh", state="offline")
-
-    recorder.set_timestamp(_fmt(ts_end))
-    app.log_api_data("get_vehicle_data", end_payload)
-
-    lines = log_path.read_text(encoding="utf-8").strip().splitlines()
-    assert any("\"state\": \"offline\"" in line for line in lines)
+    log_path = tmp_path / "park-ui.log"
+    with log_path.open("w", encoding="utf-8") as handle:
+        handle.write(_park_line(ts_start, entries[0]))
+        handle.write(_park_line(ts_offline, entries[1]))
+        handle.write(_park_line(ts_end, entries[2]))
 
     result = app._compute_parking_losses(str(log_path))
     assert "2024-03-01" in result
@@ -252,44 +248,33 @@ def test_offline_entry_without_charge_data_preserves_session_start(tmp_path, mon
 
     entries = [
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": "P"},
-                "charge_state": {
-                    "battery_level": 80,
-                    "ideal_battery_range": 210,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 80.0,
+            "range_km": round(210 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": "veh-offline-gap",
         },
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "state": "offline",
-                "drive_state": {"shift_state": None},
-            },
+            "vehicle_id": "veh",
+            "battery_pct": None,
+            "range_km": None,
+            "state": "offline",
+            "session": "veh-offline-gap",
         },
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": "P"},
-                "charge_state": {
-                    "battery_level": 79,
-                    "ideal_battery_range": 207,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 79.0,
+            "range_km": round(207 * app.MILES_TO_KM, 6),
+            "state": "offline",
+            "session": "veh-offline-gap",
         },
     ]
 
-    log_path = tmp_path / "api.log"
+    log_path = tmp_path / "park-ui.log"
     with log_path.open("w", encoding="utf-8") as handle:
-        handle.write(_log_line(ts_start, entries[0]))
-        handle.write(_log_line(ts_offline, entries[1]))
-        handle.write(_log_line(ts_end, entries[2]))
+        handle.write(_park_line(ts_start, entries[0]))
+        handle.write(_park_line(ts_offline, entries[1]))
+        handle.write(_park_line(ts_end, entries[2]))
 
     result = app._compute_parking_losses(str(log_path))
 
@@ -326,47 +311,32 @@ def test_compute_parking_losses_tracks_energy_and_range(tmp_path, monkeypatch):
     ts_base = datetime(2024, 1, 1, 8, 0, 0, tzinfo=app.LOCAL_TZ)
     entries = [
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": "P"},
-                "charge_state": {
-                    "battery_level": 80,
-                    "ideal_battery_range": 200,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 80.0,
+            "range_km": round(200 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": "veh-tracking",
         },
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": None},
-                "charge_state": {
-                    "battery_level": 79,
-                    "ideal_battery_range": 198,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 79.0,
+            "range_km": round(198 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": "veh-tracking",
         },
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": "D"},
-                "charge_state": {
-                    "battery_level": 78,
-                    "ideal_battery_range": 195,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 78.0,
+            "range_km": round(195 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": "veh-tracking",
         },
     ]
 
-    log_path = tmp_path / "api.log"
+    log_path = tmp_path / "park-ui.log"
     with log_path.open("w", encoding="utf-8") as handle:
         for idx, payload in enumerate(entries):
-            handle.write(_log_line(ts_base.replace(hour=8 + idx * 2), payload))
+            handle.write(_park_line(ts_base.replace(hour=8 + idx * 2), payload))
 
     result = app._compute_parking_losses(str(log_path))
     assert "2024-01-01" in result
@@ -384,35 +354,25 @@ def test_compute_parking_losses_uses_est_range_when_ideal_missing(tmp_path, monk
     ts_base = datetime(2024, 5, 1, 6, 0, 0, tzinfo=app.LOCAL_TZ)
     entries = [
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": "P"},
-                "charge_state": {
-                    "battery_level": 70,
-                    "est_battery_range": 150,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 70.0,
+            "range_km": round(150 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": "veh-est",
         },
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": None},
-                "charge_state": {
-                    "battery_level": 69,
-                    "est_battery_range": 148,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 69.0,
+            "range_km": round(148 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": "veh-est",
         },
     ]
 
-    log_path = tmp_path / "api.log"
+    log_path = tmp_path / "park-ui.log"
     with log_path.open("w", encoding="utf-8") as handle:
         for idx, payload in enumerate(entries):
-            handle.write(_log_line(ts_base.replace(hour=6 + idx), payload))
+            handle.write(_park_line(ts_base.replace(hour=6 + idx), payload))
 
     result = app._compute_parking_losses(str(log_path))
     assert "2024-05-01" in result
@@ -429,35 +389,25 @@ def test_compute_parking_losses_excludes_drive_losses(tmp_path, monkeypatch):
     ts_base = datetime(2024, 7, 1, 9, 0, 0, tzinfo=app.LOCAL_TZ)
     entries = [
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": "D"},
-                "charge_state": {
-                    "battery_level": 80,
-                    "ideal_battery_range": 300,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 80.0,
+            "range_km": round(300 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": "veh-drive-1",
         },
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": "D"},
-                "charge_state": {
-                    "battery_level": 69,
-                    "ideal_battery_range": 270,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 69.0,
+            "range_km": round(270 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": "veh-drive-2",
         },
     ]
 
-    log_path = tmp_path / "api.log"
+    log_path = tmp_path / "park-ui.log"
     with log_path.open("w", encoding="utf-8") as handle:
         for idx, payload in enumerate(entries):
-            handle.write(_log_line(ts_base.replace(hour=9 + idx), payload))
+            handle.write(_park_line(ts_base.replace(hour=9 + idx), payload))
 
     result = app._compute_parking_losses(str(log_path))
     assert result == {}
@@ -471,35 +421,25 @@ def test_compute_parking_losses_counts_drive_transition_losses(tmp_path, monkeyp
     ts_base = datetime(2024, 7, 1, 9, 0, 0, tzinfo=app.LOCAL_TZ)
     entries = [
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": "P"},
-                "charge_state": {
-                    "battery_level": 80,
-                    "ideal_battery_range": 300,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 80.0,
+            "range_km": round(300 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": "veh-drive-transition",
         },
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": "D"},
-                "charge_state": {
-                    "battery_level": 78,
-                    "ideal_battery_range": 294,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 78.0,
+            "range_km": round(294 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": "veh-drive-transition",
         },
     ]
 
-    log_path = tmp_path / "api.log"
+    log_path = tmp_path / "park-ui.log"
     with log_path.open("w", encoding="utf-8") as handle:
         for idx, payload in enumerate(entries):
-            handle.write(_log_line(ts_base.replace(hour=9 + idx), payload))
+            handle.write(_park_line(ts_base.replace(hour=9 + idx), payload))
 
     result = app._compute_parking_losses(str(log_path))
     assert "2024-07-01" in result
@@ -516,35 +456,25 @@ def test_compute_parking_losses_logs_losses(tmp_path, monkeypatch):
     ts_base = datetime(2024, 8, 1, 10, 0, 0, tzinfo=app.LOCAL_TZ)
     entries = [
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": "P"},
-                "charge_state": {
-                    "battery_level": 60,
-                    "ideal_battery_range": 200,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 60.0,
+            "range_km": round(200 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": "veh-log",
         },
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": "P"},
-                "charge_state": {
-                    "battery_level": 59,
-                    "ideal_battery_range": 198,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 59.0,
+            "range_km": round(198 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": "veh-log",
         },
     ]
 
-    log_path = tmp_path / "api.log"
+    log_path = tmp_path / "park-ui.log"
     with log_path.open("w", encoding="utf-8") as handle:
         for idx, payload in enumerate(entries):
-            handle.write(_log_line(ts_base.replace(minute=idx * 30), payload))
+            handle.write(_park_line(ts_base.replace(minute=idx * 30), payload))
 
     result = app._compute_parking_losses(str(log_path))
     assert "2024-08-01" in result
@@ -566,37 +496,25 @@ def test_compute_parking_losses_logs_state_context(tmp_path, monkeypatch):
     ts_base = datetime(2024, 9, 1, 1, 0, 0, tzinfo=app.LOCAL_TZ)
     entries = [
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "state": "offline",
-                "drive_state": {"shift_state": "P"},
-                "charge_state": {
-                    "battery_level": 70,
-                    "ideal_battery_range": 210,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 70.0,
+            "range_km": round(210 * app.MILES_TO_KM, 6),
+            "state": "offline",
+            "session": "veh-state",
         },
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "state": "asleep",
-                "drive_state": {"shift_state": "P"},
-                "charge_state": {
-                    "battery_level": 68,
-                    "ideal_battery_range": 204,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 68.0,
+            "range_km": round(204 * app.MILES_TO_KM, 6),
+            "state": "asleep",
+            "session": "veh-state",
         },
     ]
 
-    log_path = tmp_path / "api.log"
+    log_path = tmp_path / "park-ui.log"
     with log_path.open("w", encoding="utf-8") as handle:
         for idx, payload in enumerate(entries):
-            handle.write(_log_line(ts_base.replace(minute=idx * 30), payload))
+            handle.write(_park_line(ts_base.replace(minute=idx * 30), payload))
 
     result = app._compute_parking_losses(str(log_path))
     assert "2024-09-01" in result
@@ -617,35 +535,25 @@ def test_compute_parking_losses_uses_battery_range_fallback(tmp_path, monkeypatc
     ts_base = datetime(2024, 6, 1, 7, 0, 0, tzinfo=app.LOCAL_TZ)
     entries = [
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": "P"},
-                "charge_state": {
-                    "battery_level": 65,
-                    "battery_range": 180,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 65.0,
+            "range_km": round(180 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": "veh-battery",
         },
         {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": None},
-                "charge_state": {
-                    "battery_level": 64,
-                    "battery_range": 178,
-                    "charging_state": "Disconnected",
-                },
-            },
+            "vehicle_id": "veh",
+            "battery_pct": 64.0,
+            "range_km": round(178 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": "veh-battery",
         },
     ]
 
-    log_path = tmp_path / "api.log"
+    log_path = tmp_path / "park-ui.log"
     with log_path.open("w", encoding="utf-8") as handle:
         for idx, payload in enumerate(entries):
-            handle.write(_log_line(ts_base.replace(hour=7 + idx * 3), payload))
+            handle.write(_park_line(ts_base.replace(hour=7 + idx * 3), payload))
 
     result = app._compute_parking_losses(str(log_path))
     assert "2024-06-01" in result
@@ -659,40 +567,24 @@ def test_compute_parking_losses_ignores_charging_sessions(tmp_path, monkeypatch)
 
     monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
 
-    ts_base = datetime(2024, 2, 1, 6, 0, 0, tzinfo=app.LOCAL_TZ)
-    entries = [
-        {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": "P"},
-                "charge_state": {
-                    "battery_level": 75,
-                    "ideal_battery_range": 190,
-                    "charging_state": "Stopped",
-                },
-            },
-        },
-        {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": "P"},
-                "charge_state": {
-                    "battery_level": 73,
-                    "ideal_battery_range": 186,
-                    "charging_state": "Stopped",
-                },
-            },
-        },
-    ]
+    app._active_parking_sessions.clear()
 
-    log_path = tmp_path / "api.log"
-    with log_path.open("w", encoding="utf-8") as handle:
-        for idx, payload in enumerate(entries):
-            handle.write(_log_line(ts_base.replace(minute=idx * 30), payload))
+    charging_data = {
+        "drive_state": {"shift_state": "P"},
+        "charge_state": {
+            "battery_level": 75,
+            "ideal_battery_range": 190,
+            "charging_state": "Stopped",
+        },
+    }
 
-    result = app._compute_parking_losses(str(log_path))
+    app._record_dashboard_parking_state("veh", charging_data)
+
+    log_path = tmp_path / app.PARK_UI_LOG
+    if log_path.exists():
+        assert log_path.read_text(encoding="utf-8").strip() == ""
+
+    result = app._compute_parking_losses()
     assert result == {}
 
 
@@ -701,40 +593,33 @@ def test_compute_parking_losses_requires_explicit_park_start(tmp_path, monkeypat
 
     monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
 
-    ts_base = datetime(2024, 4, 1, 12, 0, 0, tzinfo=app.LOCAL_TZ)
-    entries = [
-        {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": None},
-                "charge_state": {
-                    "battery_level": 80,
-                    "ideal_battery_range": 200,
-                    "charging_state": "Disconnected",
-                },
-            },
-        },
-        {
-            "endpoint": "get_vehicle_data",
-            "data": {
-                "id_s": "veh",
-                "drive_state": {"shift_state": None},
-                "charge_state": {
-                    "battery_level": 79,
-                    "ideal_battery_range": 198,
-                    "charging_state": "Disconnected",
-                },
-            },
-        },
-    ]
+    app._active_parking_sessions.clear()
 
-    log_path = tmp_path / "api.log"
-    with log_path.open("w", encoding="utf-8") as handle:
-        for idx, payload in enumerate(entries):
-            handle.write(_log_line(ts_base.replace(hour=12 + idx), payload))
+    data = {
+        "drive_state": {"shift_state": None},
+        "charge_state": {
+            "battery_level": 80,
+            "ideal_battery_range": 200,
+            "charging_state": "Disconnected",
+        },
+    }
+    app._record_dashboard_parking_state("veh", data)
 
-    result = app._compute_parking_losses(str(log_path))
+    data_drop = {
+        "drive_state": {"shift_state": None},
+        "charge_state": {
+            "battery_level": 79,
+            "ideal_battery_range": 198,
+            "charging_state": "Disconnected",
+        },
+    }
+    app._record_dashboard_parking_state("veh", data_drop)
+
+    log_path = tmp_path / app.PARK_UI_LOG
+    if log_path.exists():
+        assert log_path.read_text(encoding="utf-8").strip() == ""
+
+    result = app._compute_parking_losses()
     assert result == {}
 
 
