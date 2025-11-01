@@ -901,7 +901,7 @@ def track_park_time(vehicle_data):
     drive = (
         vehicle_data.get("drive_state", {}) if isinstance(vehicle_data, dict) else {}
     )
-    shift = drive.get("shift_state")
+    shift = _normalize_shift_state(drive.get("shift_state"))
     ts = drive.get("timestamp") or drive.get("gps_as_of")
     if ts and ts < 1e12:
         ts = int(ts * 1000)
@@ -959,7 +959,7 @@ def track_drive_path(vehicle_data):
     drive = (
         vehicle_data.get("drive_state", {}) if isinstance(vehicle_data, dict) else {}
     )
-    shift = drive.get("shift_state")
+    shift = _normalize_shift_state(drive.get("shift_state"))
     lat = drive.get("latitude")
     lon = drive.get("longitude")
     ts = drive.get("timestamp") or drive.get("gps_as_of")
@@ -1331,6 +1331,29 @@ def _as_float(value):
         return None
 
 
+def _normalize_shift_state(shift):
+    """Return the shift state normalised for comparisons."""
+
+    if shift is None:
+        return None
+
+    if isinstance(shift, str):
+        value = shift.strip()
+    else:
+        try:
+            value = str(shift).strip()
+        except Exception:
+            return None
+
+    if not value:
+        return None
+
+    upper = value.upper()
+    if upper == "PARK":
+        return "P"
+    return upper
+
+
 def _parking_log_path(filename=None):
     """Return the path to the dashboard parking log file."""
 
@@ -1478,14 +1501,14 @@ def _record_dashboard_parking_state(vehicle_id, data):
     charge_state = data.get("charge_state") or {}
     drive_state = data.get("drive_state") or {}
 
-    shift = drive_state.get("shift_state")
+    shift = _normalize_shift_state(drive_state.get("shift_state"))
     charging_state = str(charge_state.get("charging_state") or "")
     state_value = data.get("state")
 
     session_key = str(vehicle_id)
     session = _active_parking_sessions.get(session_key)
 
-    is_park = shift in ("P", "Park")
+    is_park = shift == "P"
     is_unknown = shift is None
     parked = is_park or (session is not None and is_unknown)
     charging = charging_state in PARKING_CHARGING_STATES
@@ -2271,7 +2294,7 @@ def _process_legacy_parking_log(filename, distribute_loss):
 
                     charge_state = data.get("charge_state") or {}
                     drive_state = data.get("drive_state") or {}
-                    shift = drive_state.get("shift_state")
+                    shift = _normalize_shift_state(drive_state.get("shift_state"))
                     charging_state = str(charge_state.get("charging_state") or "")
 
                     state_value = data.get("state")
@@ -2287,7 +2310,7 @@ def _process_legacy_parking_log(filename, distribute_loss):
 
                     session = sessions.get(vid)
 
-                    is_park = shift in ("P", "Park")
+                    is_park = shift == "P"
                     is_unknown = shift is None
                     parked = is_park or (session is not None and is_unknown)
                     charging = charging_state in PARKING_CHARGING_STATES
@@ -3349,7 +3372,7 @@ def _fetch_loop(vehicle_id, interval=3):
             trunk_open = any(v_state.get(k) for k in ["ft", "rt"])
             unlocked = v_state.get("locked") is False
             present = present or v_state.get("is_user_present")
-            gear_active = d_state.get("shift_state") in ("R", "N", "D")
+            gear_active = _normalize_shift_state(d_state.get("shift_state")) in {"R", "N", "D"}
             charging = c_state.get("charging_state") == "Charging"
 
         if (
