@@ -1952,10 +1952,13 @@ def _compute_parking_losses(filename=None):
     if filename == os.path.join(DATA_DIR, "api.log"):
         rotated = []
         for path in glob.glob(f"{filename}.*"):
-            suffix = path.rsplit(".", 1)[-1]
-            if suffix.isdigit():
-                rotated.append((int(suffix), path))
-        files.extend(path for _idx, path in sorted(rotated))
+            try:
+                mtime = os.path.getmtime(path)
+            except OSError:
+                continue
+            rotated.append((mtime, path))
+        rotated.sort(key=lambda item: (item[0], item[1]))
+        files.extend(path for _mtime, path in rotated)
 
     if filename and os.path.exists(filename):
         files.append(filename)
