@@ -9,6 +9,11 @@ def _park_line(ts, payload):
     return f"{ts.strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} {json.dumps(payload)}\n"
 
 
+def _api_log_line(ts, payload):
+    body = {"endpoint": "get_vehicle_data", "data": payload}
+    return f"{ts.strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} {json.dumps(body)}\n"
+
+
 @pytest.fixture
 def rotated_parking_logs(tmp_path, monkeypatch):
     import app
@@ -235,6 +240,50 @@ def test_compute_parking_losses_handles_offline_entries(tmp_path, monkeypatch):
     assert day_two["energy_pct"] == pytest.approx(expected_second_pct)
     assert day_one["km"] == pytest.approx(expected_first_km)
     assert day_two["km"] == pytest.approx(expected_second_km)
+
+
+def test_record_dashboard_parking_state_accepts_blank_shift(tmp_path, monkeypatch):
+    import app
+
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    app._active_parking_sessions.clear()
+    app._last_parking_samples.clear()
+
+    calls = []
+
+    def fake_log(vehicle_id, **kwargs):
+        calls.append({"vehicle_id": vehicle_id, **kwargs})
+        return True
+
+    monkeypatch.setattr(app, "_log_dashboard_parking_sample", fake_log)
+
+    base_data = {
+        "drive_state": {"shift_state": "P"},
+        "charge_state": {
+            "battery_level": 80,
+            "ideal_battery_range": 200,
+            "charging_state": "Disconnected",
+        },
+        "state": "parked",
+    }
+
+    app._record_dashboard_parking_state("veh", base_data)
+    assert len(calls) == 1
+
+    blank_shift = {
+        "drive_state": {"shift_state": " "},
+        "charge_state": {
+            "battery_level": 79,
+            "ideal_battery_range": 198,
+            "charging_state": "Disconnected",
+        },
+        "state": "offline",
+    }
+
+    app._record_dashboard_parking_state("veh", blank_shift)
+    assert len(calls) == 2
+    assert calls[-1]["battery_pct"] == pytest.approx(79.0)
+    assert calls[-1]["range_km"] == pytest.approx(198 * app.MILES_TO_KM)
 
 
 def test_offline_entry_without_charge_data_preserves_session_start(tmp_path, monkeypatch):
@@ -525,6 +574,50 @@ def test_compute_parking_losses_logs_state_context(tmp_path, monkeypatch):
     assert len(lines) == 1
     record = json.loads(lines[0])
     assert record["context"] == "asleep"
+
+
+def test_compute_parking_losses_handles_blank_shift_in_legacy_log(tmp_path, monkeypatch):
+    import app
+
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    ts_start = datetime(2024, 5, 1, 8, 0, 0, tzinfo=app.LOCAL_TZ)
+    ts_end = ts_start.replace(hour=10)
+
+    first_payload = {
+        "id_s": "veh",
+        "charge_state": {
+            "battery_level": 80,
+            "ideal_battery_range": 200,
+            "charging_state": "Disconnected",
+        },
+        "drive_state": {"shift_state": "P"},
+        "state": "parked",
+    }
+
+    second_payload = {
+        "id_s": "veh",
+        "charge_state": {
+            "battery_level": 79,
+            "ideal_battery_range": 198,
+            "charging_state": "Disconnected",
+        },
+        "drive_state": {"shift_state": ""},
+        "state": "offline",
+    }
+
+    log_path = tmp_path / "api.log"
+    with log_path.open("w", encoding="utf-8") as handle:
+        handle.write(_api_log_line(ts_start, first_payload))
+        handle.write(_api_log_line(ts_end, second_payload))
+
+    result = app._compute_parking_losses(str(log_path))
+    day = ts_start.date().isoformat()
+    assert day in result
+
+    entry = result[day]
+    assert entry["energy_pct"] == pytest.approx(1.0)
+    assert entry["km"] == pytest.approx(2 * app.MILES_TO_KM)
 
 
 def test_compute_parking_losses_uses_battery_range_fallback(tmp_path, monkeypatch):
