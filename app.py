@@ -846,48 +846,6 @@ api_errors_lock = threading.Lock()
 state_lock = threading.Lock()
 _statistics_cache_lock = threading.Lock()
 _statistics_cache = {"signature": None, "data": None}
-_statistics_job_queue = queue.Queue(maxsize=1)
-_statistics_refresh_pending = False
-
-
-def _statistics_worker():
-    """Process queued statistics recomputations in the background."""
-
-    global _statistics_refresh_pending
-    while True:
-        _statistics_job_queue.get()
-        try:
-            stats = compute_statistics()
-            with _statistics_cache_lock:
-                _statistics_cache["data"] = stats
-                _statistics_cache["signature"] = _statistics_dependency_signature()
-        except Exception:  # pragma: no cover - logging only
-            logging.exception("Background statistics refresh failed")
-        finally:
-            with _statistics_cache_lock:
-                _statistics_refresh_pending = False
-            _statistics_job_queue.task_done()
-
-
-def _schedule_statistics_refresh():
-    """Trigger a background statistics refresh if none is running."""
-
-    global _statistics_refresh_pending
-    with _statistics_cache_lock:
-        if _statistics_refresh_pending:
-            return
-        _statistics_refresh_pending = True
-    try:
-        _statistics_job_queue.put_nowait(object())
-    except queue.Full:
-        # A refresh is already queued or running.
-        pass
-
-
-_statistics_worker_thread = threading.Thread(
-    target=_statistics_worker, name="statistics-worker", daemon=True
-)
-_statistics_worker_thread.start()
 last_vehicle_state = _load_last_state()
 occupant_present = False
 _default_vehicle_id = None
