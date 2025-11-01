@@ -1463,12 +1463,25 @@ def _record_dashboard_parking_state(vehicle_id, data):
     charging_state = str(charge_state.get("charging_state") or "")
     state_value = data.get("state")
 
+    speed_val = _as_float(drive_state.get("speed"))
+    power_val = _as_float(drive_state.get("power"))
+    is_stationary = True
+    if speed_val is not None and abs(speed_val) > 0.05:
+        is_stationary = False
+    if power_val is not None and abs(power_val) > 1:
+        is_stationary = False
+
     session_key = str(vehicle_id)
     session = _active_parking_sessions.get(session_key)
 
     is_park = shift == "P"
     is_unknown = shift is None
-    parked = is_park or (session is not None and is_unknown)
+    assume_parked = (
+        is_unknown
+        and is_stationary
+        and (state_value in {None, "online", "asleep", "parked", "offline"})
+    )
+    parked = is_park or assume_parked or (session is not None and is_unknown)
     charging = charging_state in PARKING_CHARGING_STATES
 
     if parked and not charging:
