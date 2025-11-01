@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime
 
 import pytest
@@ -6,6 +7,81 @@ import pytest
 
 def _log_line(ts, payload):
     return f"{ts.strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} {json.dumps(payload)}\n"
+
+
+@pytest.fixture
+def rotated_api_logs(tmp_path, monkeypatch):
+    import app
+
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    start_ts = datetime(2024, 6, 1, 20, 0, 0, tzinfo=app.LOCAL_TZ)
+    end_ts = datetime(2024, 6, 1, 22, 0, 0, tzinfo=app.LOCAL_TZ)
+
+    start_payload = {
+        "endpoint": "get_vehicle_data",
+        "data": {
+            "id_s": "veh",
+            "drive_state": {"shift_state": "P"},
+            "charge_state": {
+                "battery_level": 80,
+                "ideal_battery_range": 200,
+                "charging_state": "Disconnected",
+            },
+        },
+    }
+    end_payload = {
+        "endpoint": "get_vehicle_data",
+        "data": {
+            "id_s": "veh",
+            "drive_state": {"shift_state": "P"},
+            "charge_state": {
+                "battery_level": 79,
+                "ideal_battery_range": 198,
+                "charging_state": "Disconnected",
+            },
+        },
+    }
+
+    rotated_path = tmp_path / "api.log.2024-06-01T200000"
+    with rotated_path.open("w", encoding="utf-8") as handle:
+        handle.write(_log_line(start_ts, start_payload))
+    os.utime(rotated_path, (start_ts.timestamp(), start_ts.timestamp()))
+
+    main_path = tmp_path / "api.log"
+    with main_path.open("w", encoding="utf-8") as handle:
+        handle.write(_log_line(end_ts, end_payload))
+    os.utime(main_path, (end_ts.timestamp(), end_ts.timestamp()))
+
+    return {
+        "start_ts": start_ts,
+        "end_ts": end_ts,
+        "data_dir": tmp_path,
+    }
+
+
+def test_compute_parking_losses_processes_date_rotated_logs(rotated_api_logs):
+    import app
+
+    result = app._compute_parking_losses()
+
+    day = rotated_api_logs["start_ts"].date().isoformat()
+    assert day in result
+
+    entry = result[day]
+    assert entry["energy_pct"] == pytest.approx(1.0)
+    assert entry["km"] == pytest.approx(2 * app.MILES_TO_KM)
+
+    log_path = rotated_api_logs["data_dir"] / "park-loss.log"
+    assert log_path.exists()
+
+    first_run = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(first_run) == 1
+
+    app._compute_parking_losses()
+
+    second_run = log_path.read_text(encoding="utf-8").splitlines()
+    assert second_run == first_run
 
 
 def test_compute_parking_losses_splits_losses_across_midnight(tmp_path, monkeypatch):
