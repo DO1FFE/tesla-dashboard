@@ -286,6 +286,37 @@ def test_record_dashboard_parking_state_accepts_blank_shift(tmp_path, monkeypatc
     assert calls[-1]["range_km"] == pytest.approx(198 * app.MILES_TO_KM)
 
 
+def test_record_dashboard_parking_state_accepts_sleeping_snapshot(tmp_path, monkeypatch):
+    import app
+
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    app._active_parking_sessions.clear()
+    app._last_parking_samples.clear()
+
+    calls = []
+
+    def fake_log(vehicle_id, **kwargs):
+        calls.append({"vehicle_id": vehicle_id, **kwargs})
+        return True
+
+    monkeypatch.setattr(app, "_log_dashboard_parking_sample", fake_log)
+
+    sleepy_data = {
+        "drive_state": {"shift_state": None, "speed": None, "power": 0},
+        "charge_state": {
+            "battery_level": 78,
+            "ideal_battery_range": 195,
+            "charging_state": "Disconnected",
+        },
+        "state": "asleep",
+    }
+
+    app._record_dashboard_parking_state("veh", sleepy_data)
+    assert len(calls) == 1
+    assert calls[-1]["battery_pct"] == pytest.approx(78.0)
+    assert calls[-1]["range_km"] == pytest.approx(195 * app.MILES_TO_KM)
+
+
 def test_offline_entry_without_charge_data_preserves_session_start(tmp_path, monkeypatch):
     import app
 
@@ -681,7 +712,7 @@ def test_compute_parking_losses_ignores_charging_sessions(tmp_path, monkeypatch)
     assert result == {}
 
 
-def test_compute_parking_losses_requires_explicit_park_start(tmp_path, monkeypatch):
+def test_compute_parking_losses_accepts_sleeping_start(tmp_path, monkeypatch):
     import app
 
     monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
@@ -709,11 +740,11 @@ def test_compute_parking_losses_requires_explicit_park_start(tmp_path, monkeypat
     app._record_dashboard_parking_state("veh", data_drop)
 
     log_path = tmp_path / app.PARK_UI_LOG
-    if log_path.exists():
-        assert log_path.read_text(encoding="utf-8").strip() == ""
+    assert log_path.exists()
+    contents = [line for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(contents) == 2
 
-    result = app._compute_parking_losses()
-    assert result == {}
+    app._compute_parking_losses()
 
 
 def test_compute_statistics_includes_parking_losses(tmp_path, monkeypatch):
