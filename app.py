@@ -4,6 +4,7 @@ eventlet.monkey_patch()
 import os
 import json
 import queue
+from collections import deque
 import threading
 import time
 import logging
@@ -401,6 +402,10 @@ APRS_HOST = "euro.aprs2.net"
 APRS_PORT = 14580
 LOCAL_TZ = ZoneInfo("Europe/Berlin")
 MILES_TO_KM = 1.60934
+PARK_UI_LOG = "park-ui.log"
+PARKING_CHARGING_STATES = {"Charging", "Starting", "Stopped", "NoPower"}
+_active_parking_sessions = {}
+_last_parking_samples = {}
 api_logger = logging.getLogger("api_logger")
 if not api_logger.handlers:
     handler = RotatingFileHandler(
@@ -1276,6 +1281,246 @@ def _log_energy(vehicle_id, amount, timestamp=None):
     return written
 
 
+def _range_to_km(value):
+    """Return ``value`` converted to kilometres when possible."""
+
+    if value is None:
+        return None
+    try:
+        if isinstance(value, dict):
+            val = float(value.get("value", 0.0))
+            unit = str(value.get("unit") or "").lower()
+            if unit in ("km", "kilometer", "kilometre"):
+                return val
+            if unit in ("mi", "mile", "miles"):
+                return val * MILES_TO_KM
+            return None
+        val = float(value)
+    except Exception:
+        return None
+    if val < 0:
+        return None
+    return val * MILES_TO_KM
+
+
+def _extract_dashboard_range_km(charge_state):
+    """Return the range in kilometres using the dashboard preference order."""
+
+    if not isinstance(charge_state, dict):
+        return None
+    for key in (
+        "ideal_battery_range",
+        "est_battery_range",
+        "battery_range",
+        "rated_battery_range",
+    ):
+        rng = _range_to_km(charge_state.get(key))
+        if rng is not None:
+            return rng
+    return None
+
+
+def _as_float(value):
+    """Return ``value`` converted to ``float`` or ``None`` on failure."""
+
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _parking_log_path(filename=None):
+    """Return the path to the dashboard parking log file."""
+
+    if filename:
+        return filename
+    return os.path.join(DATA_DIR, PARK_UI_LOG)
+
+
+def _load_last_parking_entry(vehicle_id, filename=None):
+    """Return the last logged parking entry for ``vehicle_id`` or ``None``."""
+
+    path = _parking_log_path(filename)
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            tail = deque(handle, maxlen=256)
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+
+    for line in reversed(tail):
+        idx = line.find("{")
+        if idx == -1:
+            continue
+        ts_str = line[:idx].strip()
+        try:
+            payload = json.loads(line[idx:])
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        vid = str(payload.get("vehicle_id") or "")
+        if vid and vehicle_id is not None and vid != vehicle_id:
+            continue
+        entry = {
+            "vehicle_id": vid or vehicle_id,
+            "battery_pct": _as_float(payload.get("battery_pct")),
+            "range_km": _as_float(payload.get("range_km")),
+            "state": payload.get("state") or None,
+            "session": payload.get("session") or None,
+        }
+        ts_dt = _parse_log_time(ts_str)
+        if ts_dt is not None:
+            entry["timestamp"] = ts_dt
+        return entry
+    return None
+
+
+def _log_dashboard_parking_sample(
+    vehicle_id,
+    timestamp=None,
+    battery_pct=None,
+    range_km=None,
+    state=None,
+    session=None,
+    filename=None,
+):
+    """Persist a single parking sample used by the dashboard backend."""
+
+    if vehicle_id in (None, ""):
+        vehicle_id = "default"
+    vehicle_id = str(vehicle_id)
+
+    if timestamp is None:
+        timestamp = datetime.now(LOCAL_TZ)
+    elif isinstance(timestamp, (int, float)):
+        timestamp = datetime.fromtimestamp(timestamp, LOCAL_TZ)
+    elif timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=LOCAL_TZ)
+    else:
+        timestamp = timestamp.astimezone(LOCAL_TZ)
+
+    pct = _as_float(battery_pct)
+    rng = _as_float(range_km)
+    if pct is None and rng is None and state is None:
+        return False
+
+    record = {
+        "vehicle_id": vehicle_id,
+        "battery_pct": None if pct is None else round(pct, 6),
+        "range_km": None if rng is None else round(rng, 6),
+        "state": state or None,
+        "session": str(session) if session is not None else None,
+    }
+
+    last = _last_parking_samples.get(vehicle_id)
+    if last is None:
+        last = _load_last_parking_entry(vehicle_id, filename=filename)
+        if last is not None:
+            cached = {
+                "battery_pct": last.get("battery_pct"),
+                "range_km": last.get("range_km"),
+                "state": last.get("state"),
+                "session": last.get("session"),
+            }
+            _last_parking_samples[vehicle_id] = cached
+            last = cached
+
+    def _normalized(value):
+        if value is None:
+            return None
+        try:
+            return round(float(value), 6)
+        except Exception:
+            return None
+
+    if last:
+        if (
+            _normalized(last.get("battery_pct")) == record["battery_pct"]
+            and _normalized(last.get("range_km")) == record["range_km"]
+            and (last.get("state") or None) == record["state"]
+            and (last.get("session") or None) == record["session"]
+        ):
+            return False
+
+    path = _parking_log_path(filename)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    except Exception:
+        pass
+
+    ts_str = timestamp.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+    line = f"{ts_str} {json.dumps(record, ensure_ascii=False)}\n"
+    try:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(line)
+    except Exception:
+        return False
+
+    _last_parking_samples[vehicle_id] = {
+        "battery_pct": record["battery_pct"],
+        "range_km": record["range_km"],
+        "state": record["state"],
+        "session": record["session"],
+    }
+    return True
+
+
+def _record_dashboard_parking_state(vehicle_id, data):
+    """Record a dashboard parking sample when the vehicle is parked."""
+
+    if not isinstance(data, dict):
+        return
+
+    charge_state = data.get("charge_state") or {}
+    drive_state = data.get("drive_state") or {}
+
+    shift = drive_state.get("shift_state")
+    charging_state = str(charge_state.get("charging_state") or "")
+    state_value = data.get("state")
+
+    session_key = str(vehicle_id)
+    session = _active_parking_sessions.get(session_key)
+
+    is_park = shift in ("P", "Park")
+    is_unknown = shift is None
+    parked = is_park or (session is not None and is_unknown)
+    charging = charging_state in PARKING_CHARGING_STATES
+
+    if parked and not charging:
+        if session is None:
+            session_id = f"{session_key}-{datetime.now(LOCAL_TZ).isoformat()}"
+            session = {"id": session_id, "state": state_value or "parked"}
+            _active_parking_sessions[session_key] = session
+        elif session.get("id") is None:
+            session["id"] = f"{session_key}-{datetime.now(LOCAL_TZ).isoformat()}"
+
+        if state_value:
+            session["state"] = state_value
+
+        pct = charge_state.get("usable_battery_level")
+        if pct is None:
+            pct = charge_state.get("battery_level")
+        pct_val = _as_float(pct)
+        rng_val = _extract_dashboard_range_km(charge_state)
+
+        state_for_log = session.get("state") or "parked"
+        _log_dashboard_parking_sample(
+            vehicle_id,
+            battery_pct=pct_val,
+            range_km=rng_val,
+            state=state_for_log,
+            session=session.get("id"),
+        )
+        return
+
+    if session is not None:
+        _active_parking_sessions.pop(session_key, None)
+
+
 def _log_sms(message, success):
     """Append SMS information to ``sms.log``."""
     try:
@@ -1855,17 +2100,323 @@ def _compute_energy_stats(filename=None):
     return energy
 
 
+def _iter_parking_log_lines(filename):
+    """Yield (timestamp, payload) tuples from the dashboard parking log."""
+
+    if not filename:
+        return
+
+    path = _parking_log_path(filename)
+
+    def _read(pathname):
+        try:
+            with open(pathname, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    idx = line.find("{")
+                    if idx == -1:
+                        continue
+                    ts_str = line[:idx].strip()
+                    ts_dt = _parse_log_time(ts_str)
+                    if ts_dt is None:
+                        continue
+                    try:
+                        payload = json.loads(line[idx:])
+                    except Exception:
+                        continue
+                    if not isinstance(payload, dict):
+                        continue
+                    yield ts_dt, payload
+        except FileNotFoundError:
+            return
+        except Exception:
+            return
+
+    base_dir = os.path.dirname(path) or "."
+    base_name = os.path.basename(path)
+
+    rotated = []
+    for candidate in glob.glob(os.path.join(base_dir, f"{base_name}.*")):
+        try:
+            mtime = os.path.getmtime(candidate)
+        except OSError:
+            continue
+        rotated.append((mtime, candidate))
+    rotated.sort(key=lambda item: (item[0], item[1]))
+
+    for _mtime, candidate in rotated:
+        yield from _read(candidate)
+
+    if os.path.exists(path):
+        yield from _read(path)
+
+
+def _process_dashboard_parking_log(filename, distribute_loss):
+    """Populate parking losses from the dashboard parking log."""
+
+    sessions = {}
+    processed = False
+
+    for ts_dt, payload in _iter_parking_log_lines(filename):
+        processed = True
+        vehicle_id = str(payload.get("vehicle_id") or "default")
+        session_id = payload.get("session")
+        if session_id is None:
+            session_key = (vehicle_id, "__default__")
+        else:
+            session_key = (vehicle_id, str(session_id))
+
+        pct = _as_float(payload.get("battery_pct"))
+        rng_km = _as_float(payload.get("range_km"))
+        state_value = payload.get("state") or "parked"
+
+        session = sessions.get(session_key)
+        if session is None:
+            sessions[session_key] = {
+                "pct": pct,
+                "range": rng_km,
+                "ts": ts_dt,
+                "state": state_value,
+            }
+            continue
+
+        if state_value:
+            session["state"] = state_value
+
+        last_ts = session.get("ts")
+        pct_loss = 0.0
+        range_loss = 0.0
+
+        if pct is not None and session.get("pct") is not None:
+            drop = session["pct"] - pct
+            if drop > 0:
+                pct_loss = drop
+
+        if rng_km is not None and session.get("range") is not None:
+            drop_range = session["range"] - rng_km
+            if drop_range > 0:
+                range_loss = drop_range
+
+        if (
+            (pct_loss > 0 or range_loss > 0)
+            and last_ts is not None
+            and ts_dt is not None
+            and ts_dt > last_ts
+        ):
+            distribute_loss(last_ts, ts_dt, pct_loss, range_loss, session.get("state") or "parked")
+
+        updated_measurement = False
+        if pct is not None:
+            session["pct"] = pct
+            updated_measurement = True
+        if rng_km is not None:
+            session["range"] = rng_km
+            updated_measurement = True
+        if (updated_measurement or session.get("ts") is None) and ts_dt is not None:
+            session["ts"] = ts_dt
+
+    return processed
+
+
+def _process_legacy_parking_log(filename, distribute_loss):
+    """Populate parking losses from the legacy ``api.log`` format."""
+
+    if not filename:
+        return False
+
+    files = []
+    sessions = {}
+    processed = False
+
+    if filename == os.path.join(DATA_DIR, "api.log"):
+        rotated = []
+        for path in glob.glob(f"{filename}.*"):
+            try:
+                mtime = os.path.getmtime(path)
+            except OSError:
+                continue
+            rotated.append((mtime, path))
+        rotated.sort(key=lambda item: (item[0], item[1]))
+        files.extend(path for _mtime, path in rotated)
+
+    if filename and os.path.exists(filename):
+        files.append(filename)
+
+    for path in files:
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    idx = line.find("{")
+                    if idx == -1:
+                        continue
+                    ts_str = line[:idx].strip()
+                    ts_dt = _parse_log_time(ts_str)
+                    if ts_dt is None:
+                        continue
+                    try:
+                        payload = json.loads(line[idx:])
+                    except Exception:
+                        continue
+                    if not isinstance(payload, dict):
+                        continue
+                    if payload.get("endpoint") != "get_vehicle_data":
+                        continue
+                    data = payload.get("data")
+                    if not isinstance(data, dict):
+                        continue
+
+                    processed = True
+
+                    vid = data.get("id_s") or data.get("vehicle_id") or "default"
+                    vid = str(vid)
+
+                    charge_state = data.get("charge_state") or {}
+                    drive_state = data.get("drive_state") or {}
+                    shift = drive_state.get("shift_state")
+                    charging_state = str(charge_state.get("charging_state") or "")
+
+                    state_value = data.get("state")
+                    if not isinstance(state_value, str) or not state_value:
+                        state_value = "parked"
+
+                    pct = charge_state.get("usable_battery_level")
+                    if pct is None:
+                        pct = charge_state.get("battery_level")
+                    pct = _as_float(pct)
+
+                    rng_km = _extract_dashboard_range_km(charge_state)
+
+                    session = sessions.get(vid)
+
+                    is_park = shift in ("P", "Park")
+                    is_unknown = shift is None
+                    parked = is_park or (session is not None and is_unknown)
+                    charging = charging_state in PARKING_CHARGING_STATES
+
+                    if parked and not charging:
+                        if session is None:
+                            sessions[vid] = {
+                                "pct": pct,
+                                "range": rng_km,
+                                "ts": ts_dt,
+                                "state": state_value,
+                            }
+                            continue
+
+                        if state_value:
+                            session["state"] = state_value
+                        context = session.get("state") or "parked"
+
+                        last_pct = session.get("pct")
+                        last_range = session.get("range")
+                        pct_loss = 0.0
+                        range_loss = 0.0
+                        if pct is not None and last_pct is not None:
+                            pct_loss = last_pct - pct
+                            if pct_loss < 0:
+                                pct_loss = 0.0
+                        if rng_km is not None and last_range is not None:
+                            range_loss = last_range - rng_km
+                            if range_loss < 0:
+                                range_loss = 0.0
+                        if pct_loss > 0 or range_loss > 0:
+                            distribute_loss(
+                                session.get("ts"),
+                                ts_dt,
+                                pct_loss,
+                                range_loss,
+                                context,
+                            )
+                        updated_measurement = False
+                        if pct is not None:
+                            session["pct"] = pct
+                            updated_measurement = True
+                        if rng_km is not None:
+                            session["range"] = rng_km
+                            updated_measurement = True
+                        if updated_measurement or session.get("ts") is None:
+                            session["ts"] = ts_dt
+                        continue
+
+                    if session is None:
+                        continue
+
+                    if not parked:
+                        pct_loss = 0.0
+                        range_loss = 0.0
+                        last_pct = session.get("pct")
+                        last_range = session.get("range")
+                        if state_value:
+                            session["state"] = state_value
+                        context = session.get("state") or "parked"
+                        if pct is not None and last_pct is not None:
+                            pct_loss = last_pct - pct
+                            if pct_loss < 0:
+                                pct_loss = 0.0
+                        if rng_km is not None and last_range is not None:
+                            range_loss = last_range - rng_km
+                            if range_loss < 0:
+                                range_loss = 0.0
+                        if pct_loss > 0 or range_loss > 0:
+                            distribute_loss(
+                                session.get("ts"),
+                                ts_dt,
+                                pct_loss,
+                                range_loss,
+                                context,
+                            )
+                        sessions.pop(vid, None)
+                        continue
+
+                    if charging:
+                        pct_loss = 0.0
+                        range_loss = 0.0
+                        last_pct = session.get("pct")
+                        last_range = session.get("range")
+                        context = session.get("state") or "parked"
+                        if pct is not None and last_pct is not None:
+                            pct_loss = last_pct - pct
+                            if pct_loss < 0:
+                                pct_loss = 0.0
+                        if rng_km is not None and last_range is not None:
+                            range_loss = last_range - rng_km
+                            if range_loss < 0:
+                                range_loss = 0.0
+                        if pct_loss > 0 or range_loss > 0:
+                            distribute_loss(
+                                session.get("ts"),
+                                ts_dt,
+                                pct_loss,
+                                range_loss,
+                                context,
+                            )
+                        if pct is not None:
+                            session["pct"] = pct
+                        if rng_km is not None:
+                            session["range"] = rng_km
+                        if state_value:
+                            session["state"] = state_value
+                        session["ts"] = ts_dt
+                        continue
+        except FileNotFoundError:
+            continue
+        except Exception:
+            continue
+
+    return processed
+
+
 def _compute_parking_losses(filename=None):
     """Return per-day energy percentage and range losses while parked."""
 
     if filename is None:
-        filename = os.path.join(DATA_DIR, "api.log")
+        primary_path = _parking_log_path()
+    else:
+        primary_path = filename
 
     log_entries = []
     log_path = os.path.join(DATA_DIR, "park-loss.log")
 
     totals = {}
-    sessions = {}
 
     def _log_loss(start_ts, end_ts, pct_loss, range_loss, context):
         if pct_loss <= 0 and range_loss <= 0:
@@ -1934,207 +2485,18 @@ def _compute_parking_losses(filename=None):
         remaining_range = max(range_loss - allocated_range, 0.0)
         _add_loss(end_ts.date().isoformat(), remaining_pct, remaining_range)
 
-    def _as_float(value):
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
+    processed = False
+    base_name = os.path.basename(primary_path) if primary_path else ""
 
-    def _range_to_km(value):
-        rng = _as_float(value)
-        if rng is None:
-            return None
-        return rng * MILES_TO_KM
+    if base_name != "api.log":
+        processed = _process_dashboard_parking_log(primary_path, _distribute_loss)
+        base_dir = os.path.dirname(primary_path) or DATA_DIR
+        fallback_path = os.path.join(base_dir, "api.log")
+    else:
+        fallback_path = primary_path
 
-    files = []
-
-    # Include rotated API logs when using the default filename.
-    if filename == os.path.join(DATA_DIR, "api.log"):
-        rotated = []
-        for path in glob.glob(f"{filename}.*"):
-            try:
-                mtime = os.path.getmtime(path)
-            except OSError:
-                continue
-            rotated.append((mtime, path))
-        rotated.sort(key=lambda item: (item[0], item[1]))
-        files.extend(path for _mtime, path in rotated)
-
-    if filename and os.path.exists(filename):
-        files.append(filename)
-
-    for path in files:
-        try:
-            with open(path, "r", encoding="utf-8") as handle:
-                for line in handle:
-                    idx = line.find("{")
-                    if idx == -1:
-                        continue
-                    ts_str = line[:idx].strip()
-                    ts_dt = _parse_log_time(ts_str)
-                    if ts_dt is None:
-                        continue
-                    try:
-                        payload = json.loads(line[idx:])
-                    except Exception:
-                        continue
-                    if not isinstance(payload, dict):
-                        continue
-                    if payload.get("endpoint") != "get_vehicle_data":
-                        continue
-                    data = payload.get("data")
-                    if not isinstance(data, dict):
-                        continue
-
-                    vid = data.get("id_s") or data.get("vehicle_id") or "default"
-                    vid = str(vid)
-
-                    charge_state = data.get("charge_state") or {}
-                    drive_state = data.get("drive_state") or {}
-                    shift = drive_state.get("shift_state")
-                    charging_state = str(charge_state.get("charging_state") or "")
-
-                    state_value = data.get("state")
-                    if not isinstance(state_value, str) or not state_value:
-                        state_value = "parked"
-
-                    pct = charge_state.get("usable_battery_level")
-                    if pct is None:
-                        pct = charge_state.get("battery_level")
-                    pct = _as_float(pct)
-
-                    rng_km = None
-                    for key in (
-                        "ideal_battery_range",
-                        "est_battery_range",
-                        "battery_range",
-                        "rated_battery_range",
-                    ):
-                        rng_km = _range_to_km(charge_state.get(key))
-                        if rng_km is not None:
-                            break
-
-                    session = sessions.get(vid)
-
-                    is_park = shift in ("P", "Park")
-                    is_unknown = shift is None
-                    parked = is_park or (session is not None and is_unknown)
-                    charging = charging_state in {
-                        "Charging",
-                        "Starting",
-                        "Stopped",
-                        "NoPower",
-                    }
-
-                    if parked and not charging:
-                        if session is None:
-                            sessions[vid] = {
-                                "pct": pct,
-                                "range": rng_km,
-                                "ts": ts_dt,
-                                "state": state_value,
-                            }
-                            continue
-
-                        if state_value:
-                            session["state"] = state_value
-                        context = session.get("state") or "parked"
-
-                        last_pct = session.get("pct")
-                        last_range = session.get("range")
-                        pct_loss = 0.0
-                        range_loss = 0.0
-                        if pct is not None and last_pct is not None:
-                            pct_loss = last_pct - pct
-                            if pct_loss < 0:
-                                pct_loss = 0.0
-                        if rng_km is not None and last_range is not None:
-                            range_loss = last_range - rng_km
-                            if range_loss < 0:
-                                range_loss = 0.0
-                        if pct_loss > 0 or range_loss > 0:
-                            _distribute_loss(
-                                session.get("ts"),
-                                ts_dt,
-                                pct_loss,
-                                range_loss,
-                                context,
-                            )
-                        updated_measurement = False
-                        if pct is not None:
-                            session["pct"] = pct
-                            updated_measurement = True
-                        if rng_km is not None:
-                            session["range"] = rng_km
-                            updated_measurement = True
-                        if updated_measurement or session.get("ts") is None:
-                            session["ts"] = ts_dt
-                        continue
-
-                    if session is None:
-                        continue
-
-                    if not parked:
-                        pct_loss = 0.0
-                        range_loss = 0.0
-                        last_pct = session.get("pct")
-                        last_range = session.get("range")
-                        if state_value:
-                            session["state"] = state_value
-                        context = session.get("state") or "parked"
-                        if pct is not None and last_pct is not None:
-                            pct_loss = last_pct - pct
-                            if pct_loss < 0:
-                                pct_loss = 0.0
-                        if rng_km is not None and last_range is not None:
-                            range_loss = last_range - rng_km
-                            if range_loss < 0:
-                                range_loss = 0.0
-                        if pct_loss > 0 or range_loss > 0:
-                            _distribute_loss(
-                                session.get("ts"),
-                                ts_dt,
-                                pct_loss,
-                                range_loss,
-                                context,
-                            )
-                        sessions.pop(vid, None)
-                        continue
-
-                    if charging:
-                        pct_loss = 0.0
-                        range_loss = 0.0
-                        last_pct = session.get("pct")
-                        last_range = session.get("range")
-                        context = session.get("state") or "parked"
-                        if pct is not None and last_pct is not None:
-                            pct_loss = last_pct - pct
-                            if pct_loss < 0:
-                                pct_loss = 0.0
-                        if rng_km is not None and last_range is not None:
-                            range_loss = last_range - rng_km
-                            if range_loss < 0:
-                                range_loss = 0.0
-                        if pct_loss > 0 or range_loss > 0:
-                            _distribute_loss(
-                                session.get("ts"),
-                                ts_dt,
-                                pct_loss,
-                                range_loss,
-                                context,
-                            )
-                        if pct is not None:
-                            session["pct"] = pct
-                        if rng_km is not None:
-                            session["range"] = rng_km
-                        if state_value:
-                            session["state"] = state_value
-                        session["ts"] = ts_dt
-                        continue
-        except FileNotFoundError:
-            continue
-        except Exception:
-            continue
+    if not processed:
+        processed = _process_legacy_parking_log(fallback_path, _distribute_loss)
 
     try:
         existing_entries = []
@@ -2902,6 +3264,19 @@ def _fetch_data_once(vehicle_id="default"):
         else:
             address_cache.pop(cache_id, None)
             data.pop("location_address", None)
+
+    if isinstance(data, dict):
+        vehicle_identifier = (
+            data.get("id_s")
+            or data.get("vehicle_id")
+            or vid
+            or cache_id
+            or "default"
+        )
+        try:
+            _record_dashboard_parking_state(str(vehicle_identifier), data)
+        except Exception:
+            pass
 
     if isinstance(data, dict):
         data["_live"] = live
