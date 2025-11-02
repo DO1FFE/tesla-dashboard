@@ -2588,11 +2588,18 @@ def _merge_parking_value(prev_total, prev_source, new_raw, tolerance=0.01):
             return default
 
     prev_total = _to_float(prev_total, 0.0)
-    prev_source = prev_total if prev_source is None else _to_float(prev_source, prev_total)
+    if prev_source is None:
+        had_prev_source = False
+        prev_source = prev_total
+    else:
+        had_prev_source = True
+        prev_source = _to_float(prev_source, prev_total)
     new_raw = _to_float(new_raw, 0.0)
 
     if new_raw <= 0.0:
         return prev_total, prev_source
+
+    replaced = False
 
     if new_raw >= prev_total - tolerance:
         combined = new_raw
@@ -2600,11 +2607,15 @@ def _merge_parking_value(prev_total, prev_source, new_raw, tolerance=0.01):
     elif abs(new_raw - prev_source) <= tolerance:
         combined = prev_total
         source = prev_source
+    elif (not had_prev_source) and new_raw < prev_total - tolerance:
+        combined = new_raw
+        source = new_raw
+        replaced = True
     else:
         combined = prev_total + new_raw
         source = new_raw
 
-    if combined < prev_total:
+    if combined < prev_total and not replaced:
         combined = prev_total
     return combined, source
 
