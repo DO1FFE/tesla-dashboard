@@ -14,6 +14,21 @@ def _api_log_line(ts, payload):
     return f"{ts.strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} {json.dumps(body)}\n"
 
 
+def test_merge_parking_value_replaces_smaller_raw():
+    import app
+
+    previous_total = 12.0  # Stored as _park_energy_pct_total from earlier runs
+    previous_source = None  # _park_energy_pct_source missing in older data
+    new_raw = 2.0
+
+    merged_total, merged_source = app._merge_parking_value(
+        previous_total, previous_source, new_raw
+    )
+
+    assert merged_total == pytest.approx(new_raw)
+    assert merged_source == pytest.approx(new_raw)
+
+
 @pytest.fixture
 def rotated_parking_logs(tmp_path, monkeypatch):
     import app
