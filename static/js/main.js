@@ -1133,8 +1133,13 @@ function displayParkTime() {
     var diff = Math.max(0, Date.now() - parkStartTime);
     var minutes = Math.floor(diff / 60000);
     var hours = Math.floor(minutes / 60);
+    var days = Math.floor(hours / 24);
+    hours %= 24;
     minutes = minutes % 60;
     var parts = [];
+    if (days > 0) {
+        parts.push(days + ' ' + (days === 1 ? 'Tag' : 'Tage'));
+    }
     if (hours > 0) {
         parts.push(hours + ' ' + (hours === 1 ? 'Stunde' : 'Stunden'));
     }
