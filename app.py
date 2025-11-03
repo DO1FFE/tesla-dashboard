@@ -3428,10 +3428,21 @@ def trip_history():
     heading = 0.0
     if path:
         first = path[0]
+        raw_heading = None
         if len(first) >= 6 and first[5] is not None:
-            heading = first[5]
+            raw_heading = first[5]
         elif len(path) >= 2:
-            heading = _bearing(path[0][:2], path[1][:2])
+            raw_heading = _bearing(path[0][:2], path[1][:2])
+        if raw_heading is None:
+            raw_heading = 0.0
+        try:
+            heading = float(raw_heading)
+        except (TypeError, ValueError):
+            heading = 0.0
+        gear = _normalize_shift_state(first[6]) if len(first) >= 7 else None
+        heading = heading % 360.0
+        if gear == "R":
+            heading = (heading + 180.0) % 360.0
     weekly, monthly = compute_trip_summaries()
     cfg = load_config()
     response = make_response(
