@@ -50,7 +50,7 @@
                 <td>{{ summary.km }}</td>
                 <td>{{ summary.speed }}</td>
                 <td>{{ summary.energy }}</td>
-                <td>{{ "%.2f"|format(summary.park_energy_pct) }} % / {{ "%.2f"|format(summary.park_km) }} km</td>
+                <td>{{ "%.0f"|format(summary.park_energy_pct) }} % / {{ "%.0f"|format(summary.park_km) }} km</td>
             </tr>
             {% endif %}
         </tbody>
@@ -65,7 +65,7 @@
                 <td>{{ row.km }}</td>
                 <td>{{ row.speed }}</td>
                 <td>{{ row.energy }}</td>
-                <td>{{ "%.2f"|format(row.park_energy_pct) }} % / {{ "%.2f"|format(row.park_km) }} km</td>
+                <td>{{ "%.0f"|format(row.park_energy_pct) }} % / {{ "%.0f"|format(row.park_km) }} km</td>
             </tr>
             {% endfor %}
         </tbody>
