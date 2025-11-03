@@ -14,6 +14,45 @@ var PARK_GRACE_MS = 5 * 60 * 1000;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 18;
+
+function normalizeShiftState(shift) {
+    if (shift === null || shift === undefined) {
+        return null;
+    }
+    var value;
+    if (typeof shift === 'string') {
+        value = shift.trim();
+    } else {
+        try {
+            value = String(shift).trim();
+        } catch (err) {
+            return null;
+        }
+    }
+    if (!value) {
+        return null;
+    }
+    var upper = value.toUpperCase();
+    if (upper === 'PARK') {
+        return 'P';
+    }
+    if (upper === 'REVERSE') {
+        return 'R';
+    }
+    return upper;
+}
+
+function adjustHeadingForReverse(heading, shift) {
+    var numeric = Number(heading);
+    if (!isFinite(numeric)) {
+        return heading;
+    }
+    var normalizedHeading = ((numeric % 360) + 360) % 360;
+    if (normalizeShiftState(shift) === 'R') {
+        normalizedHeading = (normalizedHeading + 180) % 360;
+    }
+    return normalizedHeading;
+}
 // Initialize the map roughly centered on Essen with a high zoom until
 // coordinates from the API are received.
 var map = L.map('map').setView(DEFAULT_POS, DEFAULT_ZOOM);
@@ -378,7 +417,8 @@ function handleData(data) {
         map.flyTo([lat, lng], zoom);
         updateZoomDisplay();
         if (typeof drive.heading === 'number') {
-            marker.setRotationAngle(drive.heading);
+            var displayHeading = adjustHeadingForReverse(drive.heading, drive.shift_state);
+            marker.setRotationAngle(displayHeading);
         }
     } else {
         // Fall back to Essen if no coordinates are available

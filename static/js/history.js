@@ -6,6 +6,45 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 var MILES_TO_KM = 1.60934;
 
+function normalizeShiftState(shift) {
+    if (shift === null || shift === undefined) {
+        return null;
+    }
+    var value;
+    if (typeof shift === 'string') {
+        value = shift.trim();
+    } else {
+        try {
+            value = String(shift).trim();
+        } catch (err) {
+            return null;
+        }
+    }
+    if (!value) {
+        return null;
+    }
+    var upper = value.toUpperCase();
+    if (upper === 'PARK') {
+        return 'P';
+    }
+    if (upper === 'REVERSE') {
+        return 'R';
+    }
+    return upper;
+}
+
+function adjustHeadingForReverse(heading, shift) {
+    var numeric = Number(heading);
+    if (!isFinite(numeric)) {
+        return heading;
+    }
+    var normalizedHeading = ((numeric % 360) + 360) % 360;
+    if (normalizeShiftState(shift) === 'R') {
+        normalizedHeading = (normalizedHeading + 180) % 360;
+    }
+    return normalizedHeading;
+}
+
 function computeZoomForSpeed(speedKmh) {
     var zoom = DEFAULT_ZOOM;
     if (speedKmh != null && !isNaN(speedKmh)) {
@@ -77,6 +116,8 @@ function updateMarker(idx, center) {
     } else if (idx > 0) {
         angle = bearing(tripPath[idx - 1], point);
     }
+    var gear = point.length >= 7 ? point[6] : null;
+    angle = adjustHeadingForReverse(angle, gear);
     marker.setRotationAngle(angle);
     updateInfo(idx);
     if (center) {
