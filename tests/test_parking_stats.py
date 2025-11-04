@@ -332,6 +332,57 @@ def test_record_dashboard_parking_state_accepts_sleeping_snapshot(tmp_path, monk
     assert calls[-1]["range_km"] == pytest.approx(195 * app.MILES_TO_KM)
 
 
+def test_record_dashboard_parking_state_preserves_session_for_placeholder_shift(
+    tmp_path, monkeypatch
+):
+    import app
+
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    app._active_parking_sessions.clear()
+    app._last_parking_samples.clear()
+
+    calls = []
+
+    def fake_log(vehicle_id, **kwargs):
+        calls.append({"vehicle_id": vehicle_id, **kwargs})
+        return True
+
+    monkeypatch.setattr(app, "_log_dashboard_parking_sample", fake_log)
+
+    initial_data = {
+        "drive_state": {"shift_state": "P", "speed": 0, "power": 0},
+        "charge_state": {
+            "battery_level": 80,
+            "ideal_battery_range": 200,
+            "charging_state": "Disconnected",
+        },
+        "state": "parked",
+    }
+
+    app._record_dashboard_parking_state("veh", initial_data)
+    assert len(calls) == 1
+    session = app._active_parking_sessions.get("veh")
+    assert session is not None
+    first_session_id = session.get("id")
+
+    placeholder_shift = {
+        "drive_state": {"shift_state": "N/A", "speed": None, "power": 0},
+        "charge_state": {
+            "battery_level": 79,
+            "ideal_battery_range": 198,
+            "charging_state": "Disconnected",
+        },
+        "state": "offline",
+    }
+
+    app._record_dashboard_parking_state("veh", placeholder_shift)
+
+    assert len(calls) == 2
+    assert calls[-1]["state"] == "offline"
+    assert calls[-1]["session"] == first_session_id
+    assert app._active_parking_sessions.get("veh", {}).get("id") == first_session_id
+
+
 def test_offline_entry_without_charge_data_preserves_session_start(tmp_path, monkeypatch):
     import app
 
