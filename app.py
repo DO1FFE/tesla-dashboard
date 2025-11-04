@@ -1307,6 +1307,8 @@ def _normalize_shift_state(shift):
         return None
 
     upper = value.upper()
+    if upper in {"N/A", "NA", "UNKNOWN"}:
+        return None
     if upper == "PARK":
         return "P"
     return upper
