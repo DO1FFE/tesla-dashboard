@@ -39,9 +39,6 @@ function adjustHeadingForReverse(heading, shift) {
         return heading;
     }
     var normalizedHeading = ((numeric % 360) + 360) % 360;
-    if (normalizeShiftState(shift) === 'R') {
-        normalizedHeading = (normalizedHeading + 180) % 360;
-    }
     return normalizedHeading;
 }
 
