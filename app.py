@@ -2268,6 +2268,8 @@ def _process_legacy_parking_log(filename, distribute_loss):
                     charge_state = data.get("charge_state") or {}
                     drive_state = data.get("drive_state") or {}
                     shift = _normalize_shift_state(drive_state.get("shift_state"))
+                    speed_val = _as_float(drive_state.get("speed"))
+                    power_val = _as_float(drive_state.get("power"))
                     charging_state = str(charge_state.get("charging_state") or "")
 
                     state_value = data.get("state")
@@ -2283,9 +2285,17 @@ def _process_legacy_parking_log(filename, distribute_loss):
 
                     session = sessions.get(vid)
 
+                    is_stationary = True
+                    if speed_val is not None and abs(speed_val) > 0.05:
+                        is_stationary = False
+                    if power_val is not None and abs(power_val) > 1:
+                        is_stationary = False
+
                     is_park = shift == "P"
                     is_unknown = shift is None
-                    parked = is_park or (session is not None and is_unknown)
+                    parked = is_stationary and (
+                        is_park or (session is not None and is_unknown)
+                    )
                     charging = charging_state in PARKING_CHARGING_STATES
 
                     if parked and not charging:

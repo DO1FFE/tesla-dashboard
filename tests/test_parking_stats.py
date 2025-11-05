@@ -257,6 +257,105 @@ def test_compute_parking_losses_handles_offline_entries(tmp_path, monkeypatch):
     assert day_two["km"] == pytest.approx(expected_second_km)
 
 
+def test_process_legacy_parking_log_skips_motion_with_unknown_shift(tmp_path, monkeypatch):
+    import app
+
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    log_path = tmp_path / "api.log"
+    start_ts = datetime(2024, 5, 1, 12, 0, 0, tzinfo=app.LOCAL_TZ)
+    moving_ts = start_ts + timedelta(minutes=15)
+
+    start_payload = {
+        "id_s": "veh",
+        "state": "parked",
+        "charge_state": {
+            "usable_battery_level": 80.0,
+            "ideal_battery_range": 200,
+            "charging_state": "Disconnected",
+        },
+        "drive_state": {"shift_state": "P", "speed": 0, "power": 0},
+    }
+
+    moving_payload = {
+        "id_s": "veh",
+        "state": "online",
+        "charge_state": {
+            "usable_battery_level": 79.0,
+            "ideal_battery_range": 198,
+            "charging_state": "Disconnected",
+        },
+        "drive_state": {"shift_state": None, "speed": 5, "power": 10},
+    }
+
+    with log_path.open("w", encoding="utf-8") as handle:
+        handle.write(_api_log_line(start_ts, start_payload))
+        handle.write(_api_log_line(moving_ts, moving_payload))
+
+    losses = []
+
+    def capture_loss(*args):
+        losses.append(args)
+
+    processed = app._process_legacy_parking_log(str(log_path), capture_loss)
+
+    assert processed is True
+    assert losses == []
+
+
+def test_process_legacy_parking_log_counts_stationary_unknown_shift(tmp_path, monkeypatch):
+    import app
+
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    log_path = tmp_path / "api.log"
+    start_ts = datetime(2024, 5, 1, 8, 0, 0, tzinfo=app.LOCAL_TZ)
+    end_ts = start_ts + timedelta(hours=1)
+
+    start_payload = {
+        "id_s": "veh",
+        "state": "parked",
+        "charge_state": {
+            "usable_battery_level": 80.0,
+            "ideal_battery_range": 200,
+            "charging_state": "Disconnected",
+        },
+        "drive_state": {"shift_state": "P", "speed": 0, "power": 0},
+    }
+
+    stationary_payload = {
+        "id_s": "veh",
+        "state": "parked",
+        "charge_state": {
+            "usable_battery_level": 79.0,
+            "ideal_battery_range": 198,
+            "charging_state": "Disconnected",
+        },
+        "drive_state": {"shift_state": None, "speed": 0, "power": 0},
+    }
+
+    with log_path.open("w", encoding="utf-8") as handle:
+        handle.write(_api_log_line(start_ts, start_payload))
+        handle.write(_api_log_line(end_ts, stationary_payload))
+
+    losses = []
+
+    def capture_loss(*args):
+        losses.append(args)
+
+    processed = app._process_legacy_parking_log(str(log_path), capture_loss)
+
+    assert processed is True
+    assert len(losses) == 1
+
+    loss_start, loss_end, pct_loss, range_loss, context = losses[0]
+    assert loss_start == start_ts
+    assert loss_end == end_ts
+    assert pct_loss == pytest.approx(1.0)
+    assert range_loss == pytest.approx(2 * app.MILES_TO_KM)
+    assert context == "parked"
+
+
 def test_record_dashboard_parking_state_accepts_blank_shift(tmp_path, monkeypatch):
     import app
 
