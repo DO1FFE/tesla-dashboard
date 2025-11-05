@@ -2337,29 +2337,12 @@ def _process_legacy_parking_log(filename, distribute_loss):
                         continue
 
                     if not parked:
-                        pct_loss = 0.0
-                        range_loss = 0.0
-                        last_pct = session.get("pct")
-                        last_range = session.get("range")
                         if state_value:
                             session["state"] = state_value
-                        context = session.get("state") or "parked"
-                        if pct is not None and last_pct is not None:
-                            pct_loss = last_pct - pct
-                            if pct_loss < 0:
-                                pct_loss = 0.0
-                        if rng_km is not None and last_range is not None:
-                            range_loss = last_range - rng_km
-                            if range_loss < 0:
-                                range_loss = 0.0
-                        if pct_loss > 0 or range_loss > 0:
-                            distribute_loss(
-                                session.get("ts"),
-                                ts_dt,
-                                pct_loss,
-                                range_loss,
-                                context,
-                            )
+                        # Leaving ``P`` indicates the vehicle started moving.
+                        # Any change in state of charge between the last
+                        # parked snapshot and this driving entry should not be
+                        # attributed to parking losses.
                         sessions.pop(vid, None)
                         continue
 
