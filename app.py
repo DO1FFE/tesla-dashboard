@@ -2151,6 +2151,7 @@ def _process_dashboard_parking_log(filename, distribute_loss):
 
     sessions = {}
     processed = False
+    drop_tolerance = 0.01
 
     for ts_dt, payload in _iter_parking_log_lines(filename):
         processed = True
@@ -2170,6 +2171,8 @@ def _process_dashboard_parking_log(filename, distribute_loss):
             sessions[session_key] = {
                 "pct": pct,
                 "range": rng_km,
+                "pct_min": pct,
+                "range_min": rng_km,
                 "ts": ts_dt,
                 "state": state_value,
             }
@@ -2179,17 +2182,19 @@ def _process_dashboard_parking_log(filename, distribute_loss):
             session["state"] = state_value
 
         last_ts = session.get("ts")
+        pct_baseline = session.get("pct_min")
+        range_baseline = session.get("range_min")
         pct_loss = 0.0
         range_loss = 0.0
 
-        if pct is not None and session.get("pct") is not None:
-            drop = session["pct"] - pct
-            if drop > 0:
+        if pct is not None and pct_baseline is not None:
+            drop = pct_baseline - pct
+            if drop > drop_tolerance:
                 pct_loss = drop
 
-        if rng_km is not None and session.get("range") is not None:
-            drop_range = session["range"] - rng_km
-            if drop_range > 0:
+        if rng_km is not None and range_baseline is not None:
+            drop_range = range_baseline - rng_km
+            if drop_range > drop_tolerance:
                 range_loss = drop_range
 
         if (
@@ -2203,9 +2208,13 @@ def _process_dashboard_parking_log(filename, distribute_loss):
         updated_measurement = False
         if pct is not None:
             session["pct"] = pct
+            if pct_loss > 0 or pct_baseline is None:
+                session["pct_min"] = pct
             updated_measurement = True
         if rng_km is not None:
             session["range"] = rng_km
+            if range_loss > 0 or range_baseline is None:
+                session["range_min"] = rng_km
             updated_measurement = True
         if (updated_measurement or session.get("ts") is None) and ts_dt is not None:
             session["ts"] = ts_dt

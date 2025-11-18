@@ -591,6 +591,80 @@ def test_compute_parking_losses_tracks_energy_and_range(tmp_path, monkeypatch):
     assert day["km"] == pytest.approx(5 * app.MILES_TO_KM)
 
 
+def test_process_dashboard_parking_log_ignores_oscillation(tmp_path, monkeypatch):
+    import app
+
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    ts_base = datetime(2024, 1, 1, 8, 0, 0, tzinfo=app.LOCAL_TZ)
+    session_id = "veh-oscillation"
+
+    entries = [
+        {
+            "vehicle_id": "veh",
+            "battery_pct": 80.0,
+            "range_km": round(200 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": session_id,
+        },
+        {
+            "vehicle_id": "veh",
+            "battery_pct": 79.0,
+            "range_km": round(198 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": session_id,
+        },
+        {
+            "vehicle_id": "veh",
+            "battery_pct": 79.5,
+            "range_km": round(199 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": session_id,
+        },
+        {
+            "vehicle_id": "veh",
+            "battery_pct": 79.0,
+            "range_km": round(198 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": session_id,
+        },
+        {
+            "vehicle_id": "veh",
+            "battery_pct": 78.5,
+            "range_km": round(197 * app.MILES_TO_KM, 6),
+            "state": "parked",
+            "session": session_id,
+        },
+    ]
+
+    log_path = tmp_path / "park-ui.log"
+    with log_path.open("w", encoding="utf-8") as handle:
+        for idx, payload in enumerate(entries):
+            handle.write(_park_line(ts_base + timedelta(minutes=30 * idx), payload))
+
+    losses = []
+
+    def capture_loss(*args):
+        losses.append(args)
+
+    processed = app._process_dashboard_parking_log(str(log_path), capture_loss)
+
+    assert processed is True
+    assert len(losses) == 2
+
+    first_start, first_end, pct_loss, range_loss, _context = losses[0]
+    assert first_start == ts_base
+    assert first_end == ts_base + timedelta(minutes=30)
+    assert pct_loss == pytest.approx(1.0)
+    assert range_loss == pytest.approx(2 * app.MILES_TO_KM)
+
+    second_start, second_end, pct_loss, range_loss, _context = losses[1]
+    assert second_start == ts_base + timedelta(minutes=90)
+    assert second_end == ts_base + timedelta(minutes=120)
+    assert pct_loss == pytest.approx(0.5)
+    assert range_loss == pytest.approx(1 * app.MILES_TO_KM)
+
+
 def test_compute_parking_losses_uses_est_range_when_ideal_missing(tmp_path, monkeypatch):
     import app
 
