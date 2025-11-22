@@ -11,6 +11,7 @@ import logging
 import glob
 import socket
 import uuid
+import secrets
 from urllib.parse import urlparse
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
@@ -28,6 +29,7 @@ from flask import (
     g,
     make_response,
 )
+from flask_wtf import CSRFProtect
 from taximeter import Taximeter
 import requests
 from functools import wraps
@@ -55,9 +57,25 @@ try:
 except ImportError:
     phonenumbers = None
 
+
+def _secret_key():
+    """Return the configured secret key or generate a temporary one."""
+
+    secret = os.getenv("FLASK_SECRET_KEY") or os.getenv("SECRET_KEY")
+    if secret:
+        return secret
+    generated = secrets.token_hex(32)
+    logging.warning(
+        "FLASK_SECRET_KEY not set; generated temporary SECRET_KEY for CSRF protection"
+    )
+    return generated
+
+
 load_dotenv()
 app = Flask(__name__)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 3600
+app.config["SECRET_KEY"] = _secret_key()
+csrf = CSRFProtect(app)
 Compress(app)
 socketio = SocketIO(app, async_mode="eventlet")
 __version__ = get_version()
