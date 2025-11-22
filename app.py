@@ -30,7 +30,7 @@ from flask import (
 )
 from taximeter import Taximeter
 import requests
-from functools import wraps, lru_cache
+from functools import wraps
 from dotenv import load_dotenv
 from version import get_version
 import qrcode
@@ -179,10 +179,22 @@ def _client_ip():
     return request.remote_addr or ""
 
 
-@lru_cache(maxsize=256)
-def _ipinfo_data(ip):
-    """Return cached JSON data from ipinfo.io for ``ip``."""
+LOOKUP_CACHE_TTL = int(os.getenv("LOOKUP_CACHE_TTL", "300"))
+_hostname_cache = {}
+_ipinfo_cache = {}
+_lookup_queue = queue.Queue()
+_queued_ips = set()
+_lookup_lock = threading.Lock()
 
+
+def _perform_hostname_lookup(ip):
+    try:
+        return socket.gethostbyaddr(ip)[0]
+    except Exception:
+        return ""
+
+
+def _ipinfo_data(ip):
     if not ip:
         return {}
     try:
@@ -194,9 +206,66 @@ def _ipinfo_data(ip):
     return {}
 
 
+def _refresh_ip_metadata(ip):
+    hostname = _perform_hostname_lookup(ip)
+    ipinfo = _ipinfo_data(ip)
+    now = time.time()
+    _hostname_cache[ip] = {"value": hostname, "ts": now}
+    _ipinfo_cache[ip] = {"value": ipinfo, "ts": now}
+
+
+def _lookup_worker():
+    while True:
+        try:
+            ip = _lookup_queue.get(timeout=1)
+        except queue.Empty:
+            continue
+        try:
+            _refresh_ip_metadata(ip)
+        finally:
+            with _lookup_lock:
+                _queued_ips.discard(ip)
+            _lookup_queue.task_done()
+
+
+def _enqueue_lookup(ip):
+    if not ip:
+        return
+    with _lookup_lock:
+        if ip in _queued_ips:
+            return
+        _queued_ips.add(ip)
+    _lookup_queue.put(ip)
+
+
+def _cached_hostname(ip):
+    now = time.time()
+    entry = _hostname_cache.get(ip)
+    if entry and now - entry.get("ts", 0) <= LOOKUP_CACHE_TTL:
+        return entry.get("value", "")
+    _enqueue_lookup(ip)
+    return entry.get("value", "") if entry else ""
+
+
+def _cached_ipinfo(ip):
+    now = time.time()
+    entry = _ipinfo_cache.get(ip)
+    if entry and now - entry.get("ts", 0) <= LOOKUP_CACHE_TTL:
+        return entry.get("value", {})
+    _enqueue_lookup(ip)
+    return entry.get("value", {}) if entry else {}
+
+
+lookup_thread = threading.Thread(
+    target=_lookup_worker, name="client_lookup_worker", daemon=True
+)
+lookup_thread.start()
+
+
 def lookup_location(ip):
-    """Return city/country information for ``ip`` using ipinfo.io."""
-    data = _ipinfo_data(ip)
+    """Return city/country information for ``ip`` using cached ipinfo.io data."""
+
+    data = _cached_ipinfo(ip)
     city = data.get("city")
     country = data.get("country")
     if city and country:
@@ -206,7 +275,8 @@ def lookup_location(ip):
 
 def lookup_provider(ip):
     """Return provider/organisation information for ``ip``."""
-    data = _ipinfo_data(ip)
+
+    data = _cached_ipinfo(ip)
     return data.get("org", "")
 
 
@@ -244,12 +314,7 @@ def _track_client():
     """Collect information about the connecting client."""
     ip = _client_ip()
     ua = request.headers.get("User-Agent", "")
-    hostname = ""
-    if ip:
-        try:
-            hostname = socket.gethostbyaddr(ip)[0]
-        except Exception:
-            pass
+    hostname = _cached_hostname(ip)
     now = time.time()
     info = active_clients.get(ip)
     if info is None:
