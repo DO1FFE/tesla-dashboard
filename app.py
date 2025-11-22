@@ -3801,6 +3801,7 @@ def api_alarm_state(vehicle_id=None):
     return jsonify({"alarm_state": alarm})
 
 
+@csrf.exempt
 @app.route("/api/occupant", methods=["GET", "POST"])
 def api_occupant():
     """Return or update occupant presence status."""
@@ -3830,6 +3831,7 @@ def _format_phone(phone, region="DE"):
         return None
 
 
+@csrf.exempt
 @app.route("/api/sms", methods=["POST"])
 def api_sms():
     """Send a short text message using the configured phone number."""
@@ -4330,6 +4332,7 @@ def taxameter_page():
     )
 
 
+@csrf.exempt
 @app.route("/api/taxameter/start", methods=["POST"])
 def api_taxameter_start():
     vid = request.form.get("vehicle_id") or default_vehicle_id()
@@ -4339,6 +4342,7 @@ def api_taxameter_start():
     return jsonify(taximeter.status())
 
 
+@csrf.exempt
 @app.route("/api/taxameter/pause", methods=["POST"])
 def api_taxameter_pause():
     vid = request.form.get("vehicle_id")
@@ -4348,6 +4352,7 @@ def api_taxameter_pause():
     return jsonify(taximeter.status())
 
 
+@csrf.exempt
 @app.route("/api/taxameter/stop", methods=["POST"])
 def api_taxameter_stop():
     vid = request.form.get("vehicle_id")
@@ -4396,6 +4401,7 @@ def api_taxameter_stop():
     return jsonify(result or {"active": False})
 
 
+@csrf.exempt
 @app.route("/api/taxameter/reset", methods=["POST"])
 def api_taxameter_reset():
     vid = request.form.get("vehicle_id")
