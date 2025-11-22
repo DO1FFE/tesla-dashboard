@@ -736,7 +736,19 @@ CONFIG_ITEMS = [
 ]
 
 
-def load_config():
+_config_cache = None
+_config_mtime = None
+
+
+def invalidate_config_cache():
+    """Force the next load to read the config from disk."""
+
+    global _config_cache, _config_mtime
+    _config_cache = None
+    _config_mtime = None
+
+
+def _read_config_from_disk():
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             cfg = json.load(f)
@@ -747,10 +759,32 @@ def load_config():
     return {}
 
 
+def load_config():
+    global _config_cache, _config_mtime
+
+    try:
+        mtime = os.path.getmtime(CONFIG_FILE)
+    except OSError:
+        mtime = None
+
+    if _config_cache is None or mtime != _config_mtime:
+        _config_cache = _read_config_from_disk()
+        _config_mtime = mtime
+
+    return dict(_config_cache)
+
+
 def save_config(cfg):
+    global _config_cache, _config_mtime
+
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
+        _config_cache = dict(cfg)
+        try:
+            _config_mtime = os.path.getmtime(CONFIG_FILE)
+        except OSError:
+            _config_mtime = None
     except Exception:
         pass
 
