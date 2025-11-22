@@ -12,6 +12,7 @@
 <body>
     <h1>Dashboard Konfiguration</h1>
     <form method="post" class="config-container">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <section class="config-section">
             <h2>Dashboard Optionen</h2>
             {% for item in items %}
