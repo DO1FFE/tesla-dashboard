@@ -4068,6 +4068,7 @@ def config_page():
     global _default_vehicle_id
     cfg = load_config()
     vehicles = get_vehicle_list()
+    selected_vehicle_id = cfg.get("vehicle_id") or (vehicles[0]["id"] if vehicles else None)
     if request.method == "POST":
         for item in CONFIG_ITEMS:
             cfg[item["id"]] = item["id"] in request.form
@@ -4102,28 +4103,31 @@ def config_page():
         tariff_5 = request.form.get("tariff_5", "").replace(",", ".").strip()
         wait_price = request.form.get("wait_price", "").replace(",", ".").strip()
         selected_vehicle = request.form.get("vehicle_id", "").strip()
+        if selected_vehicle:
+            selected_vehicle_id = selected_vehicle
+        aprs_cfg = load_config(vehicle_id=selected_vehicle_id)
         if "refresh_vehicle_list" in request.form:
             tesla = get_tesla()
             if tesla is not None:
                 _cached_vehicle_list(tesla, ttl=0)
                 vehicles = get_vehicle_list()
         if callsign:
-            cfg["aprs_callsign"] = callsign
-        elif "aprs_callsign" in cfg:
-            cfg.pop("aprs_callsign")
+            aprs_cfg["aprs_callsign"] = callsign
+        elif "aprs_callsign" in aprs_cfg:
+            aprs_cfg.pop("aprs_callsign")
         if passcode:
-            cfg["aprs_passcode"] = passcode
-        elif not keep_passcode and "aprs_passcode" in cfg:
-            cfg.pop("aprs_passcode")
+            aprs_cfg["aprs_passcode"] = passcode
+        elif not keep_passcode and "aprs_passcode" in aprs_cfg:
+            aprs_cfg.pop("aprs_passcode")
         if wx_callsign:
-            cfg["aprs_wx_callsign"] = wx_callsign
-        elif "aprs_wx_callsign" in cfg:
-            cfg.pop("aprs_wx_callsign")
-        cfg["aprs_wx_enabled"] = wx_enabled
+            aprs_cfg["aprs_wx_callsign"] = wx_callsign
+        elif "aprs_wx_callsign" in aprs_cfg:
+            aprs_cfg.pop("aprs_wx_callsign")
+        aprs_cfg["aprs_wx_enabled"] = wx_enabled
         if aprs_comment:
-            cfg["aprs_comment"] = aprs_comment
-        elif "aprs_comment" in cfg:
-            cfg.pop("aprs_comment")
+            aprs_cfg["aprs_comment"] = aprs_comment
+        elif "aprs_comment" in aprs_cfg:
+            aprs_cfg.pop("aprs_comment")
         if announcement:
             cfg["announcement"] = announcement
         elif "announcement" in cfg:
@@ -4205,10 +4209,13 @@ def config_page():
         elif "api_interval_idle" in cfg:
             cfg.pop("api_interval_idle")
         save_config(cfg)
-    selected_vehicle_id = cfg.get("vehicle_id") or (
-        vehicles[0]["id"] if vehicles else None
-    )
+        save_config(aprs_cfg, vehicle_id=selected_vehicle_id)
+    else:
+        aprs_cfg = load_config(vehicle_id=selected_vehicle_id)
     display_cfg = dict(cfg)
+    for key in ("aprs_callsign", "aprs_passcode", "aprs_wx_callsign", "aprs_wx_enabled", "aprs_comment"):
+        if key in aprs_cfg:
+            display_cfg[key] = aprs_cfg[key]
     if display_cfg.get("aprs_passcode"):
         display_cfg["aprs_passcode"] = SECRET_PLACEHOLDER
     if display_cfg.get("infobip_api_key"):
