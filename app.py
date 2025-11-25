@@ -4115,8 +4115,11 @@ def config_page():
             aprs_cfg["aprs_callsign"] = callsign
         elif "aprs_callsign" in aprs_cfg:
             aprs_cfg.pop("aprs_callsign")
+        existing_passcode = aprs_cfg.get("aprs_passcode") or cfg.get("aprs_passcode")
         if passcode:
             aprs_cfg["aprs_passcode"] = passcode
+        elif keep_passcode and existing_passcode:
+            aprs_cfg["aprs_passcode"] = existing_passcode
         elif not keep_passcode and "aprs_passcode" in aprs_cfg:
             aprs_cfg.pop("aprs_passcode")
         if wx_callsign:
