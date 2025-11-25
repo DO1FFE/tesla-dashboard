@@ -424,9 +424,13 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 
+def _vehicle_key(vehicle_id):
+    return str(vehicle_id) if vehicle_id not in (None, "") else "default"
+
+
 def vehicle_dir(vehicle_id):
     """Return directory for a specific vehicle."""
-    dir_name = str(vehicle_id) if vehicle_id is not None else "default"
+    dir_name = _vehicle_key(vehicle_id)
     path = os.path.join(DATA_DIR, dir_name)
     os.makedirs(path, exist_ok=True)
     return path
@@ -436,6 +440,22 @@ def trip_dir(vehicle_id):
     """Return directory holding trip CSV files for ``vehicle_id``."""
     path = os.path.join(vehicle_dir(vehicle_id), "trips")
     os.makedirs(path, exist_ok=True)
+    return path
+
+
+def config_file(vehicle_id=None):
+    return os.path.join(vehicle_dir(vehicle_id), "config.json")
+
+
+def log_file(vehicle_id, name):
+    return os.path.join(vehicle_dir(vehicle_id), name)
+
+
+def resolve_log_path(vehicle_id, name):
+    path = log_file(vehicle_id, name)
+    legacy = os.path.join(DATA_DIR, name)
+    if not os.path.exists(path) and os.path.exists(legacy):
+        return legacy
     return path
 
 
@@ -462,6 +482,12 @@ def migrate_legacy_files():
                 dst = os.path.join(vehicle_dir(vid), "last_energy.txt")
                 if not os.path.exists(dst):
                     os.rename(src, dst)
+            if fname == "config.json":
+                src = os.path.join(DATA_DIR, fname)
+                dst = config_file(None)
+                if os.path.exists(src) and not os.path.exists(dst):
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    os.rename(src, dst)
         old_trip_dir = os.path.join(DATA_DIR, "trips")
         if os.path.isdir(old_trip_dir):
             for f in os.listdir(old_trip_dir):
@@ -474,13 +500,24 @@ def migrate_legacy_files():
                 os.rmdir(old_trip_dir)
             except OSError:
                 pass
+        for log_name in ("api.log", "state.log", "energy.log", "sms.log"):
+            src = os.path.join(DATA_DIR, log_name)
+            dst = log_file(None, log_name)
+            if os.path.exists(src) and not os.path.exists(dst):
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                os.rename(src, dst)
+            rotated = glob.glob(f"{src}.*")
+            for path in rotated:
+                target = os.path.join(vehicle_dir(None), os.path.basename(path))
+                if not os.path.exists(target):
+                    os.rename(path, target)
     except Exception:
         pass
 
 
 migrate_legacy_files()
 
-CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
+CONFIG_FILE = config_file(None)
 APRS_HOST = "euro.aprs2.net"
 APRS_PORT = 14580
 LOCAL_TZ = ZoneInfo("Europe/Berlin")
@@ -489,30 +526,14 @@ PARK_UI_LOG = "park-ui.log"
 PARKING_CHARGING_STATES = {"Charging", "Starting", "Stopped", "NoPower"}
 _active_parking_sessions = {}
 _last_parking_samples = {}
-api_logger = logging.getLogger("api_logger")
-if not api_logger.handlers:
-    handler = RotatingFileHandler(
-        os.path.join(DATA_DIR, "api.log"), maxBytes=1_000_000, backupCount=1
-    )
-    formatter = logging.Formatter("%(asctime)s %(message)s")
-    handler.setFormatter(formatter)
-    api_logger.addHandler(handler)
-    api_logger.setLevel(logging.INFO)
-    # Forward detailed library logs to the same file
-    for name in ("teslapy", "urllib3"):
-        lib_logger = logging.getLogger(name)
-        lib_logger.addHandler(handler)
-        lib_logger.setLevel(logging.DEBUG)
-    try:
-        import http.client as http_client
-
-        http_client.HTTPConnection.debuglevel = 1
-    except Exception:
-        pass
 
 
-def _merge_state_logs(filename=os.path.join(DATA_DIR, "state.log")):
+def _merge_state_logs(filename=None, vehicle_id=None):
     """Combine rotated state log files into a single file."""
+
+    if filename is None:
+        filename = log_file(vehicle_id, "state.log")
+
     parts = sorted(
         glob.glob(f"{filename}.*"),
         key=lambda p: int(p.rsplit(".", 1)[1]),
@@ -531,43 +552,116 @@ def _merge_state_logs(filename=os.path.join(DATA_DIR, "state.log")):
             os.remove(part)
         dest.write(base_content)
 
-state_logger = logging.getLogger("state_logger")
-if not state_logger.handlers:
-    _merge_state_logs()
-    handler = logging.FileHandler(
-        os.path.join(DATA_DIR, "state.log"), encoding="utf-8"
-    )
-    formatter = logging.Formatter("%(asctime)s %(message)s")
-    formatter.converter = lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
-    handler.setFormatter(formatter)
-    state_logger.addHandler(handler)
-    state_logger.setLevel(logging.INFO)
 
-energy_logger = logging.getLogger("energy_logger")
-if not energy_logger.handlers:
-    handler = logging.FileHandler(
-        os.path.join(DATA_DIR, "energy.log"), mode="a+", encoding="utf-8"
-    )
-    formatter = logging.Formatter("%(asctime)s %(message)s")
-    formatter.converter = lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
-    handler.setFormatter(formatter)
-    energy_logger.addHandler(handler)
-    energy_logger.setLevel(logging.INFO)
+def _get_api_logger(vehicle_id=None):
+    name = f"api_logger_{_vehicle_key(vehicle_id)}"
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        handler = RotatingFileHandler(
+            log_file(vehicle_id, "api.log"), maxBytes=1_000_000, backupCount=1
+        )
+        formatter = logging.Formatter("%(asctime)s %(message)s")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        for lib_name in ("teslapy", "urllib3"):
+            lib_logger = logging.getLogger(lib_name)
+            if handler not in lib_logger.handlers:
+                lib_logger.addHandler(handler)
+            lib_logger.setLevel(logging.DEBUG)
+        try:
+            import http.client as http_client
 
-sms_logger = logging.getLogger("sms_logger")
-if not sms_logger.handlers:
-    handler = RotatingFileHandler(
-        os.path.join(DATA_DIR, "sms.log"), maxBytes=100_000, backupCount=1
-    )
-    formatter = logging.Formatter("%(asctime)s %(message)s")
-    formatter.converter = lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
-    handler.setFormatter(formatter)
-    sms_logger.addHandler(handler)
-    sms_logger.setLevel(logging.INFO)
+            http_client.HTTPConnection.debuglevel = 1
+        except Exception:
+            pass
+    base_logger = globals().get("api_logger")
+    if base_logger and base_logger is not logger:
+        for handler in base_logger.handlers:
+            if handler not in logger.handlers:
+                logger.addHandler(handler)
+    return logger
 
 
-def _load_last_state(filename=os.path.join(DATA_DIR, "state.log")):
+def _get_state_logger(vehicle_id=None):
+    name = f"state_logger_{_vehicle_key(vehicle_id)}"
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        path = log_file(vehicle_id, "state.log")
+        _merge_state_logs(filename=path)
+        handler = logging.FileHandler(path, encoding="utf-8")
+        formatter = logging.Formatter("%(asctime)s %(message)s")
+        formatter.converter = (
+            lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    base_logger = globals().get("state_logger")
+    if base_logger and base_logger is not logger:
+        for handler in base_logger.handlers:
+            if handler not in logger.handlers:
+                logger.addHandler(handler)
+    return logger
+
+
+def _get_energy_logger(vehicle_id=None):
+    name = f"energy_logger_{_vehicle_key(vehicle_id)}"
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        handler = logging.FileHandler(
+            log_file(vehicle_id, "energy.log"), mode="a+", encoding="utf-8"
+        )
+        formatter = logging.Formatter("%(asctime)s %(message)s")
+        formatter.converter = (
+            lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    base_logger = globals().get("energy_logger")
+    if base_logger and base_logger is not logger:
+        for handler in base_logger.handlers:
+            if handler not in logger.handlers:
+                logger.addHandler(handler)
+    return logger
+
+
+def _get_sms_logger(vehicle_id=None):
+    name = f"sms_logger_{_vehicle_key(vehicle_id)}"
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        handler = RotatingFileHandler(
+            log_file(vehicle_id, "sms.log"), maxBytes=100_000, backupCount=1
+        )
+        formatter = logging.Formatter("%(asctime)s %(message)s")
+        formatter.converter = (
+            lambda ts: datetime.fromtimestamp(ts, LOCAL_TZ).timetuple()
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    base_logger = globals().get("sms_logger")
+    if base_logger and base_logger is not logger:
+        for handler in base_logger.handlers:
+            if handler not in logger.handlers:
+                logger.addHandler(handler)
+    return logger
+
+
+# Default loggers for backward compatibility
+api_logger = _get_api_logger(None)
+state_logger = _get_state_logger(None)
+energy_logger = _get_energy_logger(None)
+sms_logger = _get_sms_logger(None)
+
+
+def _load_last_state(vehicle_id=None, filename=None):
     """Load the last logged state for each vehicle from ``state.log``."""
+
+    if filename is None:
+        filename = resolve_log_path(vehicle_id, "state.log")
+
     result = {}
     try:
         with open(filename, "r", encoding="utf-8") as f:
@@ -714,10 +808,12 @@ def update_api_list(data, filename=os.path.join(DATA_DIR, "api-liste.txt")):
 # recorded in ``api.log``.
 
 
-def log_api_data(endpoint, data):
+def log_api_data(endpoint, data, vehicle_id=None):
     """Write API communication to the rotating log file."""
+
     try:
-        api_logger.info(json.dumps({"endpoint": endpoint, "data": data}))
+        logger = _get_api_logger(vehicle_id)
+        logger.info(json.dumps({"endpoint": endpoint, "data": data}))
         update_api_list(data)
     except Exception:
         pass
@@ -754,21 +850,26 @@ CONFIG_ITEMS = [
 ]
 
 
-_config_cache = None
-_config_mtime = None
+_config_cache = {}
+_config_mtime = {}
 
 
-def invalidate_config_cache():
+def invalidate_config_cache(vehicle_id=None):
     """Force the next load to read the config from disk."""
 
     global _config_cache, _config_mtime
-    _config_cache = None
-    _config_mtime = None
+    if vehicle_id is None:
+        _config_cache = {}
+        _config_mtime = {}
+    else:
+        key = _vehicle_key(vehicle_id)
+        _config_cache.pop(key, None)
+        _config_mtime.pop(key, None)
 
 
-def _read_config_from_disk():
+def _read_config_from_disk(vehicle_id=None):
     try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+        with open(config_file(vehicle_id), "r", encoding="utf-8") as f:
             cfg = json.load(f)
             if isinstance(cfg, dict):
                 return cfg
@@ -777,32 +878,37 @@ def _read_config_from_disk():
     return {}
 
 
-def load_config():
+def load_config(vehicle_id=None):
     global _config_cache, _config_mtime
 
+    key = _vehicle_key(vehicle_id)
+
     try:
-        mtime = os.path.getmtime(CONFIG_FILE)
+        mtime = os.path.getmtime(config_file(vehicle_id))
     except OSError:
         mtime = None
 
-    if _config_cache is None or mtime != _config_mtime:
-        _config_cache = _read_config_from_disk()
-        _config_mtime = mtime
+    cached = _config_cache.get(key)
+    if cached is None or mtime != _config_mtime.get(key):
+        _config_cache[key] = _read_config_from_disk(vehicle_id)
+        _config_mtime[key] = mtime
 
-    return dict(_config_cache)
+    return dict(_config_cache.get(key, {}))
 
 
-def save_config(cfg):
+def save_config(cfg, vehicle_id=None):
     global _config_cache, _config_mtime
 
+    key = _vehicle_key(vehicle_id)
+
     try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        with open(config_file(vehicle_id), "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
-        _config_cache = dict(cfg)
+        _config_cache[key] = dict(cfg)
         try:
-            _config_mtime = os.path.getmtime(CONFIG_FILE)
+            _config_mtime[key] = os.path.getmtime(config_file(vehicle_id))
         except OSError:
-            _config_mtime = None
+            _config_mtime[key] = None
     except Exception:
         pass
 
@@ -885,7 +991,11 @@ def get_news_events_info():
 
     try:
         data = tesla.api("NOTIFICATIONS_GET_NEWS_AND_EVENTS_TOGGLES")
-        log_api_data("NOTIFICATIONS_GET_NEWS_AND_EVENTS_TOGGLES", data)
+        log_api_data(
+            "NOTIFICATIONS_GET_NEWS_AND_EVENTS_TOGGLES",
+            data,
+            vehicle_id=_default_vehicle_id,
+        )
         if isinstance(data, dict):
             pairs = [f"{k}={v}" for k, v in data.items()]
             return "Toggles: " + ", ".join(pairs)
@@ -1112,10 +1222,12 @@ def _log_api_error(exc):
 def log_vehicle_state(vehicle_id, state):
     """Log vehicle state changes to ``state.log`` if changed."""
     try:
+        key = _vehicle_key(vehicle_id)
         with state_lock:
-            if last_vehicle_state.get(vehicle_id) != state:
-                last_vehicle_state[vehicle_id] = state
-                state_logger.info(
+            if last_vehicle_state.get(key) != state:
+                last_vehicle_state[key] = state
+                logger = _get_state_logger(vehicle_id)
+                logger.info(
                     json.dumps({"vehicle_id": vehicle_id, "state": state})
                 )
     except Exception:
@@ -1131,7 +1243,9 @@ def _last_logged_energy(vehicle_id):
 def _last_logged_energy_entry(vehicle_id):
     """Return the timestamp and value of the last energy entry for a vehicle."""
     try:
-        with open(os.path.join(DATA_DIR, "energy.log"), "r", encoding="utf-8") as f:
+        with open(
+            resolve_log_path(vehicle_id, "energy.log"), "r", encoding="utf-8"
+        ) as f:
             lines = f.readlines()
         for line in reversed(lines):
             idx = line.find("{")
@@ -1212,6 +1326,7 @@ def _log_energy(vehicle_id, amount, timestamp=None):
     try:
         with _energy_log_lock:
             eps = 0.001
+            logger = _get_energy_logger(vehicle_id)
             last_ts, last = _last_logged_energy_entry(vehicle_id)
             marker_before = _current_last_energy_marker(vehicle_id)
             stored_marker = _last_energy_markers.get(vehicle_id)
@@ -1268,12 +1383,16 @@ def _log_energy(vehicle_id, amount, timestamp=None):
                     and ts_dt > last_ts
                 ):
                     return False
-            filename = os.path.join(DATA_DIR, "energy.log")
+            primary_path = log_file(vehicle_id, "energy.log")
+            handler = next(
+                (h for h in reversed(logger.handlers) if getattr(h, "stream", None)),
+                None,
+            )
+            filename = getattr(handler, "baseFilename", None) or primary_path
             line_tpl = "{ts} {msg}\n"
             ts_str = ts_dt.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
             has_recent_entry = False
 
-            handler = energy_logger.handlers[0] if energy_logger.handlers else None
             stream = getattr(handler, "stream", None)
 
             if handler is not None and stream is not None:
@@ -1344,6 +1463,14 @@ def _log_energy(vehicle_id, amount, timestamp=None):
                     with open(filename, "a", encoding="utf-8") as f:
                         f.write(line)
                     written = True
+                except Exception:
+                    pass
+
+            if written and filename != primary_path:
+                try:
+                    os.makedirs(os.path.dirname(primary_path), exist_ok=True)
+                    with open(primary_path, "a", encoding="utf-8") as f:
+                        f.write(line)
                 except Exception:
                     pass
 
@@ -1634,10 +1761,11 @@ def _record_dashboard_parking_state(vehicle_id, data):
         _active_parking_sessions.pop(session_key, None)
 
 
-def _log_sms(message, success):
+def _log_sms(message, success, vehicle_id=None):
     """Append SMS information to ``sms.log``."""
     try:
-        sms_logger.info(json.dumps({"message": message, "success": success}))
+        logger = _get_sms_logger(vehicle_id)
+        logger.info(json.dumps({"message": message, "success": success}))
     except Exception:
         pass
 
@@ -1782,7 +1910,14 @@ def send_aprs(vehicle_data):
     ):
         return
 
-    cfg = load_config()
+    vid = None
+    try:
+        vid = vehicle_data.get("id_s") or vehicle_data.get("vehicle_id")
+    except Exception:
+        vid = None
+    vid = _vehicle_key(vid)
+
+    cfg = load_config(vehicle_id=vid)
     callsign = cfg.get("aprs_callsign")
     passcode = cfg.get("aprs_passcode")
     wx_callsign = cfg.get("aprs_wx_callsign")
@@ -1804,7 +1939,7 @@ def send_aprs(vehicle_data):
 
     temp_in = climate.get("inside_temp")
     temp_out = climate.get("outside_temp")
-    vid = str(vehicle_data.get("id_s") or vehicle_data.get("vehicle_id") or "default")
+    vid = vid or _vehicle_key(vehicle_data.get("id_s") or vehicle_data.get("vehicle_id"))
     now = time.time()
     last = _last_aprs_info.get(vid)
     changed = last is None
@@ -2113,8 +2248,12 @@ def _parse_log_time(ts_str):
     return None
 
 
-def _load_state_entries(filename=os.path.join(DATA_DIR, "state.log")):
+def _load_state_entries(filename=None, vehicle_id=None):
     """Parse state log entries as (timestamp, state) tuples."""
+
+    if filename is None:
+        filename = resolve_log_path(vehicle_id, "state.log")
+
     entries = []
     try:
         with open(filename, "r", encoding="utf-8") as f:
@@ -2163,10 +2302,10 @@ def _compute_state_stats(entries):
     return stats
 
 
-def _compute_energy_stats(filename=None):
+def _compute_energy_stats(filename=None, vehicle_id=None):
     """Return per-day added energy in kWh based on ``energy.log``."""
     if filename is None:
-        filename = os.path.join(DATA_DIR, "energy.log")
+        filename = resolve_log_path(vehicle_id, "energy.log")
 
     eps = 0.001
     daily_sessions = {}
@@ -2339,7 +2478,7 @@ def _process_dashboard_parking_log(filename, distribute_loss):
     return processed
 
 
-def _process_legacy_parking_log(filename, distribute_loss):
+def _process_legacy_parking_log(filename, distribute_loss, vehicle_id=None):
     """Populate parking losses from the legacy ``api.log`` format."""
 
     if not filename:
@@ -2349,7 +2488,9 @@ def _process_legacy_parking_log(filename, distribute_loss):
     sessions = {}
     processed = False
 
-    if filename == os.path.join(DATA_DIR, "api.log"):
+    api_path = resolve_log_path(vehicle_id, "api.log") if filename else None
+
+    if filename == api_path:
         rotated = []
         for path in glob.glob(f"{filename}.*"):
             try:
@@ -2520,7 +2661,7 @@ def _process_legacy_parking_log(filename, distribute_loss):
     return processed
 
 
-def _compute_parking_losses(filename=None):
+def _compute_parking_losses(filename=None, vehicle_id=None):
     """Return per-day energy percentage and range losses while parked."""
 
     if filename is None:
@@ -2605,13 +2746,15 @@ def _compute_parking_losses(filename=None):
 
     if base_name != "api.log":
         processed = _process_dashboard_parking_log(primary_path, _distribute_loss)
-        base_dir = os.path.dirname(primary_path) or DATA_DIR
-        fallback_path = os.path.join(base_dir, "api.log")
+        base_dir = os.path.dirname(primary_path) or vehicle_dir(vehicle_id)
+        fallback_path = resolve_log_path(vehicle_id, "api.log")
     else:
         fallback_path = primary_path
 
     if not processed:
-        processed = _process_legacy_parking_log(fallback_path, _distribute_loss)
+        processed = _process_legacy_parking_log(
+            fallback_path, _distribute_loss, vehicle_id=vehicle_id
+        )
 
     try:
         existing_entries = []
@@ -2743,10 +2886,21 @@ def _merge_parking_value(prev_total, prev_source, new_raw, tolerance=0.01):
 
 def compute_statistics():
     """Compute daily statistics and save them to ``STAT_FILE``."""
+    vid = _default_vehicle_id or default_vehicle_id()
     previous = _load_existing_statistics()
-    stats = _compute_state_stats(_load_state_entries())
-    energy = _compute_energy_stats()
-    parking = _compute_parking_losses()
+    try:
+        entries = _load_state_entries(vehicle_id=vid)
+    except TypeError:
+        entries = _load_state_entries()
+    stats = _compute_state_stats(entries)
+    try:
+        energy = _compute_energy_stats(vehicle_id=vid)
+    except TypeError:
+        energy = _compute_energy_stats()
+    try:
+        parking = _compute_parking_losses(vehicle_id=vid)
+    except TypeError:
+        parking = _compute_parking_losses()
     for path in _get_trip_files():
         fname = os.path.basename(path)
         date_str = fname.split("_")[-1].split(".")[0]
@@ -2836,10 +2990,11 @@ def compute_statistics():
 def _statistics_dependency_signature():
     """Return a signature describing inputs used for statistics generation."""
 
+    vid = _default_vehicle_id or default_vehicle_id()
     files = [
-        os.path.join(DATA_DIR, "state.log"),
-        os.path.join(DATA_DIR, "energy.log"),
-        os.path.join(DATA_DIR, "api.log"),
+        resolve_log_path(vid, "state.log"),
+        resolve_log_path(vid, "energy.log"),
+        resolve_log_path(vid, "api.log"),
     ]
     files.extend(_get_trip_files())
 
@@ -2959,7 +3114,9 @@ def _cached_vehicle_list(tesla, ttl=86400):
                 _vehicle_list_cache = tesla.vehicle_list()
                 _vehicle_list_cache_ts = now
                 log_api_data(
-                    "vehicle_list", sanitize([v.copy() for v in _vehicle_list_cache])
+                    "vehicle_list",
+                    sanitize([v.copy() for v in _vehicle_list_cache]),
+                    vehicle_id=_default_vehicle_id,
                 )
                 if _vehicle_list_cache and _default_vehicle_id is None:
                     _default_vehicle_id = str(_vehicle_list_cache[0]["id_s"])
@@ -2992,6 +3149,14 @@ def default_vehicle_id():
 def _refresh_state(vehicle, times=1):
     """Query the vehicle state multiple times and return the last value."""
     state = None
+    vid = None
+    try:
+        vid = vehicle.get("id_s") or vehicle.get("vehicle_id")
+    except Exception:
+        try:
+            vid = vehicle["id_s"]
+        except Exception:
+            vid = None
     for _ in range(times):
         try:
             vehicle.get_vehicle_summary()
@@ -2999,8 +3164,8 @@ def _refresh_state(vehicle, times=1):
             _log_api_error(exc)
             break
         state = vehicle.get("state") or vehicle["state"]
-        log_vehicle_state(vehicle["id_s"], state)
-        log_api_data("get_vehicle_summary", {"state": state})
+        log_vehicle_state(vid, state)
+        log_api_data("get_vehicle_summary", {"state": state}, vehicle_id=vid)
         if state == "online":
             return state
 
@@ -3064,34 +3229,34 @@ def get_vehicle_data(vehicle_id=None, state=None):
     if vehicle is None:
         vehicle = vehicles[0]
 
+    vid = None
+    try:
+        if isinstance(vehicle, dict):
+            vid = vehicle.get("id_s") or vehicle.get("vehicle_id")
+        else:
+            vid = vehicle["id_s"]
+    except Exception:
+        vid = None
+    if vid is None and vehicle_id is not None:
+        vid = vehicle_id
+    if vid is None and _default_vehicle_id is not None:
+        vid = _default_vehicle_id
+
     if state is None:
         try:
             state = _refresh_state(vehicle)
         except Exception as exc:
             _log_api_error(exc)
-            log_vehicle_state(vehicle["id_s"], "offline")
+            log_vehicle_state(vid, "offline")
             return {"error": "Vehicle unavailable", "state": "offline"}
 
     if state != "online":
-        vid = None
-        try:
-            if isinstance(vehicle, dict):
-                vid = vehicle.get("id_s") or vehicle.get("vehicle_id")
-            else:
-                vid = vehicle["id_s"]
-        except Exception:
-            vid = None
-
-        if vid is None and vehicle_id is not None:
-            vid = vehicle_id
-        if vid is None and _default_vehicle_id is not None:
-            vid = _default_vehicle_id
-
+        
         payload = {"state": state}
         if vid is not None:
             payload["id_s"] = str(vid)
 
-        log_api_data("get_vehicle_data", payload)
+        log_api_data("get_vehicle_data", payload, vehicle_id=vid)
         return payload
 
     try:
@@ -3122,7 +3287,7 @@ def get_vehicle_data(vehicle_id=None, state=None):
             v_state["vehicle_name"] = f"{name} ({car_desc} {trim.upper()})"
     except Exception:
         pass
-    log_api_data("get_vehicle_data", sanitized)
+    log_api_data("get_vehicle_data", sanitized, vehicle_id=vid)
     sanitized["park_start"] = park_start_ms
     sanitized["park_duration"] = park_duration_string(park_start_ms)
     sanitized["path"] = trip_path
@@ -3884,7 +4049,7 @@ def api_sms():
             timeout=10,
         )
         success = 200 <= resp.status_code < 300
-        _log_sms(message, success)
+        _log_sms(message, success, vehicle_id=_default_vehicle_id)
         if success:
             return jsonify({"success": True})
         try:
@@ -3893,7 +4058,7 @@ def api_sms():
             error = resp.text
         return jsonify({"success": False, "error": error})
     except Exception as exc:
-        _log_sms(message, False)
+        _log_sms(message, False, vehicle_id=_default_vehicle_id)
         return jsonify({"success": False, "error": str(exc)})
 
 
@@ -4256,9 +4421,11 @@ def api_list_file():
 @app.route("/state")
 def state_log_page():
     """Display the vehicle state log."""
+    vehicle_id = request.args.get("vehicle_id") or _default_vehicle_id or default_vehicle_id()
     log_lines = []
     try:
-        with open(os.path.join(DATA_DIR, "state.log"), "r", encoding="utf-8") as f:
+        path = resolve_log_path(vehicle_id, "state.log")
+        with open(path, "r", encoding="utf-8") as f:
             log_lines = f.readlines()
     except Exception:
         pass
@@ -4268,9 +4435,11 @@ def state_log_page():
 @app.route("/apilog")
 def api_log_page():
     """Display the API log."""
+    vehicle_id = request.args.get("vehicle_id") or _default_vehicle_id or default_vehicle_id()
     log_lines = []
     try:
-        with open(os.path.join(DATA_DIR, "api.log"), "r", encoding="utf-8") as f:
+        path = resolve_log_path(vehicle_id, "api.log")
+        with open(path, "r", encoding="utf-8") as f:
             log_lines = f.readlines()
     except Exception:
         pass
@@ -4280,9 +4449,11 @@ def api_log_page():
 @app.route("/sms")
 def sms_log_page():
     """Display the SMS log."""
+    vehicle_id = request.args.get("vehicle_id") or _default_vehicle_id or default_vehicle_id()
     log_lines = []
     try:
-        with open(os.path.join(DATA_DIR, "sms.log"), "r", encoding="utf-8") as f:
+        path = resolve_log_path(vehicle_id, "sms.log")
+        with open(path, "r", encoding="utf-8") as f:
             log_lines = f.readlines()
     except Exception:
         pass
@@ -4569,7 +4740,8 @@ def debug_info():
 
     log_lines = []
     try:
-        with open(os.path.join(DATA_DIR, "api.log"), "r", encoding="utf-8") as f:
+        path = resolve_log_path(_default_vehicle_id or default_vehicle_id(), "api.log")
+        with open(path, "r", encoding="utf-8") as f:
             log_lines = f.readlines()[-50:]
     except Exception:
         pass
