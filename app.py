@@ -1540,12 +1540,77 @@ def _process_parking_log_increment(conn):
     _set_meta(conn, "parking_offset", size)
 
 
+def _snapshot_trip_file_state(conn):
+    meta = {}
+    for path in _get_trip_files():
+        try:
+            stat = os.stat(path)
+        except OSError:
+            continue
+        meta[path] = {
+            "mtime": stat.st_mtime,
+            "size": stat.st_size,
+            "km": _trip_distance(path),
+            "speed": _trip_max_speed(path),
+        }
+    _set_meta(conn, "trip_files_meta", json.dumps(meta))
+
+
+def _process_trip_files_increment(conn):
+    raw_meta = _get_meta(conn, "trip_files_meta", "{}")
+    try:
+        meta = json.loads(raw_meta) if isinstance(raw_meta, str) else {}
+    except Exception:
+        meta = {}
+    updated_meta = {}
+
+    for path in _get_trip_files():
+        try:
+            stat = os.stat(path)
+        except OSError:
+            continue
+
+        previous = meta.get(path, {})
+        prev_mtime = float(previous.get("mtime", 0.0) or 0.0)
+        prev_size = int(previous.get("size", 0) or 0)
+        prev_km = float(previous.get("km", 0.0) or 0.0)
+        changed = stat.st_mtime != prev_mtime or stat.st_size != prev_size
+        if not changed:
+            updated_meta[path] = previous
+            continue
+
+        km = _trip_distance(path)
+        speed = _trip_max_speed(path)
+        fname = os.path.basename(path)
+        date_str = fname.split("_")[-1].split(".")[0]
+        try:
+            day = datetime.strptime(date_str, "%Y%m%d").date().isoformat()
+        except Exception:
+            day = date_str
+
+        delta_km = km - prev_km if km > prev_km else 0.0
+        payload = {"speed": speed}
+        if delta_km > 0:
+            payload["km"] = delta_km
+        _merge_daily_row(conn, day, payload)
+
+        updated_meta[path] = {
+            "mtime": stat.st_mtime,
+            "size": stat.st_size,
+            "km": km,
+            "speed": speed,
+        }
+
+    _set_meta(conn, "trip_files_meta", json.dumps(updated_meta))
+
+
 def _initial_statistics_backfill(conn):
     stats = compute_statistics()
     for day, payload in stats.items():
         _write_daily_row(conn, day, payload)
     conn.commit()
     _rebuild_monthly_scope(conn)
+    _snapshot_trip_file_state(conn)
     try:
         with open(resolve_log_path(_default_vehicle_id or default_vehicle_id(), "state.log"), "r", encoding="utf-8") as handle:
             last_line = None
@@ -1583,6 +1648,7 @@ def _statistics_aggregation_tick():
             _process_energy_log_increment(conn)
             _compute_parking_losses()
             _process_parking_log_increment(conn)
+            _process_trip_files_increment(conn)
             _rebuild_monthly_scope(conn)
         finally:
             if conn is not None:
