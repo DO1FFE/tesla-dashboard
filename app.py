@@ -4843,9 +4843,9 @@ def _prepare_statistics_payload():
         if day.startswith(current_month):
             row = {
                 "date": day,
-                "online": entry.get("online", 0.0),
-                "offline": entry.get("offline", 0.0),
-                "asleep": entry.get("asleep", 0.0),
+                "online": round(entry.get("online", 0.0), 2),
+                "offline": round(entry.get("offline", 0.0), 2),
+                "asleep": round(entry.get("asleep", 0.0), 2),
                 "km": round(entry.get("km", 0.0), 2),
                 "speed": int(round(entry.get("speed", 0.0))),
                 "energy": round(entry.get("energy", 0.0), 2),
