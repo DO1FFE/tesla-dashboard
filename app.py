@@ -1557,11 +1557,16 @@ def _snapshot_trip_file_state(conn):
 
 
 def _process_trip_files_increment(conn):
-    raw_meta = _get_meta(conn, "trip_files_meta", "{}")
+    raw_meta = _get_meta(conn, "trip_files_meta")
+    meta_missing = raw_meta is None
     try:
         meta = json.loads(raw_meta) if isinstance(raw_meta, str) else {}
     except Exception:
         meta = {}
+
+    if meta_missing and _get_meta(conn, "statistics_initialized") == "1":
+        _snapshot_trip_file_state(conn)
+        return
     updated_meta = {}
 
     for path in _get_trip_files():
