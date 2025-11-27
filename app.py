@@ -1581,6 +1581,7 @@ def _statistics_aggregation_tick():
                 _initial_statistics_backfill(conn)
             _process_state_log_increment(conn)
             _process_energy_log_increment(conn)
+            _compute_parking_losses()
             _process_parking_log_increment(conn)
             _rebuild_monthly_scope(conn)
         finally:
@@ -3345,13 +3346,11 @@ def _compute_parking_losses(filename=None, vehicle_id=None):
         seen.add(key)
         new_entries.append(entry)
 
-    combined_entries = existing_entries + new_entries
-
-    if combined_entries:
+    if new_entries:
         try:
             os.makedirs(os.path.dirname(log_path), exist_ok=True)
-            with open(log_path, "w", encoding="utf-8") as handle:
-                for entry in combined_entries:
+            with open(log_path, "a", encoding="utf-8") as handle:
+                for entry in new_entries:
                     handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
         except Exception:
             pass
