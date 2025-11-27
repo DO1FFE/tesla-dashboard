@@ -1572,16 +1572,20 @@ def _initial_statistics_backfill(conn):
 
 def _statistics_aggregation_tick():
     with _aggregation_lock:
-        conn = _statistics_conn()
-        _ensure_statistics_tables(conn)
-        initialized = _get_meta(conn, "statistics_initialized") == "1"
-        if not initialized:
-            _initial_statistics_backfill(conn)
-        _process_state_log_increment(conn)
-        _process_energy_log_increment(conn)
-        _process_parking_log_increment(conn)
-        _rebuild_monthly_scope(conn)
-        conn.close()
+        conn = None
+        try:
+            conn = _statistics_conn()
+            _ensure_statistics_tables(conn)
+            initialized = _get_meta(conn, "statistics_initialized") == "1"
+            if not initialized:
+                _initial_statistics_backfill(conn)
+            _process_state_log_increment(conn)
+            _process_energy_log_increment(conn)
+            _process_parking_log_increment(conn)
+            _rebuild_monthly_scope(conn)
+        finally:
+            if conn is not None:
+                conn.close()
 
 
 def _statistics_aggregation_loop(interval):
