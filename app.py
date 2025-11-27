@@ -1121,6 +1121,16 @@ _aggregation_initialized = False
 _aggregation_thread = None
 
 
+def _force_statistics_rebuild_on_start():
+    """Ensure the next aggregation run performs a full rebuild."""
+
+    global FORCE_STATISTICS_REBUILD
+    FORCE_STATISTICS_REBUILD = True
+    with _statistics_cache_lock:
+        _statistics_cache["signature"] = None
+        _statistics_cache["data"] = None
+
+
 def _statistics_conn():
     os.makedirs(os.path.dirname(STATISTICS_DB), exist_ok=True)
     conn = sqlite3.connect(STATISTICS_DB)
@@ -5560,15 +5570,15 @@ def handle_disconnect():
             ptt_timer = None
 
 
-# When embedded in another process (e.g., WSGI), start aggregation immediately.
-# The CLI path below also starts aggregation after handling startup flags.
+# When embedded in another process (e.g., WSGI), start aggregation immediately
+# and force a full rebuild so caches and offsets are refreshed on boot.
 if __name__ != "__main__":
+    _force_statistics_rebuild_on_start()
     _start_statistics_aggregation(AGGREGATION_INTERVAL)
 
 
 if __name__ == "__main__":
-    # Set FORCE_STATISTICS_REBUILD=1 or pass --rebuild-statistics to refresh
-    # all cached aggregates and offsets from the underlying logs and trip CSVs.
     _parse_cli_arguments()
+    _force_statistics_rebuild_on_start()
     _start_statistics_aggregation(AGGREGATION_INTERVAL)
     socketio.run(app, host="0.0.0.0", port=8013, debug=True)
