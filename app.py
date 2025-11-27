@@ -12,6 +12,8 @@ import glob
 import socket
 import uuid
 import secrets
+import sqlite3
+import argparse
 from urllib.parse import urlparse
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
@@ -169,6 +171,12 @@ def assign_client_id():
         g.set_client_id_cookie = True
     else:
         g.client_id = cid
+
+
+@app.before_request
+def _ensure_background_started():
+    if not (_aggregation_thread and _aggregation_thread.is_alive()):
+        _start_statistics_aggregation()
 
 
 @app.after_request
@@ -822,6 +830,21 @@ def log_api_data(endpoint, data, vehicle_id=None):
 STAT_FILE = os.path.join(DATA_DIR, "statistics.json")
 PARKTIME_FILE = os.path.join(DATA_DIR, "parktime.json")
 TAXI_DB = os.path.join(DATA_DIR, "taximeter.db")
+STATISTICS_DB = os.getenv("STATISTICS_DB_PATH") or os.path.join(DATA_DIR, "statistics.db")
+AGGREGATION_INTERVAL = float(os.getenv("AGGREGATION_INTERVAL_SECONDS", "300"))
+
+
+def _parse_cli_arguments():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument(
+        "--aggregation-interval",
+        type=float,
+        help="Seconds between statistics aggregation runs (default: env AGGREGATION_INTERVAL_SECONDS)",
+    )
+    args, _unknown = parser.parse_known_args()
+    if args.aggregation_interval:
+        global AGGREGATION_INTERVAL
+        AGGREGATION_INTERVAL = max(1.0, args.aggregation_interval)
 
 # Elements on the dashboard that can be toggled via the config page
 CONFIG_ITEMS = [
@@ -1073,6 +1096,516 @@ api_errors_lock = threading.Lock()
 state_lock = threading.Lock()
 _statistics_cache_lock = threading.Lock()
 _statistics_cache = {"signature": None, "data": None}
+_aggregation_lock = threading.Lock()
+_aggregation_initialized = False
+_aggregation_thread = None
+
+
+def _statistics_conn():
+    os.makedirs(os.path.dirname(STATISTICS_DB), exist_ok=True)
+    conn = sqlite3.connect(STATISTICS_DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _ensure_statistics_tables(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS statistics_aggregate (
+            scope TEXT NOT NULL,
+            date TEXT NOT NULL,
+            online REAL DEFAULT 0.0,
+            offline REAL DEFAULT 0.0,
+            asleep REAL DEFAULT 0.0,
+            km REAL DEFAULT 0.0,
+            speed REAL DEFAULT 0.0,
+            energy REAL DEFAULT 0.0,
+            park_energy_pct REAL DEFAULT 0.0,
+            park_km REAL DEFAULT 0.0,
+            PRIMARY KEY (scope, date)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS statistics_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS statistics_energy_sessions (
+            day TEXT NOT NULL,
+            session_key TEXT PRIMARY KEY,
+            value REAL DEFAULT 0.0
+        )
+        """
+    )
+    conn.commit()
+
+
+def _get_meta(conn, key, default=None):
+    cur = conn.execute("SELECT value FROM statistics_meta WHERE key=?", (key,))
+    row = cur.fetchone()
+    if row is None:
+        return default
+    return row[0]
+
+
+def _set_meta(conn, key, value):
+    conn.execute(
+        "INSERT INTO statistics_meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key, str(value)),
+    )
+    conn.commit()
+
+
+def _load_daily_from_db(conn):
+    cur = conn.execute(
+        "SELECT date, online, offline, asleep, km, speed, energy, park_energy_pct, park_km FROM statistics_aggregate WHERE scope='daily'"
+    )
+    data = {}
+    for row in cur.fetchall():
+        data[row[0]] = {
+            "online": float(row[1] or 0.0),
+            "offline": float(row[2] or 0.0),
+            "asleep": float(row[3] or 0.0),
+            "km": float(row[4] or 0.0),
+            "speed": float(row[5] or 0.0),
+            "energy": float(row[6] or 0.0),
+            "park_energy_pct": float(row[7] or 0.0),
+            "park_km": float(row[8] or 0.0),
+        }
+    return data
+
+
+def _write_daily_row(conn, day, payload, scope="daily"):
+    conn.execute(
+        """
+        INSERT INTO statistics_aggregate (
+            scope, date, online, offline, asleep, km, speed, energy, park_energy_pct, park_km
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(scope, date) DO UPDATE SET
+            online=excluded.online,
+            offline=excluded.offline,
+            asleep=excluded.asleep,
+            km=excluded.km,
+            speed=excluded.speed,
+            energy=excluded.energy,
+            park_energy_pct=excluded.park_energy_pct,
+            park_km=excluded.park_km
+        """,
+        (
+            scope,
+            day,
+            payload.get("online", 0.0),
+            payload.get("offline", 0.0),
+            payload.get("asleep", 0.0),
+            payload.get("km", 0.0),
+            payload.get("speed", 0.0),
+            payload.get("energy", 0.0),
+            payload.get("park_energy_pct", 0.0),
+            payload.get("park_km", 0.0),
+        ),
+    )
+
+
+def _merge_daily_row(conn, day, payload):
+    current = _load_daily_from_db(conn).get(day, {})
+    merged = {
+        "online": round(float(current.get("online", 0.0)) + payload.get("online", 0.0), 6),
+        "offline": round(float(current.get("offline", 0.0)) + payload.get("offline", 0.0), 6),
+        "asleep": round(float(current.get("asleep", 0.0)) + payload.get("asleep", 0.0), 6),
+        "km": round(float(current.get("km", 0.0)) + payload.get("km", 0.0), 6),
+        "speed": max(float(current.get("speed", 0.0)), payload.get("speed", 0.0)),
+        "energy": round(float(current.get("energy", 0.0)) + payload.get("energy", 0.0), 6),
+        "park_energy_pct": round(
+            float(current.get("park_energy_pct", 0.0)) + payload.get("park_energy_pct", 0.0), 6
+        ),
+        "park_km": round(float(current.get("park_km", 0.0)) + payload.get("park_km", 0.0), 6),
+    }
+    _write_daily_row(conn, day, merged)
+    conn.commit()
+
+
+def _rebuild_monthly_scope(conn):
+    conn.execute("DELETE FROM statistics_aggregate WHERE scope='monthly'")
+    cur = conn.execute(
+        "SELECT date, online, offline, asleep, km, speed, energy, park_energy_pct, park_km FROM statistics_aggregate WHERE scope='daily'"
+    )
+    monthly = {}
+    for row in cur.fetchall():
+        month = row[0][:7]
+        m = monthly.setdefault(
+            month,
+            {
+                "online_sum": 0.0,
+                "offline_sum": 0.0,
+                "asleep_sum": 0.0,
+                "km": 0.0,
+                "speed": 0.0,
+                "energy": 0.0,
+                "park_energy_pct": 0.0,
+                "park_km": 0.0,
+                "count": 0,
+            },
+        )
+        m["online_sum"] += float(row[1] or 0.0)
+        m["offline_sum"] += float(row[2] or 0.0)
+        m["asleep_sum"] += float(row[3] or 0.0)
+        m["km"] += float(row[4] or 0.0)
+        m["speed"] = max(m["speed"], float(row[5] or 0.0))
+        m["energy"] += float(row[6] or 0.0)
+        m["park_energy_pct"] += float(row[7] or 0.0)
+        m["park_km"] += float(row[8] or 0.0)
+        m["count"] += 1
+
+    for month, payload in monthly.items():
+        cnt = payload["count"] or 1
+        _write_daily_row(
+            conn,
+            month,
+            {
+                "online": round(payload["online_sum"] / cnt, 2),
+                "offline": round(payload["offline_sum"] / cnt, 2),
+                "asleep": round(payload["asleep_sum"] / cnt, 2),
+                "km": round(payload["km"], 2),
+                "speed": round(payload["speed"], 2),
+                "energy": round(payload["energy"], 2),
+                "park_energy_pct": round(payload["park_energy_pct"], 2),
+                "park_km": round(payload["park_km"], 2),
+            },
+            scope="monthly",
+        )
+    conn.commit()
+
+
+def _seed_energy_sessions_from_log(conn, offset=0):
+    path = resolve_log_path(_default_vehicle_id or default_vehicle_id(), "energy.log")
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = 0
+    if offset > size:
+        offset = 0
+
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            handle.seek(offset)
+            for line in handle:
+                idx = line.find("{")
+                if idx == -1:
+                    continue
+                ts_str = line[:idx].strip()
+                ts_dt = _parse_log_time(ts_str)
+                if ts_dt is None:
+                    continue
+                try:
+                    entry = json.loads(line[idx:])
+                    vid = entry.get("vehicle_id")
+                    val = float(entry.get("added_energy", 0.0))
+                except Exception:
+                    continue
+
+                if val <= 0:
+                    continue
+                day = ts_dt.date().isoformat()
+                session_key = (vid if vid is not None else "__default__") + "|" + ts_dt.isoformat()
+                try:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO statistics_energy_sessions(day, session_key, value) VALUES(?, ?, ?)",
+                        (day, session_key, val),
+                    )
+                except Exception:
+                    continue
+    except FileNotFoundError:
+        pass
+    conn.commit()
+    _set_meta(conn, "energy_offset", size)
+
+
+def _distribute_state_duration(conn, start, end, state):
+    if start is None or end is None or state is None:
+        return
+    if end <= start:
+        return
+    current = start
+    total_seconds = 24 * 3600
+    while current < end:
+        day = datetime.fromtimestamp(current, LOCAL_TZ).date()
+        next_day = datetime.combine(day + timedelta(days=1), datetime.min.time(), LOCAL_TZ).timestamp()
+        segment_end = min(end, next_day)
+        duration = segment_end - current
+        pct = round(duration / total_seconds * 100.0, 6)
+        key = state if state in {"online", "offline", "asleep"} else "offline"
+        _merge_daily_row(conn, day.isoformat(), {key: pct})
+        current = segment_end
+
+
+def _process_state_log_increment(conn):
+    vid = _default_vehicle_id or default_vehicle_id()
+    path = resolve_log_path(vid, "state.log")
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = 0
+
+    offset = int(float(_get_meta(conn, "state_offset", 0) or 0))
+    if offset > size:
+        offset = 0
+
+    last_ts = None
+    last_state = _get_meta(conn, "state_last_state")
+    ts_val = _get_meta(conn, "state_last_ts")
+    if ts_val is not None:
+        try:
+            last_ts = float(ts_val)
+        except (TypeError, ValueError):
+            last_ts = None
+
+    entries = []
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            handle.seek(offset)
+            for line in handle:
+                idx = line.find("{")
+                if idx == -1:
+                    continue
+                ts_str = line[:idx].strip()
+                ts_dt = _parse_log_time(ts_str)
+                if ts_dt is None:
+                    continue
+                try:
+                    data = json.loads(line[idx:])
+                    state = data.get("state")
+                except Exception:
+                    continue
+                entries.append((ts_dt.timestamp(), state))
+    except FileNotFoundError:
+        entries = []
+    except Exception:
+        entries = []
+
+    if last_ts is None and entries:
+        last_ts, last_state = entries[0]
+        entries = entries[1:]
+
+    now_ts = time.time()
+    for ts, state in entries:
+        if last_state is not None and last_ts is not None:
+            _distribute_state_duration(conn, last_ts, ts, last_state)
+        last_ts = ts
+        last_state = state
+
+    if last_state is not None and last_ts is not None:
+        _distribute_state_duration(conn, last_ts, now_ts, last_state)
+        last_ts = now_ts
+
+    _set_meta(conn, "state_last_ts", last_ts or 0)
+    if last_state is not None:
+        _set_meta(conn, "state_last_state", last_state)
+    _set_meta(conn, "state_offset", size)
+
+
+def _process_energy_log_increment(conn):
+    vid = _default_vehicle_id or default_vehicle_id()
+    path = resolve_log_path(vid, "energy.log")
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = 0
+    offset = int(float(_get_meta(conn, "energy_offset", 0) or 0))
+    if offset > size:
+        offset = 0
+
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            handle.seek(offset)
+            for line in handle:
+                idx = line.find("{")
+                if idx == -1:
+                    continue
+                ts_str = line[:idx].strip()
+                ts_dt = _parse_log_time(ts_str)
+                if ts_dt is None:
+                    continue
+                try:
+                    entry = json.loads(line[idx:])
+                    vid_val = entry.get("vehicle_id")
+                    val = float(entry.get("added_energy", 0.0))
+                except Exception:
+                    continue
+                if val <= 0:
+                    continue
+                session_key = (vid_val if vid_val is not None else "__default__") + "|" + ts_dt.isoformat()
+                day = ts_dt.date().isoformat()
+                cur = conn.execute(
+                    "SELECT value FROM statistics_energy_sessions WHERE session_key=?",
+                    (session_key,),
+                ).fetchone()
+                previous = float(cur[0]) if cur else 0.0
+                if val > previous:
+                    delta = val - previous
+                    _merge_daily_row(conn, day, {"energy": delta})
+                    conn.execute(
+                        "INSERT INTO statistics_energy_sessions(day, session_key, value) VALUES(?, ?, ?) ON CONFLICT(session_key) DO UPDATE SET value=excluded.value",
+                        (day, session_key, val),
+                    )
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+    conn.commit()
+    _set_meta(conn, "energy_offset", size)
+
+
+def _distribute_parking_loss(conn, start_ts, end_ts, pct_loss, range_loss):
+    if pct_loss <= 0 and range_loss <= 0:
+        return
+    if start_ts is None and end_ts is None:
+        return
+    if start_ts is None:
+        _merge_daily_row(conn, end_ts.date().isoformat(), {"park_energy_pct": pct_loss, "park_km": range_loss})
+        return
+    if end_ts is None or end_ts <= start_ts:
+        _merge_daily_row(conn, start_ts.date().isoformat(), {"park_energy_pct": pct_loss, "park_km": range_loss})
+        return
+    total_seconds = (end_ts - start_ts).total_seconds()
+    if total_seconds <= 0:
+        _merge_daily_row(conn, start_ts.date().isoformat(), {"park_energy_pct": pct_loss, "park_km": range_loss})
+        return
+    cursor = start_ts
+    allocated_pct = 0.0
+    allocated_range = 0.0
+    while cursor.date() < end_ts.date():
+        next_midnight = datetime.combine(cursor.date() + timedelta(days=1), datetime.min.time(), tzinfo=cursor.tzinfo)
+        span = (next_midnight - cursor).total_seconds()
+        if span <= 0:
+            break
+        share = span / total_seconds
+        share_pct = pct_loss * share
+        share_range = range_loss * share
+        _merge_daily_row(
+            conn,
+            cursor.date().isoformat(),
+            {"park_energy_pct": share_pct, "park_km": share_range},
+        )
+        allocated_pct += share_pct
+        allocated_range += share_range
+        cursor = next_midnight
+    remaining_pct = max(pct_loss - allocated_pct, 0.0)
+    remaining_range = max(range_loss - allocated_range, 0.0)
+    _merge_daily_row(
+        conn, end_ts.date().isoformat(), {"park_energy_pct": remaining_pct, "park_km": remaining_range}
+    )
+
+
+def _process_parking_log_increment(conn):
+    path = os.path.join(DATA_DIR, "park-loss.log")
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = 0
+    offset = int(float(_get_meta(conn, "parking_offset", 0) or 0))
+    if offset > size:
+        offset = 0
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            handle.seek(offset)
+            for line in handle:
+                try:
+                    entry = json.loads(line)
+                except Exception:
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+                start = entry.get("start")
+                end = entry.get("end")
+                pct_loss = _as_float(entry.get("energy_pct")) or 0.0
+                range_loss = _as_float(entry.get("range_km")) or 0.0
+                try:
+                    start_ts = datetime.fromisoformat(start) if start else None
+                    end_ts = datetime.fromisoformat(end) if end else None
+                except Exception:
+                    start_ts = None
+                    end_ts = None
+                _distribute_parking_loss(conn, start_ts, end_ts, pct_loss, range_loss)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+    conn.commit()
+    _set_meta(conn, "parking_offset", size)
+
+
+def _initial_statistics_backfill(conn):
+    stats = compute_statistics()
+    for day, payload in stats.items():
+        _write_daily_row(conn, day, payload)
+    conn.commit()
+    _rebuild_monthly_scope(conn)
+    try:
+        with open(resolve_log_path(_default_vehicle_id or default_vehicle_id(), "state.log"), "r", encoding="utf-8") as handle:
+            last_line = None
+            for line in handle:
+                last_line = line
+            if last_line:
+                idx = last_line.find("{")
+                ts_str = last_line[:idx].strip() if idx != -1 else None
+                ts_dt = _parse_log_time(ts_str) if ts_str else None
+                if ts_dt:
+                    try:
+                        data = json.loads(last_line[idx:])
+                        _set_meta(conn, "state_last_state", data.get("state"))
+                        _set_meta(conn, "state_last_ts", ts_dt.timestamp())
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    _set_meta(conn, "state_offset", os.path.getsize(resolve_log_path(_default_vehicle_id or default_vehicle_id(), "state.log")) if os.path.exists(resolve_log_path(_default_vehicle_id or default_vehicle_id(), "state.log")) else 0)
+    _seed_energy_sessions_from_log(conn)
+    _set_meta(conn, "parking_offset", os.path.getsize(os.path.join(DATA_DIR, "park-loss.log")) if os.path.exists(os.path.join(DATA_DIR, "park-loss.log")) else 0)
+    _set_meta(conn, "statistics_initialized", "1")
+
+
+def _statistics_aggregation_tick():
+    with _aggregation_lock:
+        conn = None
+        try:
+            conn = _statistics_conn()
+            _ensure_statistics_tables(conn)
+            initialized = _get_meta(conn, "statistics_initialized") == "1"
+            if not initialized:
+                _initial_statistics_backfill(conn)
+            _process_state_log_increment(conn)
+            _process_energy_log_increment(conn)
+            _process_parking_log_increment(conn)
+            _rebuild_monthly_scope(conn)
+        finally:
+            if conn is not None:
+                conn.close()
+
+
+def _statistics_aggregation_loop(interval):
+    while True:
+        try:
+            _statistics_aggregation_tick()
+        except Exception:
+            logging.exception("Statistics aggregation failed")
+        time.sleep(max(1.0, interval))
+
+
+def _start_statistics_aggregation(interval=None):
+    global _aggregation_thread, _aggregation_initialized
+    if _aggregation_thread and _aggregation_thread.is_alive():
+        return
+    _aggregation_thread = threading.Thread(
+        target=_statistics_aggregation_loop, args=(interval or AGGREGATION_INTERVAL,), daemon=True
+    )
+    _aggregation_thread.start()
+    _aggregation_initialized = True
 last_vehicle_state = _load_last_state()
 occupant_present = False
 _default_vehicle_id = None
@@ -3010,20 +3543,43 @@ def _statistics_dependency_signature():
 
 
 def _load_cached_statistics():
-    """Return cached statistics if inputs are unchanged."""
+    """Return statistics stored in the aggregation database."""
 
-    signature = _statistics_dependency_signature()
-    with _statistics_cache_lock:
-        cached = _statistics_cache.get("data")
-        cached_signature = _statistics_cache.get("signature")
-    if cached is not None and cached_signature == signature:
-        return cached
+    try:
+        conn = _statistics_conn()
+        _ensure_statistics_tables(conn)
+        if _get_meta(conn, "statistics_initialized") != "1":
+            _statistics_aggregation_tick()
+        stats = _load_daily_from_db(conn)
+        conn.close()
+        return stats
+    except Exception:
+        return compute_statistics()
 
-    stats = compute_statistics()
-    with _statistics_cache_lock:
-        _statistics_cache["data"] = stats
-        _statistics_cache["signature"] = _statistics_dependency_signature()
-    return stats
+
+def _load_monthly_statistics():
+    try:
+        conn = _statistics_conn()
+        _ensure_statistics_tables(conn)
+        cur = conn.execute(
+            "SELECT date, online, offline, asleep, km, speed, energy, park_energy_pct, park_km FROM statistics_aggregate WHERE scope='monthly'"
+        )
+        data = {}
+        for row in cur.fetchall():
+            data[row[0]] = {
+                "online": float(row[1] or 0.0),
+                "offline": float(row[2] or 0.0),
+                "asleep": float(row[3] or 0.0),
+                "km": float(row[4] or 0.0),
+                "speed": float(row[5] or 0.0),
+                "energy": float(row[6] or 0.0),
+                "park_energy_pct": float(row[7] or 0.0),
+                "park_km": float(row[8] or 0.0),
+            }
+        conn.close()
+        return data
+    except Exception:
+        return {}
 
 
 def compute_trip_summaries():
@@ -4268,8 +4824,8 @@ def error_page():
 def _prepare_statistics_payload():
     """Build the statistics payload used by both HTML and JSON views."""
     stats = _load_cached_statistics()
+    monthly_data = _load_monthly_statistics()
     current_month = datetime.now(LOCAL_TZ).strftime("%Y-%m")
-    monthly = {}
     rows = []
     current = {
         "online_sum": 0.0,
@@ -4309,46 +4865,20 @@ def _prepare_statistics_payload():
             current["park_km"] += entry.get("park_km", 0.0)
             current["speed"] = max(current["speed"], entry.get("speed", 0.0))
             current["count"] += 1
-            continue
-        month = day[:7]
-        m = monthly.setdefault(
-            month,
-            {
-                "online_sum": 0.0,
-                "offline_sum": 0.0,
-                "asleep_sum": 0.0,
-                "km": 0.0,
-                "speed": 0.0,
-                "energy": 0.0,
-                "park_energy_pct": 0.0,
-                "park_km": 0.0,
-                "count": 0,
-            },
-        )
-        m["online_sum"] += entry.get("online", 0.0)
-        m["offline_sum"] += entry.get("offline", 0.0)
-        m["asleep_sum"] += entry.get("asleep", 0.0)
-        m["km"] += entry.get("km", 0.0)
-        m["energy"] += entry.get("energy", 0.0)
-        m["park_energy_pct"] += entry.get("park_energy_pct", 0.0)
-        m["park_km"] += entry.get("park_km", 0.0)
-        m["speed"] = max(m["speed"], entry.get("speed", 0.0))
-        m["count"] += 1
 
     monthly_rows = []
-    for month in sorted(monthly.keys()):
-        data = monthly[month]
-        cnt = data["count"] or 1
+    for month in sorted(monthly_data.keys()):
+        data = monthly_data[month]
         row = {
             "date": month,
-            "online": round(data["online_sum"] / cnt, 2),
-            "offline": round(data["offline_sum"] / cnt, 2),
-            "asleep": round(data["asleep_sum"] / cnt, 2),
-            "km": round(data["km"], 2),
-            "speed": int(round(data["speed"])),
-            "energy": round(data["energy"], 2),
-            "park_energy_pct": round(data["park_energy_pct"], 2),
-            "park_km": round(data["park_km"], 2),
+            "online": round(data.get("online", 0.0), 2),
+            "offline": round(data.get("offline", 0.0), 2),
+            "asleep": round(data.get("asleep", 0.0), 2),
+            "km": round(data.get("km", 0.0), 2),
+            "speed": int(round(data.get("speed", 0.0))),
+            "energy": round(data.get("energy", 0.0), 2),
+            "park_energy_pct": round(data.get("park_energy_pct", 0.0), 2),
+            "park_km": round(data.get("park_km", 0.0), 2),
         }
         total = row["online"] + row["offline"] + row["asleep"]
         diff = round(100.0 - total, 2)
@@ -4890,4 +5420,6 @@ def handle_disconnect():
 
 
 if __name__ == "__main__":
+    _parse_cli_arguments()
+    _start_statistics_aggregation(AGGREGATION_INTERVAL)
     socketio.run(app, host="0.0.0.0", port=8013, debug=True)

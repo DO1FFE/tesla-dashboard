@@ -41,6 +41,21 @@ in `data/trips` and moves them to the appropriate vehicle folder automatically.
 All data paths are resolved relative to the application directory, so the server
 can be started from any location while still accessing existing trips and logs.
 
+### Statistics aggregation
+
+Daily and monthly statistics are persisted in `data/statistics.db` inside the
+`statistics_aggregate` table. A background worker processes new log entries
+incrementally instead of parsing all files on every request. Existing log files
+and `statistics.json` are imported once during the first aggregation run. The
+HTML output of `/statistik` stays unchanged because the page now reads directly
+from the aggregation table.
+
+The aggregation interval can be configured via the environment variable
+`AGGREGATION_INTERVAL_SECONDS` or the CLI flag `--aggregation-interval` when
+starting `app.py`. Values are given in seconds and default to five minutes.
+After switching to the database-backed aggregation you may optionally remove
+the legacy `statistics.json` file if no longer needed.
+
 All required JavaScript and CSS libraries are bundled under `static/` so the dashboard works even without Internet access.
 
 The backend continuously polls the Tesla API and pushes new data to clients using Server-Sent Events (SSE). The frontend never talks to the Tesla API directly. It only requests data from the backend using the `/api/...` endpoints so tokens remain secure on the server.
