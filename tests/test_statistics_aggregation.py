@@ -93,3 +93,38 @@ def test_api_statistics_includes_new_trip(monkeypatch, tmp_path):
     assert today_row is not None
     assert today_row["km"] == expected_km
     assert today_row["speed"] == expected_speed
+
+
+def test_api_statistics_triggers_tick_when_thread_missing(monkeypatch, tmp_path):
+    db_path = tmp_path / "stats.db"
+    monkeypatch.setenv("STATISTICS_DB_PATH", str(db_path))
+    monkeypatch.setenv("DISABLE_STATISTICS_AGGREGATION", "1")
+
+    import app
+
+    importlib.reload(app)
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(app, "_default_vehicle_id", "1")
+    monkeypatch.setattr(app, "STAT_FILE", str(tmp_path / "statistics.json"))
+    with app._statistics_cache_lock:
+        app._statistics_cache["signature"] = None
+        app._statistics_cache["data"] = None
+    app._aggregation_thread = None
+
+    today = datetime.now(app.LOCAL_TZ).date()
+    trip_folder = pathlib.Path(app.trip_dir("1"))
+    trip_path = trip_folder / f"trip_{today.strftime('%Y%m%d')}.csv"
+    _write_trip(trip_path)
+
+    expected_km = round(app._trip_distance(trip_path), 2)
+    expected_speed = int(round(app._trip_max_speed(trip_path)))
+
+    client = app.app.test_client()
+    resp = client.get("/api/statistik")
+    payload = resp.get_json()
+
+    today_row = next((row for row in payload["rows"] if row["date"] == today.isoformat()), None)
+
+    assert today_row is not None
+    assert today_row["km"] == expected_km
+    assert today_row["speed"] == expected_speed
