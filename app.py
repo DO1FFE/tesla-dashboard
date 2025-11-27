@@ -843,6 +843,7 @@ TAXI_DB = os.path.join(DATA_DIR, "taximeter.db")
 STATISTICS_DB = os.getenv("STATISTICS_DB_PATH") or os.path.join(DATA_DIR, "statistics.db")
 AGGREGATION_INTERVAL = float(os.getenv("AGGREGATION_INTERVAL_SECONDS", "300"))
 DISABLE_STATISTICS_AGGREGATION = os.getenv("DISABLE_STATISTICS_AGGREGATION") == "1"
+FORCE_STATISTICS_REBUILD = os.getenv("FORCE_STATISTICS_REBUILD") == "1"
 
 
 def _parse_cli_arguments():
@@ -852,10 +853,18 @@ def _parse_cli_arguments():
         type=float,
         help="Seconds between statistics aggregation runs (default: env AGGREGATION_INTERVAL_SECONDS)",
     )
+    parser.add_argument(
+        "--rebuild-statistics",
+        action="store_true",
+        help="Force a full rebuild of statistics from logs and trip CSVs",
+    )
     args, _unknown = parser.parse_known_args()
     if args.aggregation_interval:
         global AGGREGATION_INTERVAL
         AGGREGATION_INTERVAL = max(1.0, args.aggregation_interval)
+    if args.rebuild_statistics:
+        global FORCE_STATISTICS_REBUILD
+        FORCE_STATISTICS_REBUILD = True
 
 # Elements on the dashboard that can be toggled via the config page
 CONFIG_ITEMS = [
@@ -1171,6 +1180,29 @@ def _set_meta(conn, key, value):
         (key, str(value)),
     )
     conn.commit()
+
+
+def _reset_statistics_state(conn):
+    conn.execute("DELETE FROM statistics_aggregate")
+    conn.execute("DELETE FROM statistics_energy_sessions")
+    conn.execute("DELETE FROM statistics_meta")
+    conn.commit()
+    with _statistics_cache_lock:
+        _statistics_cache["signature"] = None
+        _statistics_cache["data"] = None
+
+
+def _statistics_missing_recent_days(conn, days=3):
+    if days <= 0:
+        return False
+    expected = {(datetime.now(LOCAL_TZ).date() - timedelta(days=i)).isoformat() for i in range(days)}
+    placeholders = ",".join(["?"] * len(expected))
+    cur = conn.execute(
+        f"SELECT date FROM statistics_aggregate WHERE scope='daily' AND date IN ({placeholders})",
+        tuple(expected),
+    )
+    present = {row[0] for row in cur.fetchall()}
+    return bool(expected - present)
 
 
 def _load_daily_from_db(conn):
@@ -1652,12 +1684,23 @@ def _initial_statistics_backfill(conn):
 
 
 def _statistics_aggregation_tick():
+    global FORCE_STATISTICS_REBUILD
     with _aggregation_lock:
         conn = None
         try:
             conn = _statistics_conn()
             _ensure_statistics_tables(conn)
             initialized = _get_meta(conn, "statistics_initialized") == "1"
+            rebuild_due_to_gap = initialized and _statistics_missing_recent_days(conn)
+            if FORCE_STATISTICS_REBUILD or rebuild_due_to_gap:
+                logging.warning(
+                    "Forcing statistics rebuild%s",
+                    " due to missing recent days" if rebuild_due_to_gap else "",
+                )
+                _reset_statistics_state(conn)
+                FORCE_STATISTICS_REBUILD = False
+                initialized = False
+
             if not initialized:
                 _initial_statistics_backfill(conn)
             _process_state_log_increment(conn)
@@ -5517,10 +5560,15 @@ def handle_disconnect():
             ptt_timer = None
 
 
-_start_statistics_aggregation(AGGREGATION_INTERVAL)
+# When embedded in another process (e.g., WSGI), start aggregation immediately.
+# The CLI path below also starts aggregation after handling startup flags.
+if __name__ != "__main__":
+    _start_statistics_aggregation(AGGREGATION_INTERVAL)
 
 
 if __name__ == "__main__":
+    # Set FORCE_STATISTICS_REBUILD=1 or pass --rebuild-statistics to refresh
+    # all cached aggregates and offsets from the underlying logs and trip CSVs.
     _parse_cli_arguments()
     _start_statistics_aggregation(AGGREGATION_INTERVAL)
     socketio.run(app, host="0.0.0.0", port=8013, debug=True)
