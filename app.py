@@ -179,6 +179,16 @@ def _ensure_background_started():
         _start_statistics_aggregation()
 
 
+def _ensure_background_started_once():
+    _start_statistics_aggregation()
+
+
+if hasattr(app, "before_first_request"):
+    app.before_first_request(_ensure_background_started_once)
+else:
+    app.before_request(_ensure_background_started_once)
+
+
 @app.after_request
 def persist_client_id(resp):
     if getattr(g, "set_client_id_cookie", False):
@@ -832,6 +842,7 @@ PARKTIME_FILE = os.path.join(DATA_DIR, "parktime.json")
 TAXI_DB = os.path.join(DATA_DIR, "taximeter.db")
 STATISTICS_DB = os.getenv("STATISTICS_DB_PATH") or os.path.join(DATA_DIR, "statistics.db")
 AGGREGATION_INTERVAL = float(os.getenv("AGGREGATION_INTERVAL_SECONDS", "300"))
+DISABLE_STATISTICS_AGGREGATION = os.getenv("DISABLE_STATISTICS_AGGREGATION") == "1"
 
 
 def _parse_cli_arguments():
@@ -1671,6 +1682,8 @@ def _statistics_aggregation_loop(interval):
 
 def _start_statistics_aggregation(interval=None):
     global _aggregation_thread, _aggregation_initialized
+    if DISABLE_STATISTICS_AGGREGATION:
+        return
     if _aggregation_thread and _aggregation_thread.is_alive():
         return
     _aggregation_thread = threading.Thread(
@@ -3615,6 +3628,14 @@ def _statistics_dependency_signature():
 def _load_cached_statistics():
     """Return statistics stored in the aggregation database."""
 
+    signature = _statistics_dependency_signature()
+    with _statistics_cache_lock:
+        cached_signature = _statistics_cache.get("signature")
+
+    thread_alive = _aggregation_thread is not None and _aggregation_thread.is_alive()
+    if (not thread_alive) or cached_signature != signature:
+        _statistics_aggregation_tick()
+
     try:
         conn = _statistics_conn()
         _ensure_statistics_tables(conn)
@@ -3622,9 +3643,16 @@ def _load_cached_statistics():
             _statistics_aggregation_tick()
         stats = _load_daily_from_db(conn)
         conn.close()
+        with _statistics_cache_lock:
+            _statistics_cache["signature"] = signature
+            _statistics_cache["data"] = stats
         return stats
     except Exception:
-        return compute_statistics()
+        fallback = compute_statistics()
+        with _statistics_cache_lock:
+            _statistics_cache["signature"] = signature
+            _statistics_cache["data"] = fallback
+        return fallback
 
 
 def _load_monthly_statistics():
@@ -5487,6 +5515,9 @@ def handle_disconnect():
         if ptt_timer:
             ptt_timer.cancel()
             ptt_timer = None
+
+
+_start_statistics_aggregation(AGGREGATION_INTERVAL)
 
 
 if __name__ == "__main__":
