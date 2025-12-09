@@ -362,7 +362,7 @@ function handleData(data) {
     updateV2LInfos(charge, drive);
     updateChargingInfo(charge);
     var climate = data.climate_state || {};
-    updateThermometers(climate.inside_temp, climate.outside_temp);
+    updateThermometers(climate.inside_temp, climate.outside_temp, charge.battery_temp);
     updateClimateStatus(climate.is_climate_on);
     updateClimateMode(climate.climate_keeper_mode);
     updateCabinProtection(climate.cabin_overheat_protection);
@@ -823,9 +823,15 @@ function updateOdometer(value) {
     $('#odometer-value').text(formatted + ' km');
 }
 
-function updateThermometers(inside, outside) {
+function updateThermometers(inside, outside, battery) {
     var range = MAX_TEMP - MIN_TEMP;
-    function set(prefix, temp) {
+    function set(prefix, temp, labelPrefix) {
+        var $level = $('#' + prefix + '-level');
+        var $bulb = $('#' + prefix + '-bulb');
+        var $label = $('#' + prefix + '-temp-value');
+        if (!$level.length || !$bulb.length || !$label.length) {
+            return;
+        }
         var missing = temp == null || isNaN(temp);
         var value = missing ? 0 : temp;
         var clamped = Math.max(MIN_TEMP, Math.min(MAX_TEMP, value));
@@ -839,13 +845,14 @@ function updateThermometers(inside, outside) {
         } else if (value < 30) {
             color = '#ff9800';
         }
-        $('#' + prefix + '-level').attr('y', y).attr('height', h).css('fill', color);
-        $('#' + prefix + '-bulb').css('fill', color);
+        $level.attr('y', y).attr('height', h).css('fill', color);
+        $bulb.css('fill', color);
         var label = missing ? '-.- °C' : temp.toFixed(1) + ' °C';
-        $('#' + prefix + '-temp-value').text((prefix === 'inside' ? 'Innen: ' : 'Außen: ') + label);
+        $label.text(labelPrefix + ': ' + label);
     }
-    set('inside', inside);
-    set('outside', outside);
+    set('inside', inside, 'Innen');
+    set('outside', outside, 'Außen');
+    set('battery', battery, 'Batterie');
 }
 
 function updateBatteryIndicator(level, rangeMiles, chargingState, heaterOn) {

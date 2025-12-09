@@ -593,7 +593,8 @@ select {
 
 #inside-temp-value,
 #desired-temp,
-#outside-temp-value {
+#outside-temp-value,
+#battery-temp-value {
   width: 9em;
   text-align: right;
 }
