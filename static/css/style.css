@@ -649,21 +649,27 @@ select {
 
 /* Thermometers for inside/outside temperature */
 #thermometers {
-  display: inline-block;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 14px;
   margin: 0;
   vertical-align: top;
-  text-align: center;
+  text-align: left;
   font-weight: bold;
   align-self: flex-start;
-  height: 110px;
+  min-height: 110px;
+  min-width: 260px;
 }
 
 #thermometers .thermometer {
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: flex-end;
-  margin: 0 5px;
+  flex: 1 1 90px;
+  min-width: 90px;
+  max-width: 140px;
   height: 100%;
 }
 
@@ -671,11 +677,16 @@ select {
   display: block;
   height: 70px;
   width: auto;
+  align-self: center;
 }
 
 #thermometers .label {
   font-size: 0.9em;
   margin-top: 2px;
+  width: 100%;
+  text-align: left;
+  white-space: normal;
+  word-break: break-word;
 }
 
 #thermometers .tube {
@@ -751,9 +762,10 @@ select {
     flex-basis: 100%;
   }
   #thermometers {
-    display: flex;
-    justify-content: space-around;
-    gap: 8px;
+    justify-content: flex-start;
+    gap: 8px 12px;
+    padding-right: 10px;
+    margin-right: 6px;
   }
   #thermometers svg {
     height: 60px;
