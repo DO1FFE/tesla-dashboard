@@ -746,6 +746,26 @@ select {
   #map {
     height: 50vh !important;
   }
+  #status-bar #thermometers,
+  #status-bar #openings-indicator {
+    flex-basis: 100%;
+  }
+  #thermometers {
+    display: flex;
+    justify-content: space-around;
+    gap: 8px;
+  }
+  #thermometers svg {
+    height: 60px;
+  }
+  #openings-indicator {
+    display: flex;
+    justify-content: center;
+  }
+  #openings-indicator svg {
+    height: 160px;
+    width: auto;
+  }
   #sms-form {
     flex-direction: column;
     align-items: stretch;
