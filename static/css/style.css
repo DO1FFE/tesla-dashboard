@@ -658,7 +658,7 @@ select {
   text-align: left;
   font-weight: bold;
   align-self: flex-start;
-  height: 110px;
+  min-height: 110px;
   min-width: 260px;
 }
 
@@ -667,8 +667,8 @@ select {
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-end;
-  flex: 1 1 110px;
-  min-width: 110px;
+  flex: 1 1 90px;
+  min-width: 90px;
   max-width: 140px;
   height: 100%;
 }
