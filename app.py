@@ -91,15 +91,16 @@ SECRET_PLACEHOLDER = "********"
 """Utilities for serving a compatible Socket.IO client script.
 
 ``ensure_socketio_client`` downloads the script into ``static/js`` if it is not
-already present.  ``_preload_socketio_client`` is invoked on startup to ensure
-the file is available before the first request.  The helper functions are
-defined before the preload call so that the module can import cleanly.
+already present.  Downloading is scheduled lazily in a background thread so
+requests are not blocked when the CDN is slow or unreachable.
 """
 
 # Ensure required Socket.IO client libraries are available in ``static/js``.
 SOCKETIO_CLIENT_MAP = {5: "4.7.2", 4: "4.5.4"}
 SOCKETIO_JS_DIR = Path(__file__).parent / "static" / "js"
 SOCKETIO_DOWNLOAD_ATTEMPTS = set()
+_socketio_download_thread = None
+_socketio_download_lock = threading.Lock()
 
 
 def ensure_socketio_client(version: str) -> None:
@@ -136,20 +137,31 @@ def _socketio_client_version() -> str:
     return SOCKETIO_CLIENT_MAP.get(major, next(iter(SOCKETIO_CLIENT_MAP.values())))
 
 
-def _preload_socketio_client():
-    """Fetch the appropriate Socket.IO client script on startup."""
-    version = _socketio_client_version()
-    ensure_socketio_client(version)
+def _schedule_socketio_client_download():
+    """Start background download of the compatible Socket.IO client script."""
 
+    global _socketio_download_thread
+    with _socketio_download_lock:
+        if _socketio_download_thread and _socketio_download_thread.is_alive():
+            return
 
-_preload_socketio_client()
+        version = _socketio_client_version()
+
+        def _background_download():
+            ensure_socketio_client(version)
+
+        _socketio_download_thread = threading.Thread(
+            target=_background_download, name="socketio-client-download", daemon=True
+        )
+        _socketio_download_thread.start()
 
 
 def socketio_client_script() -> str:
     """Return URL to a compatible Socket.IO client script."""
     version = _socketio_client_version()
-    ensure_socketio_client(version)
     dest = SOCKETIO_JS_DIR / f"socket.io-{version}.min.js"
+    if not dest.exists():
+        _schedule_socketio_client_download()
     if dest.exists():
         return url_for("static", filename=f"js/socket.io-{version}.min.js")
     return f"https://cdn.socket.io/{version}/socket.io.min.js"
@@ -181,6 +193,7 @@ def _ensure_background_started():
 
 def _ensure_background_started_once():
     _start_statistics_aggregation()
+    _schedule_socketio_client_download()
 
 
 if hasattr(app, "before_first_request"):
