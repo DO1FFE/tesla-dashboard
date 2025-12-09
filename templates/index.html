@@ -122,6 +122,14 @@
                 </svg>
                 <div id="outside-temp-value" class="label" aria-live="polite">Außen: -- °C</div>
             </div>
+            <div class="thermometer">
+                <svg width="30" height="70" viewBox="0 0 30 60">
+                    <rect x="11" y="5" width="8" height="40" class="tube" />
+                    <rect id="battery-level" x="11" y="45" width="8" height="0" class="level" />
+                    <circle id="battery-bulb" cx="15" cy="50" r="9" class="bulb" />
+                </svg>
+                <div id="battery-temp-value" class="label" aria-live="polite">Batterie: -- °C</div>
+            </div>
         </div>
         <div id="climate-indicator">
             <div id="climate-status" title="Klimaanlage aus" role="img" aria-label="Klimaanlage aus">🚫</div>

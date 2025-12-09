@@ -3920,6 +3920,90 @@ def get_vehicle_state(vehicle_id=None):
     }
 
 
+def _extract_battery_temp(payload):
+    """Return the first ``battery_temp`` field found in a nested payload."""
+
+    if isinstance(payload, dict):
+        if "battery_temp" in payload:
+            return payload.get("battery_temp")
+        for value in payload.values():
+            found = _extract_battery_temp(value)
+            if found is not None:
+                return found
+    elif isinstance(payload, list):
+        for item in payload:
+            found = _extract_battery_temp(item)
+            if found is not None:
+                return found
+    return None
+
+
+def _fleet_battery_temp(vehicle, vid):
+    """Fetch battery temperature via Fleet API when configured."""
+
+    endpoint = os.getenv("TESLA_FLEET_CHARGE_STATE_URL")
+    if not endpoint:
+        return None
+
+    vehicle_identifier = os.getenv("TESLA_FLEET_VEHICLE_ID") or vid
+    if vehicle_identifier is None:
+        return None
+
+    headers = {}
+    token = os.getenv("TESLA_FLEET_ACCESS_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    url = endpoint.format(vehicle_id=vehicle_identifier)
+    resp = requests.get(url, headers=headers, timeout=TESLA_REQUEST_TIMEOUT)
+    resp.raise_for_status()
+    payload = resp.json()
+    try:
+        log_api_data("fleet_charge_state", sanitize(payload), vehicle_id=vehicle_identifier)
+    except Exception:
+        pass
+    return _extract_battery_temp(payload)
+
+
+def _owner_battery_temp(vehicle, vid):
+    """Fetch battery temperature via an additional Owner API call."""
+
+    charge_state = None
+    api_call = getattr(vehicle, "api", None)
+    if callable(api_call):
+        try:
+            charge_state = api_call("CHARGE_STATE")
+            log_api_data("charge_state", sanitize(charge_state), vehicle_id=vid)
+        except Exception:
+            charge_state = None
+
+    if charge_state is None:
+        data_request = getattr(vehicle, "data_request", None)
+        if callable(data_request):
+            try:
+                charge_state = data_request("charge_state")
+                log_api_data("charge_state", sanitize(charge_state), vehicle_id=vid)
+            except Exception:
+                charge_state = None
+
+    if isinstance(charge_state, dict):
+        return _extract_battery_temp(charge_state)
+    return None
+
+
+def _fetch_battery_temp(vehicle, vid):
+    """Try to enrich charge_state with a battery temperature reading."""
+
+    for func in (_fleet_battery_temp, _owner_battery_temp):
+        try:
+            value = func(vehicle, vid)
+            if value is not None:
+                return value
+        except Exception as exc:
+            _log_api_error(exc)
+    return None
+
+
 def get_vehicle_data(vehicle_id=None, state=None):
     """Fetch vehicle data for a given vehicle id."""
     tesla = get_tesla()
@@ -3975,6 +4059,17 @@ def get_vehicle_data(vehicle_id=None, state=None):
     track_drive_path(vehicle_data)
     sanitized = sanitize(vehicle_data)
     sanitized["state"] = state
+    try:
+        charge_state = sanitized.get("charge_state")
+        if not isinstance(charge_state, dict):
+            charge_state = {}
+            sanitized["charge_state"] = charge_state
+        if "battery_temp" not in charge_state:
+            battery_temp = _fetch_battery_temp(vehicle, vid)
+            if battery_temp is not None:
+                charge_state["battery_temp"] = battery_temp
+    except Exception as exc:
+        _log_api_error(exc)
     try:
         v_state = sanitized.get("vehicle_state", {})
         v_config = sanitized.get("vehicle_config", {})
