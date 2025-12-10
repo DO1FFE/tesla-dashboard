@@ -3969,9 +3969,19 @@ def _extract_battery_temp(payload):
 
 
 def _fleet_access_token(tesla):
-    """Return a bearer token derived from the active Owner authentication."""
+    """Return a bearer token preferring Fleet credentials when available."""
+
+    fleet_token = os.getenv("TESLA_FLEET_ACCESS_TOKEN")
+    if fleet_token:
+        return fleet_token
 
     if teslapy is not None and tesla is not None:
+        fleet_token_data = getattr(tesla, "fleet_token", None)
+        if isinstance(fleet_token_data, dict):
+            access_token = fleet_token_data.get("access_token")
+            if access_token:
+                return access_token
+
         for attr in ("token", "sso_token"):
             token_data = getattr(tesla, attr, None)
             if isinstance(token_data, dict):
@@ -3983,7 +3993,10 @@ def _fleet_access_token(tesla):
     if owner_token:
         return owner_token
 
-    return os.getenv("TESLA_FLEET_ACCESS_TOKEN")
+    logging.info(
+        "No Fleet access token available; set TESLA_FLEET_ACCESS_TOKEN for Fleet API calls",
+    )
+    return None
 
 
 def _fleet_battery_temp(tesla, vehicle, vid):
