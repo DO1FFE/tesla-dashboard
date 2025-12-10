@@ -3975,14 +3975,18 @@ def _fleet_battery_temp(vehicle, vid):
     if not endpoint:
         return None
 
+    token = os.getenv("TESLA_FLEET_ACCESS_TOKEN")
+    if not token:
+        logging.info(
+            "Skipping Fleet battery temperature lookup: TESLA_FLEET_ACCESS_TOKEN missing"
+        )
+        return None
+
     vehicle_identifier = os.getenv("TESLA_FLEET_VEHICLE_ID") or vid
     if vehicle_identifier is None:
         return None
 
-    headers = {}
-    token = os.getenv("TESLA_FLEET_ACCESS_TOKEN")
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    headers = {"Authorization": f"Bearer {token}"}
 
     url = endpoint.format(vehicle_id=vehicle_identifier)
     resp = requests.get(url, headers=headers, timeout=TESLA_REQUEST_TIMEOUT)
