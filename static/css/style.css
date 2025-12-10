@@ -685,8 +685,7 @@ select {
   margin-top: 2px;
   width: 100%;
   text-align: left;
-  white-space: normal;
-  word-break: break-word;
+  white-space: nowrap;
 }
 
 #thermometers .tube {
