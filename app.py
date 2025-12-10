@@ -1039,10 +1039,24 @@ def format_receipt(company, breakdown, distance=0.0, slogan="", printed_at=None)
     return "\n".join(lines)
 
 
+_news_events_unavailable = False
+
+
+def _is_http_error_with_status(exc, status_codes):
+    if isinstance(exc, requests.exceptions.HTTPError):
+        response = getattr(exc, "response", None)
+        if response is not None and response.status_code in status_codes:
+            return True
+    return False
+
+
 def get_news_events_info():
     """Return the current state of the news/events toggles via the API."""
+
+    global _news_events_unavailable
+
     tesla = get_tesla()
-    if tesla is None:
+    if tesla is None or _news_events_unavailable:
         return ""
 
     try:
@@ -1056,6 +1070,9 @@ def get_news_events_info():
             pairs = [f"{k}={v}" for k, v in data.items()]
             return "Toggles: " + ", ".join(pairs)
     except Exception as exc:
+        if _is_http_error_with_status(exc, {400, 404, 405, 501}):
+            _news_events_unavailable = True
+            return ""
         _log_api_error(exc)
     return ""
 
