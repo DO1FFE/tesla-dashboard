@@ -10,6 +10,7 @@ var lastApiInterval = null;
 var lastApiIntervalIdle = null;
 var parkStartTime = null;
 var currentGear = null;
+var THERMOMETER_IDS = ['thermometer-inside', 'thermometer-outside', 'thermometer-battery'];
 var PARK_GRACE_MS = 5 * 60 * 1000;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
@@ -106,6 +107,46 @@ var smsNameInput = $('#sms-name');
 var smsInput = $('#sms-text');
 var smsButton = $('#sms-send');
 var smsStatus = $('#sms-status');
+var TOGGLE_DEFAULTS = {
+    'map': true,
+    'lock-status': true,
+    'user-presence': true,
+    'gear-shift': true,
+    'battery-indicator': true,
+    'speedometer': true,
+    'thermometer-inside': true,
+    'thermometer-outside': true,
+    'thermometer-battery': true,
+    'climate-indicator': true,
+    'tpms-indicator': true,
+    'openings-indicator': true,
+    'blue-openings': false,
+    'heater-indicator': true,
+    'charging-info': true,
+    'v2l-infos': true,
+    'announcement-box': true,
+    'page-menu': true,
+    'menu-dashboard': true,
+    'menu-statistik': true,
+    'menu-history': true,
+    'nav-bar': true,
+    'media-player': true,
+    'ptt-controls': true,
+    'software-update': true,
+    'offline-msg': true,
+    'loading-msg': true,
+    'park-since': true,
+    'sms-form': true
+};
+
+function applyThermometerCompatibility(cfg) {
+    if (!cfg || typeof cfg.thermometers === 'undefined') return;
+    THERMOMETER_IDS.forEach(function(id) {
+        if (typeof cfg[id] === 'undefined') {
+            cfg[id] = !!cfg.thermometers;
+        }
+    });
+}
 
 function parseVersion(str) {
     return str ? str.split(' ')[0] : null;
@@ -150,10 +191,18 @@ function startAnnouncementCycle() {
     }
 }
 
+function configEnabled(id) {
+    var defaultVal = TOGGLE_DEFAULTS.hasOwnProperty(id) ? TOGGLE_DEFAULTS[id] : true;
+    if (!CONFIG || typeof CONFIG[id] === 'undefined') {
+        return defaultVal;
+    }
+    return !!CONFIG[id];
+}
+
 function applyConfig(cfg) {
-    if (!cfg) return;
-    CONFIG = cfg;
-    HIGHLIGHT_BLUE = !!CONFIG['blue-openings'];
+    CONFIG = cfg || {};
+    applyThermometerCompatibility(CONFIG);
+    HIGHLIGHT_BLUE = configEnabled('blue-openings');
     if (CONFIG.announcement) {
         announcementRaw = CONFIG.announcement;
     } else {
@@ -166,10 +215,14 @@ function applyConfig(cfg) {
 }
 
 function showConfigured() {
-    Object.keys(CONFIG).forEach(function(id) {
+    Object.keys(TOGGLE_DEFAULTS).forEach(function(id) {
         if (id === 'blue-openings') return;
-        $('#' + id).toggle(!!CONFIG[id]);
+        $('#' + id).toggle(configEnabled(id));
     });
+    var visibleThermometers = THERMOMETER_IDS.some(function(id) {
+        return configEnabled(id);
+    });
+    $('#thermometers').toggle(visibleThermometers);
     $('#dashboard-content').show();
     // Recalculate map dimensions when the content becomes visible.
     map.invalidateSize();
@@ -179,6 +232,14 @@ function showConfigured() {
 function updateSmsForm() {
     if (!smsForm.length) return;
     var cfg = CONFIG || {};
+    if (!configEnabled('sms-form')) {
+        smsForm.hide();
+        smsNameInput.prop('disabled', true);
+        smsInput.prop('disabled', true);
+        smsButton.prop('disabled', true);
+        smsStatus.text('');
+        return;
+    }
     var hasNumber = cfg.phone_number && cfg.infobip_api_key && cfg.sms_enabled !== false;
     smsForm.toggle(!!hasNumber);
     var driveOnly = cfg.sms_drive_only !== false;
@@ -208,6 +269,10 @@ function updateSmsForm() {
 }
 
 function showLoading() {
+    if (!configEnabled('loading-msg')) {
+        $('#loading-msg').hide();
+        return;
+    }
     $('#loading-msg').show();
 }
 
@@ -1164,6 +1229,11 @@ function updateParkTime(ts) {
 
 function displayParkTime() {
     var $el = $('#park-since');
+    if (!configEnabled('park-since')) {
+        $el.hide();
+        updateSmsForm();
+        return;
+    }
     if (currentGear && currentGear !== 'P') {
         $el.hide();
         updateSmsForm();
@@ -1202,6 +1272,10 @@ function updateVehicleState(state) {
 
 function updateSoftwareUpdate(info) {
     var $msg = $('#software-update');
+    if (!configEnabled('software-update')) {
+        $msg.hide().text('');
+        return;
+    }
     var version = info && typeof info.version === 'string' ? info.version.trim() : '';
     if (!version) {
         $msg.hide().text('');
@@ -1228,6 +1302,11 @@ function updateSoftwareUpdate(info) {
 
 function updateOfflineInfo(state, serviceMode, serviceModePlus) {
     var $msg = $('#offline-msg');
+    if (!configEnabled('offline-msg')) {
+        hideLoading();
+        $msg.hide().text('');
+        return;
+    }
     if (serviceModePlus) {
         hideLoading();
         $msg.text(SERVICE_MODE_PLUS_TEXT).show();
