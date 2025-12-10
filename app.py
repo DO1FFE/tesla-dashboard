@@ -3968,18 +3968,34 @@ def _extract_battery_temp(payload):
     return None
 
 
-def _fleet_battery_temp(vehicle, vid):
+def _fleet_access_token(tesla):
+    """Return a bearer token derived from the active Owner authentication."""
+
+    if teslapy is not None and tesla is not None:
+        for attr in ("token", "sso_token"):
+            token_data = getattr(tesla, attr, None)
+            if isinstance(token_data, dict):
+                access_token = token_data.get("access_token")
+                if access_token:
+                    return access_token
+
+    owner_token = os.getenv("TESLA_ACCESS_TOKEN")
+    if owner_token:
+        return owner_token
+
+    return os.getenv("TESLA_FLEET_ACCESS_TOKEN")
+
+
+def _fleet_battery_temp(tesla, vehicle, vid):
     """Fetch battery temperature via Fleet API when configured."""
 
     endpoint = os.getenv("TESLA_FLEET_CHARGE_STATE_URL")
     if not endpoint:
         return None
 
-    token = os.getenv("TESLA_FLEET_ACCESS_TOKEN")
+    token = _fleet_access_token(tesla)
     if not token:
-        logging.info(
-            "Skipping Fleet battery temperature lookup: TESLA_FLEET_ACCESS_TOKEN missing"
-        )
+        logging.info("Skipping Fleet battery temperature lookup: no bearer token available")
         return None
 
     vehicle_identifier = os.getenv("TESLA_FLEET_VEHICLE_ID") or vid
@@ -4025,12 +4041,15 @@ def _owner_battery_temp(vehicle, vid):
     return None
 
 
-def _fetch_battery_temp(vehicle, vid):
+def _fetch_battery_temp(tesla, vehicle, vid):
     """Try to enrich charge_state with a battery temperature reading."""
 
-    for func in (_fleet_battery_temp, _owner_battery_temp):
+    for func in (
+        lambda: _fleet_battery_temp(tesla, vehicle, vid),
+        lambda: _owner_battery_temp(vehicle, vid),
+    ):
         try:
-            value = func(vehicle, vid)
+            value = func()
             if value is not None:
                 return value
         except Exception as exc:
@@ -4099,7 +4118,7 @@ def get_vehicle_data(vehicle_id=None, state=None):
             charge_state = {}
             sanitized["charge_state"] = charge_state
         if "battery_temp" not in charge_state:
-            battery_temp = _fetch_battery_temp(vehicle, vid)
+            battery_temp = _fetch_battery_temp(tesla, vehicle, vid)
             if battery_temp is not None:
                 charge_state["battery_temp"] = battery_temp
     except Exception as exc:
