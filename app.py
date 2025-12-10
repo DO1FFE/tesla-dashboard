@@ -887,7 +887,9 @@ CONFIG_ITEMS = [
     {"id": "gear-shift", "desc": "Ganghebel"},
     {"id": "battery-indicator", "desc": "Batteriestand"},
     {"id": "speedometer", "desc": "Tacho"},
-    {"id": "thermometers", "desc": "Temperaturen"},
+    {"id": "thermometer-inside", "desc": "Thermometer Innen"},
+    {"id": "thermometer-outside", "desc": "Thermometer Außen"},
+    {"id": "thermometer-battery", "desc": "Thermometer Batterie"},
     {"id": "climate-indicator", "desc": "Klimaanlage"},
     {"id": "tpms-indicator", "desc": "Reifendruck"},
     {"id": "openings-indicator", "desc": "Türen/Fenster"},
@@ -903,6 +905,11 @@ CONFIG_ITEMS = [
     {"id": "nav-bar", "desc": "Navigationsleiste"},
     {"id": "media-player", "desc": "Medienwiedergabe"},
     {"id": "ptt-controls", "desc": "Push-to-Talk"},
+    {"id": "software-update", "desc": "Software-Update-Hinweis"},
+    {"id": "offline-msg", "desc": "Offline-Meldung"},
+    {"id": "loading-msg", "desc": "Ladehinweis"},
+    {"id": "park-since", "desc": "Parkdauer"},
+    {"id": "sms-form", "desc": "SMS-Formular"},
 ]
 
 
