@@ -25,6 +25,20 @@ This is a simple Flask application that displays real-time data from a Tesla veh
 6. You can also enter the driver's phone number in international format (for example `+491701234567`), your Infobip API key and an optional sender ID here. Leave the sender field empty if the account does not support custom senders. SMS messages to the driver can be enabled or disabled and you may choose whether they are only allowed while driving or at any time. When restricted to driving mode, messages are still allowed for five minutes after parking.
 7. When sending a text message the sender's name is requested as well. The entire message including the name must not exceed 160 characters.
 
+### Fleet battery temperature lookup
+
+Battery temperature can be enriched through the Tesla Fleet API when a charge state endpoint is configured. Set `TESLA_FLEET_CHARGE_STATE_URL` to the full Fleet charge state URL and include a `{vehicle_id}` placeholder that will be replaced automatically. You may optionally fix the vehicle using `TESLA_FLEET_VEHICLE_ID`; otherwise the dashboard falls back to the current vehicle id.
+
+Authentication prefers the dedicated `TESLA_FLEET_ACCESS_TOKEN`. If that is not provided, the dashboard first reuses the active Owner session token from teslapy, then `TESLA_ACCESS_TOKEN`, and finally the Fleet token. Without a Fleet URL or any usable token the Fleet lookup is skipped and the dashboard only uses Owner API data.
+
+Example `.env` snippet:
+
+```
+TESLA_FLEET_CHARGE_STATE_URL=https://fleet-api.tesla.com/api/1/vehicles/{vehicle_id}/charge_state
+TESLA_FLEET_VEHICLE_ID=12345678901234567
+TESLA_FLEET_ACCESS_TOKEN=eyJhbGciOi...
+```
+
 All sent text messages are written to `data/sms.log` and can be viewed on the `/sms` page.
 Timestamps in this file are recorded in the Europe/Berlin timezone.
 
