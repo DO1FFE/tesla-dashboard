@@ -592,7 +592,12 @@ select {
 }
 
 #inside-temp-value,
-#desired-temp,
+#desired-temp {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+
 #outside-temp-value,
 #battery-temp-value {
   width: 9em;
