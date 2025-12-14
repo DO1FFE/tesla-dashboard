@@ -684,8 +684,10 @@ select {
 #thermometers .label {
   font-size: 0.9em;
   margin-top: 2px;
-  width: 100%;
-  text-align: left;
+  display: block;
+  width: 96px;
+  text-align: right;
+  align-self: center;
   white-space: nowrap;
 }
 
