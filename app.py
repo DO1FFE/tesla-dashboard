@@ -910,6 +910,7 @@ CONFIG_ITEMS = [
     {"id": "loading-msg", "desc": "Ladehinweis"},
     {"id": "park-since", "desc": "Parkdauer"},
     {"id": "sms-form", "desc": "SMS-Formular"},
+    {"id": "supercharger-list", "desc": "Supercharger in der Nähe"},
 ]
 
 
@@ -4077,6 +4078,103 @@ def _fetch_battery_temp(tesla, vehicle, vid):
     return None
 
 
+def _normalize_supercharger_sites(payload, drive_state):
+    """Return a sorted list of nearby Superchargers with normalized fields."""
+
+    def _to_float(val):
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return None
+        except Exception:
+            return None
+
+    def _to_int(val):
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return None
+        except Exception:
+            return None
+
+    car_lat = None
+    car_lon = None
+    if isinstance(drive_state, dict):
+        car_lat = _to_float(drive_state.get("latitude"))
+        car_lon = _to_float(drive_state.get("longitude"))
+
+    sites = []
+    if isinstance(payload, dict):
+        for key in ("superchargers",):
+            cand = payload.get(key)
+            if isinstance(cand, list):
+                sites = cand
+                break
+        if not sites:
+            resp = payload.get("response")
+            if isinstance(resp, dict):
+                cand = resp.get("superchargers")
+                if isinstance(cand, list):
+                    sites = cand
+
+    entries = []
+    for site in sites:
+        if not isinstance(site, dict):
+            continue
+        location = site.get("location", {})
+        lat = _to_float(location.get("lat") or location.get("latitude"))
+        lon = _to_float(location.get("long") or location.get("longitude") or location.get("lng"))
+        if lat is None or lon is None:
+            continue
+
+        distance_km = _to_float(site.get("distance_km"))
+        if distance_km is None:
+            miles = _to_float(site.get("distance_miles") or site.get("distance"))
+            if miles is not None:
+                distance_km = miles * MILES_TO_KM
+        if distance_km is None and car_lat is not None and car_lon is not None:
+            distance_km = _haversine(car_lat, car_lon, lat, lon)
+
+        name = site.get("name") or site.get("site_name") or "Supercharger"
+        available = _to_int(site.get("available_stalls"))
+        total = _to_int(site.get("total_stalls"))
+        entry = {
+            "name": name,
+            "distance_km": round(distance_km, 2) if isinstance(distance_km, (int, float)) else None,
+            "available_stalls": available,
+            "total_stalls": total,
+            "location": {"latitude": lat, "longitude": lon},
+        }
+        entries.append(entry)
+
+    entries.sort(
+        key=lambda item: item["distance_km"]
+        if isinstance(item.get("distance_km"), (int, float))
+        else float("inf")
+    )
+    return entries[:5]
+
+
+def _fetch_nearby_superchargers(vehicle, drive_state, vid):
+    """Fetch nearby Superchargers and return a normalized list."""
+
+    api_call = getattr(vehicle, "api", None)
+    if not callable(api_call):
+        return []
+    try:
+        payload = api_call("NEARBY_CHARGING_SITES")
+        log_api_data("nearby_charging_sites", sanitize(payload), vehicle_id=vid)
+    except Exception as exc:
+        _log_api_error(exc)
+        return []
+
+    try:
+        return _normalize_supercharger_sites(payload, drive_state)
+    except Exception as exc:
+        _log_api_error(exc)
+    return []
+
+
 def get_vehicle_data(vehicle_id=None, state=None):
     """Fetch vehicle data for a given vehicle id."""
     tesla = get_tesla()
@@ -4162,6 +4260,12 @@ def get_vehicle_data(vehicle_id=None, state=None):
             v_state["vehicle_name"] = f"{name} ({car_desc} {trim.upper()})"
     except Exception:
         pass
+    try:
+        drive_state = sanitized.get("drive_state", {})
+        sanitized["nearby_superchargers"] = _fetch_nearby_superchargers(vehicle, drive_state, vid)
+    except Exception as exc:
+        _log_api_error(exc)
+        sanitized["nearby_superchargers"] = []
     log_api_data("get_vehicle_data", sanitized, vehicle_id=vid)
     sanitized["park_start"] = park_start_ms
     sanitized["park_duration"] = park_duration_string(park_start_ms)

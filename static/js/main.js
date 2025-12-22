@@ -15,6 +15,8 @@ var PARK_GRACE_MS = 5 * 60 * 1000;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 18;
+var superchargerMarkers = [];
+var lastSuperchargerData = null;
 
 function normalizeShiftState(shift) {
     if (shift === null || shift === undefined) {
@@ -136,7 +138,8 @@ var TOGGLE_DEFAULTS = {
     'offline-msg': true,
     'loading-msg': true,
     'park-since': true,
-    'sms-form': true
+    'sms-form': true,
+    'supercharger-list': true
 };
 
 function applyThermometerCompatibility(cfg) {
@@ -227,6 +230,12 @@ function showConfigured() {
     // Recalculate map dimensions when the content becomes visible.
     map.invalidateSize();
     updateSmsForm();
+    if (!configEnabled('supercharger-list')) {
+        $('#supercharger-items').empty();
+        clearSuperchargerMarkers();
+    } else {
+        updateSuperchargerList();
+    }
 }
 
 function updateSmsForm() {
@@ -307,6 +316,12 @@ var arrowIcon = L.divIcon({
     iconSize: [30, 30],
     iconAnchor: [15, 15]
 });
+var scMarkerIcon = L.divIcon({
+    html: '⚡',
+    className: 'sc-icon',
+    iconSize: [20, 20],
+    iconAnchor: [10, 10]
+});
 
 var marker = L.marker(DEFAULT_POS, {
     icon: arrowIcon,
@@ -350,6 +365,86 @@ function updatePathPoints(data) {
         });
     }
     return Array.isArray(currentPath) ? currentPath : [];
+}
+
+function clearSuperchargerMarkers() {
+    superchargerMarkers.forEach(function(m) {
+        try {
+            map.removeLayer(m);
+        } catch (err) {}
+    });
+    superchargerMarkers = [];
+}
+
+function updateSuperchargerList(data) {
+    if (typeof data !== 'undefined') {
+        lastSuperchargerData = data;
+    } else {
+        data = lastSuperchargerData;
+    }
+    var $container = $('#supercharger-list');
+    var $list = $('#supercharger-items');
+    if (!$container.length || !$list.length) {
+        return;
+    }
+    if (!configEnabled('supercharger-list')) {
+        $list.empty();
+        clearSuperchargerMarkers();
+        return;
+    }
+    var online = data && data.state === 'online';
+    var entries = [];
+    if (online && data && Array.isArray(data.nearby_superchargers)) {
+        entries = data.nearby_superchargers.slice(0, 5);
+    }
+    clearSuperchargerMarkers();
+    $list.empty();
+    if (!online) {
+        $list.append('<li class="empty">Keine Live-Daten verfügbar.</li>');
+        return;
+    }
+    if (!entries.length) {
+        $list.append('<li class="empty">Keine Supercharger gefunden.</li>');
+        return;
+    }
+    entries.forEach(function(site) {
+        if (!site) return;
+        var name = site.name || 'Supercharger';
+        var distanceText = '';
+        if (typeof site.distance_km === 'number' && isFinite(site.distance_km)) {
+            distanceText = site.distance_km.toFixed(1) + ' km';
+        }
+        var availability = '';
+        var available = site.available_stalls;
+        var total = site.total_stalls;
+        if (available != null && total != null) {
+            availability = available + ' / ' + total + ' frei';
+        } else if (available != null) {
+            availability = available + ' frei';
+        } else if (total != null) {
+            availability = total + ' Plätze';
+        }
+        var metaParts = [];
+        if (distanceText) metaParts.push(distanceText);
+        if (availability) metaParts.push(availability);
+        var metaText = metaParts.join(' · ');
+        var $li = $('<li>');
+        $li.append($('<span class="name">').text(name));
+        if (metaText) {
+            $li.append($('<div class="meta">').text(metaText));
+        }
+        $list.append($li);
+        if (site.location && site.location.latitude != null && site.location.longitude != null) {
+            var lat = Number(site.location.latitude);
+            var lng = Number(site.location.longitude);
+            if (isFinite(lat) && isFinite(lng)) {
+                var marker = L.marker([lat, lng], { icon: scMarkerIcon });
+                marker.bindTooltip(name + (distanceText ? ' – ' + distanceText : ''), {permanent: false});
+                marker.addTo(map);
+                superchargerMarkers.push(marker);
+            }
+        }
+    });
 }
 
 function updateHeader(data) {
@@ -501,6 +596,7 @@ function handleData(data) {
         $('#address-text').text('');
         $('#address-error').hide();
     }
+    updateSuperchargerList(data);
 
     // Show destination flag and route line if navigation is active
     if (drive.active_route_destination && drive.active_route_latitude && drive.active_route_longitude) {
