@@ -127,9 +127,8 @@ select {
 }
 
 #supercharger-list {
-  flex: 0 0 280px;
+  flex: 1 1 100%;
   width: 100%;
-  max-width: 320px;
   margin: 10px 0;
   padding: 10px;
   background: var(--surface-color);
