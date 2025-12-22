@@ -235,6 +235,9 @@ _lookup_queue = queue.Queue()
 _queued_ips = set()
 _lookup_lock = threading.Lock()
 
+SUPERCHARGER_CACHE_TTL = 300
+_supercharger_cache = {"ts": 0, "payload": None}
+
 
 def _perform_hostname_lookup(ip):
     try:
@@ -4127,13 +4130,15 @@ def _normalize_supercharger_sites(payload, drive_state):
         if lat is None or lon is None:
             continue
 
-        distance_km = _to_float(site.get("distance_km"))
-        if distance_km is None:
-            miles = _to_float(site.get("distance_miles") or site.get("distance"))
-            if miles is not None:
-                distance_km = miles * MILES_TO_KM
-        if distance_km is None and car_lat is not None and car_lon is not None:
+        distance_km = None
+        if car_lat is not None and car_lon is not None:
             distance_km = _haversine(car_lat, car_lon, lat, lon)
+        if distance_km is None:
+            distance_km = _to_float(site.get("distance_km"))
+            if distance_km is None:
+                miles = _to_float(site.get("distance_miles") or site.get("distance"))
+                if miles is not None:
+                    distance_km = miles * MILES_TO_KM
 
         name = site.get("name") or site.get("site_name") or "Supercharger"
         available = _to_int(site.get("available_stalls"))
@@ -4161,12 +4166,21 @@ def _fetch_nearby_superchargers(vehicle, drive_state, vid):
     api_call = getattr(vehicle, "api", None)
     if not callable(api_call):
         return []
-    try:
-        payload = api_call("NEARBY_CHARGING_SITES")
-        log_api_data("nearby_charging_sites", sanitize(payload), vehicle_id=vid)
-    except Exception as exc:
-        _log_api_error(exc)
-        return []
+    now = time.time()
+    payload = None
+    if now - _supercharger_cache.get("ts", 0) < SUPERCHARGER_CACHE_TTL:
+        payload = _supercharger_cache.get("payload")
+    if payload is None:
+        try:
+            payload = api_call("NEARBY_CHARGING_SITES")
+            log_api_data("nearby_charging_sites", sanitize(payload), vehicle_id=vid)
+            _supercharger_cache["payload"] = payload
+            _supercharger_cache["ts"] = now
+        except Exception as exc:
+            _log_api_error(exc)
+            payload = _supercharger_cache.get("payload")
+            if payload is None:
+                return []
 
     try:
         return _normalize_supercharger_sites(payload, drive_state)
