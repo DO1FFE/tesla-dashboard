@@ -75,11 +75,23 @@ def _secret_key():
 
 load_dotenv()
 app = Flask(__name__)
-app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 3600
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 app.config["SECRET_KEY"] = _secret_key()
 csrf = CSRFProtect(app)
 Compress(app)
 socketio = SocketIO(app, async_mode="eventlet")
+
+
+@app.after_request
+def disable_response_caching(resp):
+    resp.headers.setdefault(
+        "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0"
+    )
+    resp.headers.setdefault("Pragma", "no-cache")
+    resp.headers.setdefault("Expires", "0")
+    return resp
+
+
 __version__ = get_version()
 CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
 RECEIPT_TIME_FORMAT = "%d.%m.%Y %H:%M"
