@@ -236,7 +236,8 @@ _queued_ips = set()
 _lookup_lock = threading.Lock()
 
 SUPERCHARGER_CACHE_TTL = 300
-_supercharger_cache = {"ts": 0, "payload": None}
+SUPERCHARGER_CACHE_DISTANCE_KM = 1.0
+_supercharger_cache = {}
 
 
 def _perform_hostname_lookup(ip):
@@ -4160,6 +4161,56 @@ def _normalize_supercharger_sites(payload, drive_state):
     return entries[:5]
 
 
+def _drive_state_coordinates(drive_state):
+    """Return latitude and longitude extracted from a drive_state dict."""
+
+    def _to_float(val):
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return None
+
+    if not isinstance(drive_state, dict):
+        return None, None
+
+    return _to_float(drive_state.get("latitude")), _to_float(drive_state.get("longitude"))
+
+
+def _coarse_location(lat, lon, digits=2):
+    """Return a rounded tuple suitable for cache keys."""
+    try:
+        if lat is None or lon is None:
+            return None
+        return (round(lat, digits), round(lon, digits))
+    except Exception:
+        return None
+
+
+def _cache_entry_valid(entry, lat, lon, now):
+    """Return True if the cached Supercharger payload is still valid."""
+    if not isinstance(entry, dict):
+        return False
+    ts = entry.get("ts")
+    if ts is None or now - ts >= SUPERCHARGER_CACHE_TTL:
+        return False
+
+    cached_loc = entry.get("location")
+    if (
+        lat is not None
+        and lon is not None
+        and isinstance(cached_loc, tuple)
+        and len(cached_loc) == 2
+    ):
+        cached_lat, cached_lon = cached_loc
+        if cached_lat is not None and cached_lon is not None:
+            try:
+                if _haversine(lat, lon, cached_lat, cached_lon) > SUPERCHARGER_CACHE_DISTANCE_KM:
+                    return False
+            except Exception:
+                return False
+    return True
+
+
 def _fetch_nearby_superchargers(vehicle, drive_state, vid):
     """Fetch nearby Superchargers and return a normalized list."""
 
@@ -4167,20 +4218,29 @@ def _fetch_nearby_superchargers(vehicle, drive_state, vid):
     if not callable(api_call):
         return []
     now = time.time()
+    car_lat, car_lon = _drive_state_coordinates(drive_state)
+    vehicle_key = str(vid) if vid is not None else "unknown"
+    cache_key = (vehicle_key, _coarse_location(car_lat, car_lon))
+    cached_entry = _supercharger_cache.get(cache_key)
     payload = None
-    if now - _supercharger_cache.get("ts", 0) < SUPERCHARGER_CACHE_TTL:
-        payload = _supercharger_cache.get("payload")
+
+    if _cache_entry_valid(cached_entry, car_lat, car_lon, now):
+        payload = cached_entry.get("payload")
+    else:
+        _supercharger_cache.pop(cache_key, None)
+
     if payload is None:
         try:
             payload = api_call("NEARBY_CHARGING_SITES")
             log_api_data("nearby_charging_sites", sanitize(payload), vehicle_id=vid)
-            _supercharger_cache["payload"] = payload
-            _supercharger_cache["ts"] = now
+            _supercharger_cache[cache_key] = {
+                "payload": payload,
+                "ts": now,
+                "location": (car_lat, car_lon),
+            }
         except Exception as exc:
             _log_api_error(exc)
-            payload = _supercharger_cache.get("payload")
-            if payload is None:
-                return []
+            return []
 
     try:
         return _normalize_supercharger_sites(payload, drive_state)
