@@ -279,7 +279,7 @@
 
         gradient: function (colorStops) {
             // create a 256x1 gradient that we'll use to turn a grayscale heatmap into a colored one
-            var canvas = this._grad = document.createElement('canvas'),
+            var canvas = document.createElement('canvas'),
                 ctx = canvas.getContext('2d'),
                 stops = colorStops || this.defaultGradient,
                 gradient = ctx.createLinearGradient(0, 0, 0, 256),
@@ -303,6 +303,8 @@
 
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, 1, 256);
+
+            this._grad = ctx.getImageData(0, 0, 1, 256).data;
 
             return this;
         },
