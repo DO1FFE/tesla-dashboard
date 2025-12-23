@@ -918,6 +918,7 @@ CONFIG_ITEMS = [
     {"id": "menu-dashboard", "desc": "Dashboard im Seitenmenü"},
     {"id": "menu-statistik", "desc": "Statistik im Seitenmenü"},
     {"id": "menu-history", "desc": "History im Seitenmenü"},
+    {"id": "menu-heatmap", "desc": "Heatmap im Seitenmenü"},
     {"id": "nav-bar", "desc": "Navigationsleiste"},
     {"id": "media-player", "desc": "Medienwiedergabe"},
     {"id": "ptt-controls", "desc": "Push-to-Talk"},
@@ -2839,6 +2840,38 @@ def _load_trip(filename):
     return points
 
 
+def _heatmap_points(max_points=5000):
+    """Return heatmap-friendly points with optional downsampling."""
+
+    trip_points = []
+    for path in _get_trip_files():
+        for entry in _load_trip(path):
+            if len(entry) < 2:
+                continue
+            lat, lon = entry[0], entry[1]
+            if lat is None or lon is None:
+                continue
+            speed = entry[2] if len(entry) >= 3 else None
+            power = entry[3] if len(entry) >= 4 else None
+            weight = None
+            for candidate in (power, speed):
+                try:
+                    if candidate is not None:
+                        weight = float(candidate)
+                        break
+                except Exception:
+                    continue
+            if weight is None:
+                weight = 1.0
+            trip_points.append((lat, lon, weight))
+
+    if max_points and max_points > 0 and len(trip_points) > max_points:
+        step = max(1, len(trip_points) // max_points)
+        trip_points = trip_points[::step][:max_points]
+
+    return trip_points
+
+
 def _bearing(p1, p2):
     """Compute heading in degrees from p1 to p2."""
     from math import atan2, cos, sin, radians, degrees
@@ -4756,6 +4789,17 @@ def map_only():
     return render_template("map.html", version=__version__)
 
 
+@app.route("/heatmap")
+def heatmap():
+    """Show a heatmap view of recorded trips."""
+    cfg = load_config()
+    response = make_response(
+        render_template("heatmap.html", version=__version__, config=cfg)
+    )
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
+
+
 @app.route("/history")
 def trip_history():
     """Show recorded trips and allow selecting a trip to display."""
@@ -4840,6 +4884,32 @@ def api_data_vehicle(vehicle_id):
     if data is None:
         data = _fetch_data_once(vehicle_id)
     return jsonify(data)
+
+
+@app.route("/api/heatmap")
+def api_heatmap():
+    """Expose aggregated trip points for heatmap visualization."""
+
+    fmt = (request.args.get("format") or "list").lower()
+    max_points = request.args.get("max_points", type=int)
+    if max_points is not None and max_points < 0:
+        abort(400, description="max_points must be non-negative")
+
+    limit = 5000 if max_points is None else max_points
+    points = _heatmap_points(max_points=limit)
+    if fmt == "geojson":
+        features = []
+        for lat, lon, weight in points:
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                    "properties": {"weight": weight},
+                }
+            )
+        return jsonify({"type": "FeatureCollection", "features": features})
+
+    return jsonify({"points": points})
 
 
 @app.route("/stream")
