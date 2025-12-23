@@ -33,8 +33,21 @@
 
     function normalizePoints(points) {
         var maxWeight = 0;
+        var sanitized = [];
         for (var i = 0; i < points.length; i++) {
-            var weight = Number(points[i][2]) || 0;
+            var lat = Number(points[i][0]);
+            var lon = Number(points[i][1]);
+            if (!isFinite(lat) || !isFinite(lon)) {
+                continue;
+            }
+            var weight = Number(points[i][2]);
+            if (!isFinite(weight)) {
+                weight = 1;
+            }
+            if (weight < 0) {
+                weight = 0;
+            }
+            sanitized.push([lat, lon, weight]);
             if (weight > maxWeight) {
                 maxWeight = weight;
             }
@@ -42,9 +55,7 @@
         if (maxWeight <= 0) {
             maxWeight = 1;
         }
-        return points.map(function(p) {
-            return [p[0], p[1], (Number(p[2]) || 0) / maxWeight || 0.1];
-        });
+        return { points: sanitized, maxWeight: maxWeight };
     }
 
     function fitBoundsForPoints(points) {
@@ -57,12 +68,21 @@
 
     function buildHeatLayer(points) {
         var normalized = normalizePoints(points);
-        L.heatLayer(normalized, {
+        L.heatLayer(normalized.points, {
             radius: 25,
             blur: 15,
-            maxZoom: 17
+            maxZoom: 17,
+            max: normalized.maxWeight,
+            minOpacity: 0.2,
+            gradient: {
+                0.0: 'blue',
+                0.2: 'cyan',
+                0.4: 'lime',
+                0.7: 'yellow',
+                1.0: 'red'
+            }
         }).addTo(map);
-        fitBoundsForPoints(points);
+        fitBoundsForPoints(normalized.points);
     }
 
     function parseHeatmapResponse(data) {
