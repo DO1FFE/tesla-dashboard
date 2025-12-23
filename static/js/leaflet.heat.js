@@ -277,20 +277,31 @@
             return this;
         },
 
-        gradient: function (grad) {
+        gradient: function (colorStops) {
             // create a 256x1 gradient that we'll use to turn a grayscale heatmap into a colored one
             var canvas = this._grad = document.createElement('canvas'),
                 ctx = canvas.getContext('2d'),
-                grad = ctx.createLinearGradient(0, 0, 0, 256);
+                stops = colorStops || this.defaultGradient,
+                gradient = ctx.createLinearGradient(0, 0, 0, 256),
+                keys = Object.keys(stops),
+                i, len, stop, offset;
 
             canvas.width = 1;
             canvas.height = 256;
 
-            for (var i in grad) {
-                grad.addColorStop(i, grad[i]);
+            for (i = 0, len = keys.length; i < len; i++) {
+                stop = keys[i];
+                offset = Number(stop);
+
+                if (!isFinite(offset)) {
+                    continue;
+                }
+
+                offset = Math.min(1, Math.max(0, offset));
+                gradient.addColorStop(offset, stops[stop]);
             }
 
-            ctx.fillStyle = grad;
+            ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, 1, 256);
 
             return this;
