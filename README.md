@@ -115,6 +115,10 @@ The same information is also stored as hierarchical JSON in `data/api-liste.json
 * `/api/state` – return the current vehicle state as JSON
 * `/api/version` – return the current dashboard version as JSON
 * `/api/clients` – number of connected clients as JSON
+* `/api/heatmap` – aggregated trip points for the heatmap
+    * Optional query parameters:
+        * `max_points=<positive integer>` down-samples the response to the requested number of points. Omit this parameter or set `max_points=0` to return all recorded points.
+        * `format=geojson` returns a GeoJSON FeatureCollection instead of a point list.
 * `/api/occupant` – get or set occupant presence flag
     * Use `POST` with a JSON body like `{ "present": true }` or `{ "present": false }`
       to notify the dashboard whether someone is inside.

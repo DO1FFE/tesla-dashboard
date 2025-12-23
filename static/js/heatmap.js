@@ -87,7 +87,7 @@
     function fetchHeatmap() {
         setLoading('Lade Heatmap-Daten…');
         setError('');
-        fetch('/api/heatmap')
+        fetch('/api/heatmap?max_points=0')
             .then(function(resp) {
                 if (!resp.ok) {
                     throw new Error('HTTP ' + resp.status);

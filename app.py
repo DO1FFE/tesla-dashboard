@@ -2840,8 +2840,8 @@ def _load_trip(filename):
     return points
 
 
-def _heatmap_points(max_points=5000):
-    """Return heatmap-friendly points with optional downsampling."""
+def _heatmap_points(max_points=None):
+    """Return heatmap-friendly points with optional downsampling when limited."""
 
     trip_points = []
     for path in _get_trip_files():
@@ -4895,8 +4895,7 @@ def api_heatmap():
     if max_points is not None and max_points < 0:
         abort(400, description="max_points must be non-negative")
 
-    limit = 5000 if max_points is None else max_points
-    points = _heatmap_points(max_points=limit)
+    points = _heatmap_points(max_points=max_points)
     if fmt == "geojson":
         features = []
         for lat, lon, weight in points:
