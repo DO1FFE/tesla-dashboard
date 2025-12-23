@@ -2843,6 +2843,8 @@ def _load_trip(filename):
 def _heatmap_points(max_points=None):
     """Return heatmap-friendly points with optional downsampling when limited."""
 
+    from math import isfinite
+
     trip_points = []
     for path in _get_trip_files():
         for entry in _load_trip(path):
@@ -2851,16 +2853,28 @@ def _heatmap_points(max_points=None):
             lat, lon = entry[0], entry[1]
             if lat is None or lon is None:
                 continue
+            if not (isfinite(lat) and isfinite(lon)):
+                continue
             speed = entry[2] if len(entry) >= 3 else None
             power = entry[3] if len(entry) >= 4 else None
             weight = None
-            for candidate in (power, speed):
+            try:
+                if power is not None:
+                    weight = abs(float(power))
+                    if weight <= 0:
+                        weight = None
+            except Exception:
+                weight = None
+
+            if weight is None:
                 try:
-                    if candidate is not None:
-                        weight = float(candidate)
-                        break
+                    if speed is not None:
+                        speed_weight = float(speed)
+                        if speed_weight > 0:
+                            weight = speed_weight
                 except Exception:
-                    continue
+                    weight = None
+
             if weight is None:
                 weight = 1.0
             trip_points.append((lat, lon, weight))
