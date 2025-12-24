@@ -2777,11 +2777,8 @@ def _get_trip_periods():
     weeks = set()
     months = set()
     for path in _get_trip_files():
-        fname = os.path.basename(path)
-        date_str = fname.split("_")[-1].split(".")[0]
-        try:
-            day = datetime.strptime(date_str, "%Y%m%d").date()
-        except Exception:
+        day = _trip_date_from_filename(path)
+        if day is None:
             continue
         iso_year, iso_week, _ = day.isocalendar()
         weeks.add(f"{iso_year}-W{iso_week:02d}")
@@ -2789,15 +2786,22 @@ def _get_trip_periods():
     return sorted(weeks), sorted(months)
 
 
+def _trip_date_from_filename(path):
+    """Return the trip date parsed from the filename, if available."""
+    fname = os.path.basename(path)
+    date_str = fname.split("_")[-1].split(".")[0]
+    try:
+        return datetime.strptime(date_str, "%Y%m%d").date()
+    except Exception:
+        return None
+
+
 def _load_trip_period(prefix, key):
     """Load all trip points for the given week or month key."""
     points = []
     for path in _get_trip_files():
-        fname = os.path.basename(path)
-        date_str = fname.split("_")[-1].split(".")[0]
-        try:
-            day = datetime.strptime(date_str, "%Y%m%d").date()
-        except Exception:
+        day = _trip_date_from_filename(path)
+        if day is None:
             continue
         iso_year, iso_week, _ = day.isocalendar()
         week_key = f"{iso_year}-W{iso_week:02d}"
@@ -2840,13 +2844,13 @@ def _load_trip(filename):
     return points
 
 
-def _heatmap_points(max_points=None):
-    """Return heatmap-friendly points with optional downsampling when limited."""
+def _heatmap_points_for_paths(paths, max_points=None):
+    """Return heatmap-friendly points from the given trip paths."""
 
     from math import isfinite
 
     trip_points = []
-    for path in _get_trip_files():
+    for path in paths:
         for entry in _load_trip(path):
             if len(entry) < 2:
                 continue
@@ -2885,6 +2889,28 @@ def _heatmap_points(max_points=None):
 
     return trip_points
 
+
+def _heatmap_points(max_points=None):
+    """Return heatmap-friendly points with optional downsampling when limited."""
+
+    return _heatmap_points_for_paths(_get_trip_files(), max_points=max_points)
+
+
+def _trip_paths_for_scope(scope, year=None, month=None):
+    """Return trip file paths filtered by scope."""
+    paths = _get_trip_files()
+    if scope == "all":
+        return paths
+    filtered = []
+    for path in paths:
+        day = _trip_date_from_filename(path)
+        if day is None:
+            continue
+        if scope == "year" and day.year == year:
+            filtered.append(path)
+        elif scope == "month" and day.strftime("%Y-%m") == month:
+            filtered.append(path)
+    return filtered
 
 def _bearing(p1, p2):
     """Compute heading in degrees from p1 to p2."""
@@ -4807,8 +4833,16 @@ def map_only():
 def heatmap():
     """Show a heatmap view of recorded trips."""
     cfg = load_config()
+    _, months = _get_trip_periods()
+    years = sorted({month.split("-")[0] for month in months})
     response = make_response(
-        render_template("heatmap.html", version=__version__, config=cfg)
+        render_template(
+            "heatmap.html",
+            version=__version__,
+            config=cfg,
+            years=years,
+            months=months,
+        )
     )
     response.headers["X-Robots-Tag"] = "noindex, nofollow"
     return response
@@ -4909,7 +4943,33 @@ def api_heatmap():
     if max_points is not None and max_points < 0:
         abort(400, description="max_points must be non-negative")
 
-    points = _heatmap_points(max_points=max_points)
+    scope = (request.args.get("scope") or "all").lower()
+    if scope not in ("all", "year", "month"):
+        abort(400, description="scope must be all, year, or month")
+
+    year = None
+    month = None
+    if scope == "year":
+        year_raw = request.args.get("year")
+        if not year_raw:
+            abort(400, description="year is required for scope=year")
+        try:
+            year = int(year_raw)
+        except ValueError:
+            abort(400, description="year must be YYYY")
+        if year < 1000 or year > 9999:
+            abort(400, description="year must be YYYY")
+    elif scope == "month":
+        month_raw = request.args.get("month")
+        if not month_raw:
+            abort(400, description="month is required for scope=month")
+        try:
+            month = datetime.strptime(month_raw, "%Y-%m").strftime("%Y-%m")
+        except ValueError:
+            abort(400, description="month must be YYYY-MM")
+
+    paths = _trip_paths_for_scope(scope, year=year, month=month)
+    points = _heatmap_points_for_paths(paths, max_points=max_points)
     if fmt == "geojson":
         features = []
         for lat, lon, weight in points:
