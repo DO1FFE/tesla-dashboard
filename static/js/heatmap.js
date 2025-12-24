@@ -8,6 +8,11 @@
     var mapEl = document.getElementById('map');
     var loadingEl = document.getElementById('loading-status');
     var errorEl = document.getElementById('error-status');
+    var scopeEl = document.getElementById('heatmap-scope');
+    var yearEl = document.getElementById('heatmap-year');
+    var monthEl = document.getElementById('heatmap-month');
+    var yearLabelEl = document.getElementById('heatmap-year-label');
+    var monthLabelEl = document.getElementById('heatmap-month-label');
 
     function setLoading(text) {
         if (loadingEl) {
@@ -30,6 +35,24 @@
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
     }).addTo(map);
+    var heatLayer = null;
+
+    function setFilterVisibility(scope) {
+        var showYear = scope === 'year';
+        var showMonth = scope === 'month';
+        if (yearLabelEl) {
+            yearLabelEl.style.display = showYear ? '' : 'none';
+        }
+        if (yearEl) {
+            yearEl.style.display = showYear ? '' : 'none';
+        }
+        if (monthLabelEl) {
+            monthLabelEl.style.display = showMonth ? '' : 'none';
+        }
+        if (monthEl) {
+            monthEl.style.display = showMonth ? '' : 'none';
+        }
+    }
 
     function normalizePoints(points) {
         var maxWeight = 0;
@@ -68,7 +91,10 @@
 
     function buildHeatLayer(points) {
         var normalized = normalizePoints(points);
-        L.heatLayer(normalized.points, {
+        if (heatLayer) {
+            map.removeLayer(heatLayer);
+        }
+        heatLayer = L.heatLayer(normalized.points, {
             radius: 25,
             blur: 15,
             maxZoom: 17,
@@ -104,10 +130,56 @@
         return [];
     }
 
+    function selectionDescription(scope, year, month) {
+        if (scope === 'year') {
+            return year ? 'Jahr ' + year : 'Jahr';
+        }
+        if (scope === 'month') {
+            return month ? 'Monat ' + month : 'Monat';
+        }
+        return 'Alle Fahrten';
+    }
+
+    function buildHeatmapUrl(scope, year, month) {
+        var url = '/api/heatmap?max_points=0';
+        if (scope) {
+            url += '&scope=' + encodeURIComponent(scope);
+        }
+        if (scope === 'year' && year) {
+            url += '&year=' + encodeURIComponent(year);
+        }
+        if (scope === 'month' && month) {
+            url += '&month=' + encodeURIComponent(month);
+        }
+        return url;
+    }
+
     function fetchHeatmap() {
+        var scope = scopeEl ? scopeEl.value : 'all';
+        var year = yearEl ? yearEl.value : '';
+        var month = monthEl ? monthEl.value : '';
+        var description = selectionDescription(scope, year, month);
+
+        if (scope === 'year' && !year) {
+            if (heatLayer) {
+                map.removeLayer(heatLayer);
+                heatLayer = null;
+            }
+            setLoading('Keine Fahrtdaten für ' + description + '.');
+            return;
+        }
+        if (scope === 'month' && !month) {
+            if (heatLayer) {
+                map.removeLayer(heatLayer);
+                heatLayer = null;
+            }
+            setLoading('Keine Fahrtdaten für ' + description + '.');
+            return;
+        }
+
         setLoading('Lade Heatmap-Daten…');
         setError('');
-        fetch('/api/heatmap?max_points=0')
+        fetch(buildHeatmapUrl(scope, year, month))
             .then(function(resp) {
                 if (!resp.ok) {
                     throw new Error('HTTP ' + resp.status);
@@ -117,16 +189,46 @@
             .then(function(data) {
                 var points = parseHeatmapResponse(data);
                 if (!points.length) {
-                    setLoading('Keine Fahrtdaten vorhanden.');
+                    if (heatLayer) {
+                        map.removeLayer(heatLayer);
+                        heatLayer = null;
+                    }
+                    setLoading('Keine Fahrtdaten für ' + description + '.');
                     return;
                 }
                 buildHeatLayer(points);
-                setLoading('Heatmap geladen (' + points.length + ' Punkte).');
+                setLoading(
+                    'Heatmap geladen (' + description + ', ' + points.length + ' Punkte).'
+                );
             })
             .catch(function(err) {
                 setLoading('');
                 setError('Fehler beim Laden der Heatmap: ' + err.message);
             });
+    }
+
+    if (scopeEl) {
+        setFilterVisibility(scopeEl.value);
+        scopeEl.addEventListener('change', function() {
+            setFilterVisibility(scopeEl.value);
+            fetchHeatmap();
+        });
+    }
+
+    if (yearEl) {
+        yearEl.addEventListener('change', function() {
+            if (!scopeEl || scopeEl.value === 'year') {
+                fetchHeatmap();
+            }
+        });
+    }
+
+    if (monthEl) {
+        monthEl.addEventListener('change', function() {
+            if (!scopeEl || scopeEl.value === 'month') {
+                fetchHeatmap();
+            }
+        });
     }
 
     fetchHeatmap();

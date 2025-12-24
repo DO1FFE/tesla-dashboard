@@ -28,6 +28,20 @@
             background: #222;
             color: #eee;
         }
+        #heatmap-controls {
+            margin: 12px 0;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+        }
+        #heatmap-controls label {
+            font-weight: 600;
+        }
+        #heatmap-controls select {
+            padding: 4px 6px;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
@@ -44,6 +58,26 @@
         {% if show_heat %}<a class="menu-button" href="/heatmap">Heatmap</a>{% endif %}
     </nav>
     {% endif %}
+    <div id="heatmap-controls">
+        <label for="heatmap-scope">Zeitraum</label>
+        <select id="heatmap-scope">
+            <option value="all">Alle Fahrten</option>
+            <option value="year">Jahr</option>
+            <option value="month">Monat</option>
+        </select>
+        <label for="heatmap-year" id="heatmap-year-label">Jahr</label>
+        <select id="heatmap-year">
+            {% for year in years %}
+            <option value="{{ year }}"{% if loop.last %} selected{% endif %}>{{ year }}</option>
+            {% endfor %}
+        </select>
+        <label for="heatmap-month" id="heatmap-month-label">Monat</label>
+        <select id="heatmap-month">
+            {% for month in months %}
+            <option value="{{ month }}"{% if loop.last %} selected{% endif %}>{{ month }}</option>
+            {% endfor %}
+        </select>
+    </div>
     <div id="map" aria-live="polite"></div>
     <div id="status-bar">
         <span id="loading-status">Lade Heatmap-Daten…</span>
