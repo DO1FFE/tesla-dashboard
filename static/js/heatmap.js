@@ -40,6 +40,34 @@
         attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
     }).addTo(map);
     var heatLayer = null;
+    var controlsEl = document.getElementById('heatmap-controls');
+    if (controlsEl) {
+        L.DomEvent.disableClickPropagation(controlsEl);
+        L.DomEvent.disableScrollPropagation(controlsEl);
+
+        var selects = controlsEl.querySelectorAll('select');
+        var stopPropagation = function(event) {
+            event.stopPropagation();
+        };
+        var disableDragging = function() {
+            if (map.dragging) {
+                map.dragging.disable();
+            }
+        };
+        var enableDragging = function() {
+            if (map.dragging) {
+                map.dragging.enable();
+            }
+        };
+
+        for (var i = 0; i < selects.length; i++) {
+            selects[i].addEventListener('pointerdown', stopPropagation);
+            selects[i].addEventListener('touchstart', stopPropagation);
+            selects[i].addEventListener('focus', disableDragging);
+            selects[i].addEventListener('pointerdown', disableDragging);
+            selects[i].addEventListener('blur', enableDragging);
+        }
+    }
 
     function setFilterVisibility(scope) {
         var showYear = scope === 'year';
