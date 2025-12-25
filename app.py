@@ -2773,9 +2773,10 @@ def _get_trip_files(vehicle_id=None):
 
 
 def _get_trip_periods():
-    """Return sorted lists of available weeks and months."""
+    """Return sorted lists of available weeks, months, and days."""
     weeks = set()
     months = set()
+    days = set()
     for path in _get_trip_files():
         day = _trip_date_from_filename(path)
         if day is None:
@@ -2783,7 +2784,8 @@ def _get_trip_periods():
         iso_year, iso_week, _ = day.isocalendar()
         weeks.add(f"{iso_year}-W{iso_week:02d}")
         months.add(day.strftime("%Y-%m"))
-    return sorted(weeks), sorted(months)
+        days.add(day.strftime("%Y-%m-%d"))
+    return sorted(weeks), sorted(months), sorted(days)
 
 
 def _get_trip_days():
@@ -2925,7 +2927,7 @@ def _trip_paths_for_scope(scope, year=None, month=None, week=None, day=None):
             iso_year, iso_week, _ = trip_day.isocalendar()
             if f"{iso_year}-W{iso_week:02d}" == week:
                 filtered.append(path)
-        elif scope == "day" and trip_day == day:
+        elif scope == "day" and trip_day.strftime("%Y-%m-%d") == day:
             filtered.append(path)
     return filtered
 
@@ -4850,8 +4852,7 @@ def map_only():
 def heatmap():
     """Show a heatmap view of recorded trips."""
     cfg = load_config()
-    weeks, months = _get_trip_periods()
-    days = _get_trip_days()
+    weeks, months, days = _get_trip_periods()
     years = sorted({month.split("-")[0] for month in months})
     response = make_response(
         render_template(
@@ -4873,7 +4874,7 @@ def trip_history():
     """Show recorded trips and allow selecting a trip to display."""
     paths = _get_trip_files()
     files = [os.path.relpath(p, DATA_DIR) for p in paths]
-    weeks, months = _get_trip_periods()
+    weeks, months, _days = _get_trip_periods()
     selected = request.args.get("file")
     path = []
     if selected:
@@ -5007,7 +5008,7 @@ def api_heatmap():
         if not day_raw:
             abort(400, description="day is required for scope=day")
         try:
-            day = datetime.strptime(day_raw, "%Y-%m-%d").date()
+            day = datetime.strptime(day_raw, "%Y-%m-%d").date().strftime("%Y-%m-%d")
         except ValueError:
             abort(400, description="day must be YYYY-MM-DD")
 
