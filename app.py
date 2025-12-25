@@ -2786,6 +2786,17 @@ def _get_trip_periods():
     return sorted(weeks), sorted(months)
 
 
+def _get_trip_days():
+    """Return sorted list of available trip days."""
+    days = set()
+    for path in _get_trip_files():
+        trip_day = _trip_date_from_filename(path)
+        if trip_day is None:
+            continue
+        days.add(trip_day.strftime("%Y-%m-%d"))
+    return sorted(days)
+
+
 def _trip_date_from_filename(path):
     """Return the trip date parsed from the filename, if available."""
     fname = os.path.basename(path)
@@ -2896,19 +2907,25 @@ def _heatmap_points(max_points=None):
     return _heatmap_points_for_paths(_get_trip_files(), max_points=max_points)
 
 
-def _trip_paths_for_scope(scope, year=None, month=None):
+def _trip_paths_for_scope(scope, year=None, month=None, week=None, day=None):
     """Return trip file paths filtered by scope."""
     paths = _get_trip_files()
     if scope == "all":
         return paths
     filtered = []
     for path in paths:
-        day = _trip_date_from_filename(path)
-        if day is None:
+        trip_day = _trip_date_from_filename(path)
+        if trip_day is None:
             continue
-        if scope == "year" and day.year == year:
+        if scope == "year" and trip_day.year == year:
             filtered.append(path)
-        elif scope == "month" and day.strftime("%Y-%m") == month:
+        elif scope == "month" and trip_day.strftime("%Y-%m") == month:
+            filtered.append(path)
+        elif scope == "week":
+            iso_year, iso_week, _ = trip_day.isocalendar()
+            if f"{iso_year}-W{iso_week:02d}" == week:
+                filtered.append(path)
+        elif scope == "day" and trip_day == day:
             filtered.append(path)
     return filtered
 
@@ -4833,7 +4850,8 @@ def map_only():
 def heatmap():
     """Show a heatmap view of recorded trips."""
     cfg = load_config()
-    _, months = _get_trip_periods()
+    weeks, months = _get_trip_periods()
+    days = _get_trip_days()
     years = sorted({month.split("-")[0] for month in months})
     response = make_response(
         render_template(
@@ -4842,6 +4860,8 @@ def heatmap():
             config=cfg,
             years=years,
             months=months,
+            weeks=weeks,
+            days=days,
         )
     )
     response.headers["X-Robots-Tag"] = "noindex, nofollow"
@@ -4944,11 +4964,13 @@ def api_heatmap():
         abort(400, description="max_points must be non-negative")
 
     scope = (request.args.get("scope") or "all").lower()
-    if scope not in ("all", "year", "month"):
-        abort(400, description="scope must be all, year, or month")
+    if scope not in ("all", "year", "month", "week", "day"):
+        abort(400, description="scope must be all, year, month, week, or day")
 
     year = None
     month = None
+    week = None
+    day = None
     if scope == "year":
         year_raw = request.args.get("year")
         if not year_raw:
@@ -4967,8 +4989,29 @@ def api_heatmap():
             month = datetime.strptime(month_raw, "%Y-%m").strftime("%Y-%m")
         except ValueError:
             abort(400, description="month must be YYYY-MM")
+    elif scope == "week":
+        week_raw = request.args.get("week")
+        if not week_raw:
+            abort(400, description="week is required for scope=week")
+        try:
+            year_part, week_part = week_raw.split("-W")
+            year_value = int(year_part)
+            week_value = int(week_part)
+        except ValueError:
+            abort(400, description="week must be YYYY-W##")
+        if year_value < 1000 or year_value > 9999 or week_value < 1 or week_value > 53:
+            abort(400, description="week must be YYYY-W##")
+        week = f"{year_value}-W{week_value:02d}"
+    elif scope == "day":
+        day_raw = request.args.get("day")
+        if not day_raw:
+            abort(400, description="day is required for scope=day")
+        try:
+            day = datetime.strptime(day_raw, "%Y-%m-%d").date()
+        except ValueError:
+            abort(400, description="day must be YYYY-MM-DD")
 
-    paths = _trip_paths_for_scope(scope, year=year, month=month)
+    paths = _trip_paths_for_scope(scope, year=year, month=month, week=week, day=day)
     points = _heatmap_points_for_paths(paths, max_points=max_points)
     if fmt == "geojson":
         features = []
