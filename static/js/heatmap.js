@@ -11,8 +11,12 @@
     var scopeEl = document.getElementById('heatmap-scope');
     var yearEl = document.getElementById('heatmap-year');
     var monthEl = document.getElementById('heatmap-month');
+    var weekEl = document.getElementById('heatmap-week');
+    var dayEl = document.getElementById('heatmap-day');
     var yearLabelEl = document.getElementById('heatmap-year-label');
     var monthLabelEl = document.getElementById('heatmap-month-label');
+    var weekLabelEl = document.getElementById('heatmap-week-label');
+    var dayLabelEl = document.getElementById('heatmap-day-label');
 
     function setLoading(text) {
         if (loadingEl) {
@@ -40,6 +44,8 @@
     function setFilterVisibility(scope) {
         var showYear = scope === 'year';
         var showMonth = scope === 'month';
+        var showWeek = scope === 'week';
+        var showDay = scope === 'day';
         if (yearLabelEl) {
             yearLabelEl.style.display = showYear ? '' : 'none';
         }
@@ -51,6 +57,18 @@
         }
         if (monthEl) {
             monthEl.style.display = showMonth ? '' : 'none';
+        }
+        if (weekLabelEl) {
+            weekLabelEl.style.display = showWeek ? '' : 'none';
+        }
+        if (weekEl) {
+            weekEl.style.display = showWeek ? '' : 'none';
+        }
+        if (dayLabelEl) {
+            dayLabelEl.style.display = showDay ? '' : 'none';
+        }
+        if (dayEl) {
+            dayEl.style.display = showDay ? '' : 'none';
         }
     }
 
@@ -130,17 +148,23 @@
         return [];
     }
 
-    function selectionDescription(scope, year, month) {
+    function selectionDescription(scope, year, month, week, day) {
         if (scope === 'year') {
             return year ? 'Jahr ' + year : 'Jahr';
         }
         if (scope === 'month') {
             return month ? 'Monat ' + month : 'Monat';
         }
+        if (scope === 'week') {
+            return week ? 'Woche ' + week : 'Woche';
+        }
+        if (scope === 'day') {
+            return day ? 'Tag ' + day : 'Tag';
+        }
         return 'Alle Fahrten';
     }
 
-    function buildHeatmapUrl(scope, year, month) {
+    function buildHeatmapUrl(scope, year, month, week, day) {
         var url = '/api/heatmap?max_points=0';
         if (scope) {
             url += '&scope=' + encodeURIComponent(scope);
@@ -151,6 +175,12 @@
         if (scope === 'month' && month) {
             url += '&month=' + encodeURIComponent(month);
         }
+        if (scope === 'week' && week) {
+            url += '&week=' + encodeURIComponent(week);
+        }
+        if (scope === 'day' && day) {
+            url += '&day=' + encodeURIComponent(day);
+        }
         return url;
     }
 
@@ -158,7 +188,9 @@
         var scope = scopeEl ? scopeEl.value : 'all';
         var year = yearEl ? yearEl.value : '';
         var month = monthEl ? monthEl.value : '';
-        var description = selectionDescription(scope, year, month);
+        var week = weekEl ? weekEl.value : '';
+        var day = dayEl ? dayEl.value : '';
+        var description = selectionDescription(scope, year, month, week, day);
 
         if (scope === 'year' && !year) {
             if (heatLayer) {
@@ -176,10 +208,26 @@
             setLoading('Keine Fahrtdaten für ' + description + '.');
             return;
         }
+        if (scope === 'week' && !week) {
+            if (heatLayer) {
+                map.removeLayer(heatLayer);
+                heatLayer = null;
+            }
+            setLoading('Keine Fahrtdaten für ' + description + '.');
+            return;
+        }
+        if (scope === 'day' && !day) {
+            if (heatLayer) {
+                map.removeLayer(heatLayer);
+                heatLayer = null;
+            }
+            setLoading('Keine Fahrtdaten für ' + description + '.');
+            return;
+        }
 
         setLoading('Lade Heatmap-Daten…');
         setError('');
-        fetch(buildHeatmapUrl(scope, year, month))
+        fetch(buildHeatmapUrl(scope, year, month, week, day))
             .then(function(resp) {
                 if (!resp.ok) {
                     throw new Error('HTTP ' + resp.status);
@@ -226,6 +274,22 @@
     if (monthEl) {
         monthEl.addEventListener('change', function() {
             if (!scopeEl || scopeEl.value === 'month') {
+                fetchHeatmap();
+            }
+        });
+    }
+
+    if (weekEl) {
+        weekEl.addEventListener('change', function() {
+            if (!scopeEl || scopeEl.value === 'week') {
+                fetchHeatmap();
+            }
+        });
+    }
+
+    if (dayEl) {
+        dayEl.addEventListener('change', function() {
+            if (!scopeEl || scopeEl.value === 'day') {
                 fetchHeatmap();
             }
         });

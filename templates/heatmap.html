@@ -64,6 +64,8 @@
             <option value="all">Alle Fahrten</option>
             <option value="year">Jahr</option>
             <option value="month">Monat</option>
+            <option value="week">Woche</option>
+            <option value="day">Tag</option>
         </select>
         <label for="heatmap-year" id="heatmap-year-label">Jahr</label>
         <select id="heatmap-year">
@@ -75,6 +77,18 @@
         <select id="heatmap-month">
             {% for month in months %}
             <option value="{{ month }}"{% if loop.last %} selected{% endif %}>{{ month }}</option>
+            {% endfor %}
+        </select>
+        <label for="heatmap-week" id="heatmap-week-label">Woche</label>
+        <select id="heatmap-week">
+            {% for week in weeks %}
+            <option value="{{ week }}"{% if loop.last %} selected{% endif %}>{{ week }}</option>
+            {% endfor %}
+        </select>
+        <label for="heatmap-day" id="heatmap-day-label">Tag</label>
+        <select id="heatmap-day">
+            {% for day in days %}
+            <option value="{{ day }}"{% if loop.last %} selected{% endif %}>{{ day }}</option>
             {% endfor %}
         </select>
     </div>
