@@ -60,6 +60,80 @@ select {
   border-radius: 4px;
 }
 
+/* Tesla Browser Fix */
+.tesla-select-native {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.tesla-select {
+  display: inline-block;
+  min-width: 160px;
+}
+
+.tesla-select-trigger {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: var(--surface-color);
+  color: var(--text-color);
+  text-align: left;
+  position: relative;
+}
+
+.tesla-select-trigger::after {
+  content: '▾';
+  position: absolute;
+  right: 0.7rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.9rem;
+  color: #bbb;
+}
+
+.tesla-select-portal {
+  position: fixed;
+  z-index: 10000;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--surface-color);
+  border: 1px solid #444;
+  border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+  padding: 6px 0;
+}
+
+.tesla-select-option {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.45rem 0.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-color);
+  text-align: left;
+}
+
+.tesla-select-option[aria-selected="true"] {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.tesla-select-option:disabled {
+  opacity: 0.5;
+}
+
+.tesla-select-group {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  color: #aaa;
+  text-transform: uppercase;
+}
+
 #dashboard-content {
   padding: 0 1rem;
 }

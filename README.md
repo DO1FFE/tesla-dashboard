@@ -78,6 +78,26 @@ opening the streaming connection. When the vehicle is reported as `offline` or
 `asleep` no further API requests are made so the car remains in its current
 state. The dashboard never wakes the vehicle automatically.
 
+## Tesla browser compatibility (dropdowns)
+
+The in-car Tesla browser is an embedded Chromium build that can behave differently from modern desktop or mobile browsers. Dropdowns are especially sensitive because touch input, overflow clipping, and stacking contexts can cause native `<select>` elements to open inconsistently or close immediately.
+
+To mitigate this, the frontend includes a Tesla-specific select replacement:
+
+* `static/js/tesla-browser.js` exposes `isTeslaBrowser()` using a user-agent check (`Tesla/` or `QtCarBrowser`).  
+  It is intentionally small and safe to call on every page.
+* `static/js/tesla-select.js` activates only when `isTeslaBrowser()` is `true`. It hides native `<select>` elements and renders a custom, touch-friendly dropdown.
+* The custom select is the **standard** dropdown behavior for the Tesla browser. Other browsers continue to use native selects.
+
+Best practices for future dropdowns in this repo:
+
+* Prefer click/tap handlers over `:hover`-only interactions.
+* Avoid `overflow: hidden` on parent containers of dropdowns, or render the dropdown in a top-level layer.
+* Avoid `transform` on containers that host absolutely positioned dropdowns.
+* Always set explicit `z-index` values for menu layers.
+* Keep touch targets at least 44px tall.
+* When in doubt, use the Tesla custom select instead of relying on a native `<select>`.
+
 ## Features
 
 The dashboard shows a short overview depending on whether the vehicle is parked, driving or charging. Below this, additional tables are grouped by category (battery/charging, climate, drive state, vehicle status and media information) to make the raw API data easier to read. While parked the dashboard also displays tire pressures, power usage of the drive unit and the 12V battery as well as how long the vehicle has been parked.
