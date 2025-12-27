@@ -245,13 +245,25 @@ select {
   box-sizing: border-box;
 }
 
+#supercharger-list li .row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 #supercharger-list li .name {
   font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 #supercharger-list li .meta {
   font-size: 0.9em;
   color: #ccc;
+  flex: 0 0 auto;
+  text-align: right;
+  white-space: nowrap;
 }
 
 #supercharger-list li.empty {

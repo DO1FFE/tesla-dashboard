@@ -429,10 +429,12 @@ function updateSuperchargerList(data) {
         if (availability) metaParts.push(availability);
         var metaText = metaParts.join(' · ');
         var $li = $('<li>');
-        $li.append($('<span class="name">').text(name));
+        var $row = $('<div class="row">');
+        $row.append($('<span class="name">').text(name));
         if (metaText) {
-            $li.append($('<div class="meta">').text(metaText));
+            $row.append($('<span class="meta">').text(metaText));
         }
+        $li.append($row);
         $list.append($li);
         if (site.location && site.location.latitude != null && site.location.longitude != null) {
             var lat = Number(site.location.latitude);
