@@ -174,7 +174,26 @@
                 return;
             }
             select.value = option.value;
-            select.dispatchEvent(new Event('change', { bubbles: true }));
+            try {
+                var changeEvent = null;
+                if (typeof window.Event === 'function') {
+                    changeEvent = new Event('change', { bubbles: true });
+                } else if (document.createEvent) {
+                    try {
+                        changeEvent = document.createEvent('Event');
+                    } catch (error) {
+                        changeEvent = document.createEvent('HTMLEvents');
+                    }
+                    if (changeEvent && changeEvent.initEvent) {
+                        changeEvent.initEvent('change', true, false);
+                    }
+                }
+                if (changeEvent) {
+                    select.dispatchEvent(changeEvent);
+                }
+            } catch (error) {
+                // Continue even if event dispatch fails.
+            }
             updateTriggerText(select, select._teslaSelect.button);
             closeActive();
         });
