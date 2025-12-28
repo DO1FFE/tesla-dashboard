@@ -237,7 +237,7 @@ select {
 }
 
 #supercharger-list li {
-  background: rgba(211, 47, 47, 0.1);
+  background: var(--surface-color);
   border: 1px solid #d32f2f;
   border-radius: 6px;
   padding: 8px;
