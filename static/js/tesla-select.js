@@ -143,6 +143,35 @@
         }
     }
 
+    function selectOption(select, option) {
+        if (!select || !option || option.disabled) {
+            return;
+        }
+        select.value = option.value;
+        try {
+            var changeEvent = null;
+            if (typeof window.Event === 'function') {
+                changeEvent = new Event('change', { bubbles: true });
+            } else if (document.createEvent) {
+                try {
+                    changeEvent = document.createEvent('Event');
+                } catch (error) {
+                    changeEvent = document.createEvent('HTMLEvents');
+                }
+                if (changeEvent && changeEvent.initEvent) {
+                    changeEvent.initEvent('change', true, false);
+                }
+            }
+            if (changeEvent) {
+                select.dispatchEvent(changeEvent);
+            }
+        } catch (error) {
+            // Continue even if event dispatch fails.
+        }
+        updateTriggerText(select, select._teslaSelect.button);
+        closeActive();
+    }
+
     function buildOptionButton(select, option) {
         var button = document.createElement('button');
         button.type = 'button';
@@ -159,7 +188,9 @@
 
         button.addEventListener('touchstart', function(event) {
             lastTouchTime = Date.now();
+            event.preventDefault();
             event.stopPropagation();
+            selectOption(select, option);
         });
         button.addEventListener('mousedown', function(event) {
             if (shouldIgnoreMouse()) {
@@ -168,34 +199,12 @@
             event.stopPropagation();
         });
         button.addEventListener('click', function(event) {
-            event.preventDefault();
-            event.stopPropagation();
-            if (option.disabled) {
+            if (shouldIgnoreMouse()) {
                 return;
             }
-            select.value = option.value;
-            try {
-                var changeEvent = null;
-                if (typeof window.Event === 'function') {
-                    changeEvent = new Event('change', { bubbles: true });
-                } else if (document.createEvent) {
-                    try {
-                        changeEvent = document.createEvent('Event');
-                    } catch (error) {
-                        changeEvent = document.createEvent('HTMLEvents');
-                    }
-                    if (changeEvent && changeEvent.initEvent) {
-                        changeEvent.initEvent('change', true, false);
-                    }
-                }
-                if (changeEvent) {
-                    select.dispatchEvent(changeEvent);
-                }
-            } catch (error) {
-                // Continue even if event dispatch fails.
-            }
-            updateTriggerText(select, select._teslaSelect.button);
-            closeActive();
+            event.preventDefault();
+            event.stopPropagation();
+            selectOption(select, option);
         });
         return button;
     }
@@ -280,6 +289,9 @@
         });
 
         button.addEventListener('click', function(event) {
+            if (shouldIgnoreMouse()) {
+                return;
+            }
             event.preventDefault();
             event.stopPropagation();
             toggleSelect(select);
