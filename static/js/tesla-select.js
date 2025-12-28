@@ -1,8 +1,18 @@
 (function() {
     'use strict';
 
+    function shouldEnableTeslaSelect() {
+        if (window.isTeslaSelectForced && window.isTeslaSelectForced()) {
+            return true;
+        }
+        if (window.isTeslaBrowser && window.isTeslaBrowser()) {
+            return true;
+        }
+        return false;
+    }
+
     // Tesla Browser Fix: only enable the custom select UI in the Tesla browser.
-    if (!window.isTeslaBrowser || !window.isTeslaBrowser()) {
+    if (!shouldEnableTeslaSelect()) {
         return;
     }
 
