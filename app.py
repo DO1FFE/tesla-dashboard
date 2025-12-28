@@ -1,4 +1,11 @@
+import asyncio
 import eventlet
+import eventlet.hubs
+
+try:
+    asyncio.get_running_loop()
+except RuntimeError:
+    eventlet.hubs.use_hub("eventlet.hubs.asyncio")
 eventlet.monkey_patch()
 
 import os
