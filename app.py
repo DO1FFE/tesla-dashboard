@@ -4037,6 +4037,21 @@ def get_vehicle_state(vehicle_id=None):
     vid = str(vehicle_id or _default_vehicle_id or "default")
     state = last_vehicle_state.get(vid)
 
+    cached = _load_cached(vid)
+    service_mode = None
+    service_mode_plus = None
+    if isinstance(cached, dict):
+        vs = cached.get("vehicle_state", {})
+        service_mode = vs.get("service_mode")
+        service_mode_plus = vs.get("service_mode_plus")
+
+    if state in ("offline", "asleep"):
+        return {
+            "state": state,
+            "service_mode": service_mode,
+            "service_mode_plus": service_mode_plus,
+        }
+
     tesla = get_tesla()
     if tesla is None:
         return {"error": "Missing Tesla credentials or teslapy not installed"}
@@ -4057,14 +4072,6 @@ def get_vehicle_state(vehicle_id=None):
         _log_api_error(exc)
         log_vehicle_state(vehicle["id_s"], "offline")
         return {"error": "Vehicle unavailable", "state": "offline"}
-
-    cached = _load_cached(vid)
-    service_mode = None
-    service_mode_plus = None
-    if isinstance(cached, dict):
-        vs = cached.get("vehicle_state", {})
-        service_mode = vs.get("service_mode")
-        service_mode_plus = vs.get("service_mode_plus")
 
     return {
         "state": state,
