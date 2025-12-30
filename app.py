@@ -1811,6 +1811,7 @@ occupant_present = False
 _default_vehicle_id = None
 _last_aprs_info = {}
 _last_wx_info = {}
+_last_state_refresh_ts = {}
 
 
 def track_park_time(vehicle_data):
@@ -4036,6 +4037,7 @@ def get_vehicle_state(vehicle_id=None):
     """Return the current vehicle state without waking the car."""
     vid = str(vehicle_id or _default_vehicle_id or "default")
     state = last_vehicle_state.get(vid)
+    now = time.time()
 
     cached = _load_cached(vid)
     service_mode = None
@@ -4045,7 +4047,8 @@ def get_vehicle_state(vehicle_id=None):
         service_mode = vs.get("service_mode")
         service_mode_plus = vs.get("service_mode_plus")
 
-    if state in ("offline", "asleep"):
+    last_refresh = _last_state_refresh_ts.get(vid)
+    if state is not None and last_refresh and now - last_refresh < 10:
         return {
             "state": state,
             "service_mode": service_mode,
@@ -4066,6 +4069,7 @@ def get_vehicle_state(vehicle_id=None):
     if vehicle is None:
         vehicle = vehicles[0]
 
+    _last_state_refresh_ts[vid] = now
     try:
         state = _refresh_state(vehicle)
     except Exception as exc:
