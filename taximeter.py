@@ -146,8 +146,15 @@ class Taximeter:
             now = time.time()
             dt = now - last_ts
             last_ts = now
-            moving = speed is not None and speed >= 5
-            if lat is not None and lon is not None:
+            speed_valid = isinstance(speed, (int, float)) and not isinstance(speed, bool)
+            speed_valid = speed_valid and speed >= 0
+            position_valid = isinstance(lat, (int, float)) and not isinstance(lat, bool)
+            position_valid = position_valid and isinstance(lon, (int, float)) and not isinstance(
+                lon, bool
+            )
+            telemetrie_gueltig = speed_valid or position_valid
+            moving = speed_valid and speed >= 5
+            if position_valid:
                 point = (lat, lon)
                 with self.lock:
                     if not self.points or self.points[-1] != point:
@@ -156,8 +163,11 @@ class Taximeter:
                             self.distance += self._haversine(last, point)
                         last = point
             with self.lock:
-                self.waiting = not moving
-                if not moving:
+                if telemetrie_gueltig:
+                    self.waiting = not moving
+                else:
+                    self.waiting = False
+                if telemetrie_gueltig and not moving:
                     prev_units = int(self.wait_time // wait_interval)
                     self.wait_time += dt
                     units = int(self.wait_time // wait_interval)
