@@ -604,11 +604,15 @@ def _merge_state_logs(filename=None, vehicle_id=None):
     if filename is None:
         filename = log_file(vehicle_id, "state.log")
 
-    parts = sorted(
-        glob.glob(f"{filename}.*"),
-        key=lambda p: int(p.rsplit(".", 1)[1]),
-        reverse=True,
-    )
+    parts = []
+    for path in glob.glob(f"{filename}.*"):
+        suffix = path.rsplit(".", 1)[1]
+        try:
+            suffix_int = int(suffix)
+        except ValueError:
+            continue
+        parts.append((suffix_int, path))
+    parts.sort(key=lambda item: item[0], reverse=True)
     if not parts:
         return
     base_content = ""
@@ -616,7 +620,7 @@ def _merge_state_logs(filename=None, vehicle_id=None):
         with open(filename, "r", encoding="utf-8") as f:
             base_content = f.read()
     with open(filename, "w", encoding="utf-8") as dest:
-        for part in parts:
+        for _, part in parts:
             with open(part, "r", encoding="utf-8") as src:
                 dest.write(src.read())
             os.remove(part)
