@@ -1158,6 +1158,27 @@ select {
   color: var(--accent-color);
 }
 
+@media (max-width: 600px) {
+  .app-version {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: center;
+  }
+
+  .app-version #vehicle-state,
+  .app-version #client-count,
+  .app-version #data-age {
+    position: static;
+    width: 100%;
+    text-align: center;
+  }
+
+  .app-version span {
+    display: block;
+  }
+}
+
 #sms-form {
   margin: 10px 0;
   padding: 8px;
