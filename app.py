@@ -2656,10 +2656,10 @@ def send_aprs(vehicle_data):
         return
 
     vid = None
-    try:
+    if isinstance(vehicle_data, dict):
         vid = vehicle_data.get("id_s") or vehicle_data.get("vehicle_id")
-    except Exception:
-        vid = None
+    else:
+        vid = "default"
     vid = _vehicle_key(vid)
 
     cfg = load_config(vehicle_id=vid)
@@ -2684,7 +2684,12 @@ def send_aprs(vehicle_data):
 
     temp_in = climate.get("inside_temp")
     temp_out = climate.get("outside_temp")
-    vid = vid or _vehicle_key(vehicle_data.get("id_s") or vehicle_data.get("vehicle_id"))
+    if isinstance(vehicle_data, dict):
+        vid = vid or _vehicle_key(
+            vehicle_data.get("id_s") or vehicle_data.get("vehicle_id")
+        )
+    else:
+        vid = vid or "default"
     now = time.time()
     last = _last_aprs_info.get(vid)
     changed = last is None
