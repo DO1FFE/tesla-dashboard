@@ -2,10 +2,12 @@ import sqlite3
 import threading
 import time
 import math
+import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 LOCAL_TZ = ZoneInfo("Europe/Berlin")
+logger = logging.getLogger(__name__)
 
 
 class Taximeter:
@@ -134,7 +136,16 @@ class Taximeter:
             with self.lock:
                 if not self.active:
                     break
-            data = self.fetch_func(self.vehicle_id)
+            try:
+                data = self.fetch_func(self.vehicle_id)
+            except Exception:
+                logger.exception(
+                    "Fehler beim Abrufen der Fahrzeugdaten für %s.", self.vehicle_id
+                )
+                with self.lock:
+                    self.waiting = False
+                time.sleep(1)
+                continue
             lat = None
             lon = None
             speed = None
