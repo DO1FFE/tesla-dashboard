@@ -953,6 +953,8 @@ select {
     left: auto;
     right: auto;
     bottom: auto;
+    width: 100%;
+    text-align: center;
   }
 }
 
@@ -1154,27 +1156,6 @@ select {
   left: 120px;
   bottom: 0;
   color: var(--accent-color);
-}
-
-@media (max-width: 600px) {
-  .app-version {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    align-items: center;
-    padding-bottom: 26px;
-  }
-
-  .app-version #vehicle-state,
-  .app-version #client-count,
-  .app-version #data-age {
-    position: static;
-    left: auto;
-    right: auto;
-    bottom: auto;
-    width: 100%;
-    text-align: center;
-  }
 }
 
 #sms-form {
