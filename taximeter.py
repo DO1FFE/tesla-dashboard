@@ -266,6 +266,7 @@ class Taximeter:
         return ride_id
 
     def reset(self):
+        thread_zum_warten = None
         with self.lock:
             self.active = False
             self.paused = False
@@ -274,8 +275,15 @@ class Taximeter:
             self.distance = 0.0
             self.price = 0.0
             self.start_time = None
-            self.thread = None
+            if self.thread and self.thread.is_alive():
+                thread_zum_warten = self.thread
+            else:
+                self.thread = None
             self.last_result = None
             self.wait_time = 0.0
             self.wait_cost = 0.0
             self.waiting = False
+        if thread_zum_warten:
+            thread_zum_warten.join()
+            with self.lock:
+                self.thread = None
