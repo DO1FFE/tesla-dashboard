@@ -262,18 +262,15 @@ class Taximeter:
         return price
 
     def _save_ride(self, start, end, duration, distance, price):
-        con = sqlite3.connect(self.db_path)
-        cur = con.cursor()
-        cur.execute(
-            "CREATE TABLE IF NOT EXISTS rides (id INTEGER PRIMARY KEY AUTOINCREMENT, start REAL, end REAL, duration REAL, distance REAL, price REAL)"
-        )
-        cur.execute(
-            "INSERT INTO rides (start, end, duration, distance, price) VALUES (?, ?, ?, ?, ?)",
-            (start, end, duration, distance, price),
-        )
-        ride_id = cur.lastrowid
-        con.commit()
-        con.close()
+        with sqlite3.connect(self.db_path) as con:
+            con.execute(
+                "CREATE TABLE IF NOT EXISTS rides (id INTEGER PRIMARY KEY AUTOINCREMENT, start REAL, end REAL, duration REAL, distance REAL, price REAL)"
+            )
+            cur = con.execute(
+                "INSERT INTO rides (start, end, duration, distance, price) VALUES (?, ?, ?, ?, ?)",
+                (start, end, duration, distance, price),
+            )
+            ride_id = cur.lastrowid
         return ride_id
 
     def reset(self):
