@@ -136,7 +136,12 @@ def ensure_socketio_client(version: str) -> None:
     if dest.exists():
         return
     if version in SOCKETIO_DOWNLOAD_ATTEMPTS:
-        return
+        letzte_versuch_zeit = SOCKETIO_DOWNLOAD_LAST_ATTEMPT.get(version)
+        if letzte_versuch_zeit is None:
+            return
+        if time.monotonic() - letzte_versuch_zeit < SOCKETIO_DOWNLOAD_RETRY_SECONDS:
+            return
+        SOCKETIO_DOWNLOAD_ATTEMPTS.discard(version)
     SOCKETIO_DOWNLOAD_ATTEMPTS.add(version)
     SOCKETIO_DOWNLOAD_LAST_ATTEMPT[version] = time.monotonic()
 
