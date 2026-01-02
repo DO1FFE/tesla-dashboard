@@ -940,7 +940,19 @@ select {
     margin-top: 4px;
   }
   .app-version {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: center;
     padding-bottom: 26px;
+  }
+  .app-version #vehicle-state,
+  .app-version #client-count,
+  .app-version #data-age {
+    position: static;
+    left: auto;
+    right: auto;
+    bottom: auto;
   }
 }
 
