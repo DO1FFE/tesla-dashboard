@@ -1048,6 +1048,63 @@ var lastChargeInfo = null;
 var lastChargeStop = null;
 var lastEnergyAdded = null;
 
+function parseNumber(value) {
+    if (value == null || value === '') {
+        return null;
+    }
+    var num = Number(value);
+    if (!isFinite(num)) {
+        return null;
+    }
+    return num;
+}
+
+function parseChargeSessionStart(value) {
+    var num = parseNumber(value);
+    if (num != null) {
+        if (num < 1e12) {
+            return num * 1000;
+        }
+        return num;
+    }
+    if (typeof value === 'string') {
+        var parsed = Date.parse(value);
+        if (!isNaN(parsed)) {
+            return parsed;
+        }
+    }
+    return null;
+}
+
+function formatChargeDuration(durationMs) {
+    if (durationMs == null || !isFinite(durationMs) || durationMs < 0) {
+        return null;
+    }
+    var totalMinutes = Math.floor(durationMs / 60000);
+    var hours = Math.floor(totalMinutes / 60);
+    var minutes = totalMinutes % 60;
+    var parts = [];
+    if (hours > 0) {
+        parts.push(hours + ' h');
+    }
+    parts.push(minutes + ' min');
+    return parts.join(' ');
+}
+
+function formatPercentDelta(delta) {
+    if (delta == null || !isFinite(delta) || delta < 0) {
+        return null;
+    }
+    var rounded = Math.round(delta * 10) / 10;
+    if (rounded < 0) {
+        return null;
+    }
+    if (Math.abs(rounded - Math.round(rounded)) < 0.05) {
+        return Math.round(rounded).toString();
+    }
+    return rounded.toFixed(1);
+}
+
 function updateV2LInfos(charge, drive) {
     var $info = $('#v2l-infos');
     if (!charge || !CONFIG['v2l-infos']) {
@@ -1113,6 +1170,35 @@ function updateChargingInfo(charge) {
         showFull = true;
     }
 
+    var durationText = null;
+    var addedPercentText = null;
+    if (showFull) {
+        var sessionStartRaw = charge ? charge.charge_session_start : null;
+        if (sessionStartRaw == null && lastChargeInfo) {
+            sessionStartRaw = lastChargeInfo.charge_session_start;
+        }
+        var sessionStartMs = parseChargeSessionStart(sessionStartRaw);
+        durationText = formatChargeDuration(sessionStartMs != null ? now - sessionStartMs : null);
+
+        var startSoc = parseNumber(charge ? charge.charge_session_start_soc : null);
+        if (startSoc == null && lastChargeInfo) {
+            startSoc = parseNumber(lastChargeInfo.charge_session_start_soc);
+        }
+        var currentSoc = parseNumber(charge ? charge.battery_level : null);
+        if (currentSoc == null && charge) {
+            currentSoc = parseNumber(charge.usable_battery_level);
+        }
+        if (currentSoc == null && lastChargeInfo) {
+            currentSoc = parseNumber(lastChargeInfo.battery_level);
+            if (currentSoc == null) {
+                currentSoc = parseNumber(lastChargeInfo.usable_battery_level);
+            }
+        }
+        if (startSoc != null && currentSoc != null) {
+            addedPercentText = formatPercentDelta(currentSoc - startSoc);
+        }
+    }
+
     var rows = [];
     if (showFull) {
         if (charge.charging_state) {
@@ -1120,6 +1206,19 @@ function updateChargingInfo(charge) {
         }
         if (charge.charge_energy_added != null) {
             rows.push('<tr><th>Geladene Energie:</th><td>' + Number(charge.charge_energy_added).toFixed(2) + ' kWh</td></tr>');
+            if (durationText) {
+                rows.push('<tr><th>Ladedauer:</th><td>' + durationText + '</td></tr>');
+            }
+            if (addedPercentText) {
+                rows.push('<tr><th>% hinzugefügt:</th><td>' + addedPercentText + ' %</td></tr>');
+            }
+        } else {
+            if (durationText) {
+                rows.push('<tr><th>Ladedauer:</th><td>' + durationText + '</td></tr>');
+            }
+            if (addedPercentText) {
+                rows.push('<tr><th>% hinzugefügt:</th><td>' + addedPercentText + ' %</td></tr>');
+            }
         }
         if (charge.charger_voltage != null) {
             rows.push('<tr><th>Spannung:</th><td>' + Number(charge.charger_voltage).toFixed(0) + ' V</td></tr>');
