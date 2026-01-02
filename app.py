@@ -3948,9 +3948,9 @@ def compute_statistics():
 
 
 def _statistics_dependency_signature():
-    """Return a signature describing inputs used for statistics generation."""
+    """Gibt eine Signatur der Eingaben für die Statistikgenerierung zurück."""
 
-    vid = _default_vehicle_id or default_vehicle_id()
+    vid = _default_vehicle_id or load_config().get("vehicle_id") or "default"
     files = [
         resolve_log_path(vid, "state.log"),
         resolve_log_path(vid, "energy.log"),
