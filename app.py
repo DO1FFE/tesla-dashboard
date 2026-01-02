@@ -118,25 +118,27 @@ requests are not blocked when the CDN is slow or unreachable.
 SOCKETIO_CLIENT_MAP = {5: "4.7.2", 4: "4.5.4"}
 SOCKETIO_JS_DIR = Path(__file__).parent / "static" / "js"
 SOCKETIO_DOWNLOAD_ATTEMPTS = set()
+SOCKETIO_DOWNLOAD_LAST_ATTEMPT = {}
+SOCKETIO_DOWNLOAD_RETRY_SECONDS = 300
 _socketio_download_thread = None
 _socketio_download_lock = threading.Lock()
 
 
 def ensure_socketio_client(version: str) -> None:
-    """Download missing Socket.IO client script into ``static/js``.
+    """Lädt ein fehlendes Socket.IO-Client-Skript in ``static/js``.
 
-    The download is attempted only once per version to avoid blocking
-    repeated requests when the CDN is unreachable.
+    Der Download wird nur einmal pro Version versucht, um wiederholte
+    Requests zu vermeiden, wenn das CDN nicht erreichbar ist.
     """
-
-    if version in SOCKETIO_DOWNLOAD_ATTEMPTS:
-        return
-    SOCKETIO_DOWNLOAD_ATTEMPTS.add(version)
 
     SOCKETIO_JS_DIR.mkdir(parents=True, exist_ok=True)
     dest = SOCKETIO_JS_DIR / f"socket.io-{version}.min.js"
     if dest.exists():
         return
+    if version in SOCKETIO_DOWNLOAD_ATTEMPTS:
+        return
+    SOCKETIO_DOWNLOAD_ATTEMPTS.add(version)
+    SOCKETIO_DOWNLOAD_LAST_ATTEMPT[version] = time.monotonic()
 
     url = f"https://cdn.socket.io/{version}/socket.io.min.js"
     try:
@@ -144,7 +146,7 @@ def ensure_socketio_client(version: str) -> None:
         resp.raise_for_status()
         dest.write_bytes(resp.content)
     except Exception as exc:
-        logging.warning("Failed to download Socket.IO %s: %s", version, exc)
+        logging.warning("Socket.IO %s konnte nicht geladen werden: %s", version, exc)
 
 
 def _socketio_client_version() -> str:
@@ -157,7 +159,7 @@ def _socketio_client_version() -> str:
 
 
 def _schedule_socketio_client_download():
-    """Start background download of the compatible Socket.IO client script."""
+    """Startet den Hintergrund-Download des passenden Socket.IO-Clients."""
 
     global _socketio_download_thread
     with _socketio_download_lock:
@@ -165,6 +167,15 @@ def _schedule_socketio_client_download():
             return
 
         version = _socketio_client_version()
+        dest = SOCKETIO_JS_DIR / f"socket.io-{version}.min.js"
+        if dest.exists():
+            return
+        if version in SOCKETIO_DOWNLOAD_ATTEMPTS:
+            letzte_versuch_zeit = SOCKETIO_DOWNLOAD_LAST_ATTEMPT.get(version)
+            if letzte_versuch_zeit is None:
+                return
+            if time.monotonic() - letzte_versuch_zeit < SOCKETIO_DOWNLOAD_RETRY_SECONDS:
+                return
 
         def _background_download():
             ensure_socketio_client(version)
@@ -176,7 +187,7 @@ def _schedule_socketio_client_download():
 
 
 def socketio_client_script() -> str:
-    """Return URL to a compatible Socket.IO client script."""
+    """Gibt die URL für ein kompatibles Socket.IO-Client-Skript zurück."""
     version = _socketio_client_version()
     dest = SOCKETIO_JS_DIR / f"socket.io-{version}.min.js"
     if not dest.exists():
