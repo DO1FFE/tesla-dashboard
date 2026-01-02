@@ -1205,7 +1205,9 @@ def _force_statistics_rebuild_on_start():
 
 
 def _statistics_conn():
-    os.makedirs(os.path.dirname(STATISTICS_DB), exist_ok=True)
+    dir_path = os.path.dirname(STATISTICS_DB)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
     conn = sqlite3.connect(STATISTICS_DB)
     conn.row_factory = sqlite3.Row
     return conn
