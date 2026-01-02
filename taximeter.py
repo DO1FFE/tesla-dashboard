@@ -71,7 +71,7 @@ class Taximeter:
 
     def stop(self):
         with self.lock:
-            if not self.active:
+            if not self.active and not self.paused:
                 return None
             self.active = False
             self.paused = False
