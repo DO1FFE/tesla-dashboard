@@ -4179,6 +4179,11 @@ def get_vehicle_state(vehicle_id=None):
     vid = str(vehicle_id or _default_vehicle_id or "default")
     state = last_vehicle_state.get(vid)
     now = time.time()
+    cfg = load_config(vehicle_id)
+    try:
+        api_interval_idle = int(cfg.get("api_interval_idle", 30))
+    except Exception:
+        api_interval_idle = 30
 
     cached = _load_cached(vid)
     service_mode = None
@@ -4189,7 +4194,10 @@ def get_vehicle_state(vehicle_id=None):
         service_mode_plus = vs.get("service_mode_plus")
 
     last_refresh = _last_state_refresh_ts.get(vid)
-    if state is not None and last_refresh and now - last_refresh < 10:
+    refresh_interval = 10
+    if state in {"offline", "asleep"} and not occupant_present:
+        refresh_interval = api_interval_idle
+    if state is not None and last_refresh and now - last_refresh < refresh_interval:
         return {
             "state": state,
             "service_mode": service_mode,
