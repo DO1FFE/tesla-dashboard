@@ -4764,8 +4764,12 @@ def _fetch_data_once(vehicle_id="default"):
 
     if isinstance(data, dict):
         last_val = None
+        last_charging_state = None
         if isinstance(cached, dict):
             last_val = cached.get("last_charge_energy_added")
+            cached_charge = cached.get("charge_state", {})
+            if isinstance(cached_charge, dict):
+                last_charging_state = cached_charge.get("charging_state")
         if last_val is None:
             last_val = _load_last_energy(cache_id)
 
@@ -4788,23 +4792,35 @@ def _fetch_data_once(vehicle_id="default"):
                 cache_id, session_start, charge
             )
 
+        session_ended = False
+        if charging_state in ("Complete", "Disconnected"):
+            session_ended = True
+        elif last_charging_state == "Charging" and charging_state != "Charging":
+            session_ended = True
+
         if val is not None:
             if last_val is not None and val < last_val:
-                # Finish previous session before counter resets
-                prev_start = session_start or _load_session_start(cache_id)
-                if last_val > 0:
-                    logged = _log_energy(cache_id, last_val, timestamp=prev_start)
-                    if logged:
-                        _save_last_energy(cache_id, last_val)
-                        saved_val = last_val
-                _clear_session_start(cache_id)
-                session_start = None
-                session_start_soc = None
-                if charging_state == "Charging":
-                    session_start = now
-                    session_start_soc = _start_charging_session(
-                        cache_id, session_start, charge
-                    )
+                if session_ended:
+                    # Vorherige Session abschließen, wenn der Ladevorgang endet.
+                    prev_start = session_start or _load_session_start(cache_id)
+                    if last_val > 0:
+                        logged = _log_energy(
+                            cache_id, last_val, timestamp=prev_start
+                        )
+                        if logged:
+                            _save_last_energy(cache_id, last_val)
+                            saved_val = last_val
+                    _clear_session_start(cache_id)
+                    session_start = None
+                    session_start_soc = None
+                    if charging_state == "Charging":
+                        session_start = now
+                        session_start_soc = _start_charging_session(
+                            cache_id, session_start, charge
+                        )
+                else:
+                    # Während aktivem Laden keinen Session-Reset erzwingen.
+                    val = last_val
             last_val = val
 
         value_to_log = None
