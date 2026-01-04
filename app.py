@@ -1,13 +1,3 @@
-import asyncio
-import eventlet
-import eventlet.hubs
-
-try:
-    asyncio.get_running_loop()
-except RuntimeError:
-    eventlet.hubs.use_hub("eventlet.hubs.asyncio")
-eventlet.monkey_patch()
-
 import os
 import json
 import queue
@@ -86,7 +76,7 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 app.config["SECRET_KEY"] = _secret_key()
 csrf = CSRFProtect(app)
 Compress(app)
-socketio = SocketIO(app, async_mode="eventlet")
+socketio = SocketIO(app, async_mode="threading")
 
 
 @app.after_request
