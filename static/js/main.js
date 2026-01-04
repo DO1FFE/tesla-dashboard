@@ -522,7 +522,7 @@ function handleData(data) {
     }
     updateBatteryIndicator(charge.battery_level, rangeMiles, charge.charging_state, charge.battery_heater_on);
     updateV2LInfos(charge, drive);
-    updateChargingInfo(charge);
+    updateChargingInfo(charge, data);
     var climate = data.climate_state || {};
     updateThermometers(climate.inside_temp, climate.outside_temp, charge.battery_temp);
     updateClimateStatus(climate.is_climate_on);
@@ -1133,7 +1133,7 @@ function updateV2LInfos(charge, drive) {
     }
 }
 
-function updateChargingInfo(charge) {
+function updateChargingInfo(charge, wurzelDaten) {
     var $info = $('#charging-info');
     if (!charge) {
         $info.empty().hide();
@@ -1203,11 +1203,19 @@ function updateChargingInfo(charge) {
         }
     }
 
-    if (charge && charge.last_charge_duration_s != null && !isNaN(charge.last_charge_duration_s)) {
-        letzteLadedauerMs = Number(charge.last_charge_duration_s) * 1000;
+    var letzteLadedauerQuelle = charge ? charge.last_charge_duration_s : null;
+    if (letzteLadedauerQuelle == null && wurzelDaten) {
+        letzteLadedauerQuelle = wurzelDaten.last_charge_duration_s;
     }
-    if (charge && charge.last_charge_added_percent != null && !isNaN(charge.last_charge_added_percent)) {
-        letzterLadezuwachsProzent = Number(charge.last_charge_added_percent);
+    if (letzteLadedauerQuelle != null && !isNaN(letzteLadedauerQuelle)) {
+        letzteLadedauerMs = Number(letzteLadedauerQuelle) * 1000;
+    }
+    var letzterLadezuwachsQuelle = charge ? charge.last_charge_added_percent : null;
+    if (letzterLadezuwachsQuelle == null && wurzelDaten) {
+        letzterLadezuwachsQuelle = wurzelDaten.last_charge_added_percent;
+    }
+    if (letzterLadezuwachsQuelle != null && !isNaN(letzterLadezuwachsQuelle)) {
+        letzterLadezuwachsProzent = Number(letzterLadezuwachsQuelle);
     }
     if (letzteLadedauerMs != null) {
         lastChargeDurationText = formatChargeDuration(letzteLadedauerMs);
