@@ -2575,6 +2575,73 @@ def _save_last_energy(vehicle_id, value):
         pass
 
 
+def _last_charge_duration_file(vehicle_id):
+    """Dateiname für die letzte Ladedauer einer Session."""
+    return os.path.join(vehicle_dir(vehicle_id), "last_charge_duration.txt")
+
+
+def _load_last_charge_duration(vehicle_id):
+    """Lade die zuletzt gespeicherte Ladedauer."""
+    try:
+        with open(_last_charge_duration_file(vehicle_id), "r", encoding="utf-8") as f:
+            value = f.read().strip()
+        if value == "":
+            return None
+        return int(float(value))
+    except Exception:
+        return None
+
+
+def _save_last_charge_duration(vehicle_id, value):
+    """Speichere die letzte Ladedauer einer Session."""
+    if value is None:
+        return
+    try:
+        duration = int(float(value))
+    except (TypeError, ValueError):
+        return
+    except Exception:
+        return
+    try:
+        with open(_last_charge_duration_file(vehicle_id), "w", encoding="utf-8") as f:
+            f.write(str(duration))
+    except Exception:
+        pass
+
+
+def _last_charge_added_percent_file(vehicle_id):
+    """Dateiname für den zuletzt hinzugefügten Ladeprozentsatz."""
+    return os.path.join(vehicle_dir(vehicle_id), "last_charge_added_percent.txt")
+
+
+def _load_last_charge_added_percent(vehicle_id):
+    """Lade den zuletzt gespeicherten Ladeprozentsatz."""
+    try:
+        with open(
+            _last_charge_added_percent_file(vehicle_id), "r", encoding="utf-8"
+        ) as f:
+            value = f.read().strip()
+        if value == "":
+            return None
+        return int(float(value))
+    except Exception:
+        return None
+
+
+def _save_last_charge_added_percent(vehicle_id, value):
+    """Speichere den zuletzt hinzugefügten Ladeprozentsatz."""
+    value = _normalize_charge_soc(value)
+    if value is None:
+        return
+    try:
+        with open(
+            _last_charge_added_percent_file(vehicle_id), "w", encoding="utf-8"
+        ) as f:
+            f.write(str(value))
+    except Exception:
+        pass
+
+
 _charging_session_start = {}
 _charging_session_start_soc = {}
 _recently_logged_sessions = set()
@@ -4765,18 +4832,28 @@ def _fetch_data_once(vehicle_id="default"):
     if isinstance(data, dict):
         last_val = None
         last_charging_state = None
+        last_duration = None
+        last_added_percent = None
         if isinstance(cached, dict):
             last_val = cached.get("last_charge_energy_added")
+            last_duration = cached.get("last_charge_duration_s")
+            last_added_percent = cached.get("last_charge_added_percent")
             cached_charge = cached.get("charge_state", {})
             if isinstance(cached_charge, dict):
                 last_charging_state = cached_charge.get("charging_state")
         if last_val is None:
             last_val = _load_last_energy(cache_id)
+        if last_duration is None:
+            last_duration = _load_last_charge_duration(cache_id)
+        if last_added_percent is None:
+            last_added_percent = _load_last_charge_added_percent(cache_id)
 
         charge = data.get("charge_state", {})
         val = charge.get("charge_energy_added")
         charging_state = charge.get("charging_state")
         saved_val = last_val
+        saved_duration = last_duration
+        saved_added_percent = last_added_percent
         now = datetime.now(LOCAL_TZ)
 
         session_start = _charging_session_start.get(cache_id)
@@ -4831,6 +4908,21 @@ def _fetch_data_once(vehicle_id="default"):
                 value_to_log = last_val
         if value_to_log is not None:
             start_time = session_start or _load_session_start(cache_id)
+            if start_time is not None:
+                try:
+                    duration_s = int(
+                        max(0, (now - start_time).total_seconds())
+                    )
+                except Exception:
+                    duration_s = None
+            else:
+                duration_s = None
+            start_soc = session_start_soc or _load_session_start_soc(cache_id)
+            current_soc = _extract_current_charge_soc(charge)
+            if start_soc is not None and current_soc is not None:
+                added_percent = max(0, current_soc - start_soc)
+            else:
+                added_percent = None
             should_log = True
             if start_time is None:
                 try:
@@ -4860,6 +4952,12 @@ def _fetch_data_once(vehicle_id="default"):
             if logged:
                 _save_last_energy(cache_id, value_to_log)
                 saved_val = value_to_log
+            if duration_s is not None:
+                _save_last_charge_duration(cache_id, duration_s)
+                saved_duration = duration_s
+            if added_percent is not None:
+                _save_last_charge_added_percent(cache_id, added_percent)
+                saved_added_percent = added_percent
             session_start = None
             session_start_soc = None
 
@@ -4875,6 +4973,10 @@ def _fetch_data_once(vehicle_id="default"):
 
         if saved_val is not None:
             data["last_charge_energy_added"] = saved_val
+        if saved_duration is not None:
+            data["last_charge_duration_s"] = saved_duration
+        if saved_added_percent is not None:
+            data["last_charge_added_percent"] = saved_added_percent
 
         if isinstance(charge, dict):
             _apply_charge_session_payload(
