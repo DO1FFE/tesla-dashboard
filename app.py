@@ -4848,7 +4848,10 @@ def _fetch_data_once(vehicle_id="default"):
         if last_added_percent is None:
             last_added_percent = _load_last_charge_added_percent(cache_id)
 
-        charge = data.get("charge_state", {})
+        charge = data.get("charge_state")
+        if not isinstance(charge, dict):
+            charge = {}
+            data["charge_state"] = charge
         val = charge.get("charge_energy_added")
         charging_state = charge.get("charging_state")
         saved_val = last_val
@@ -4975,8 +4978,10 @@ def _fetch_data_once(vehicle_id="default"):
             data["last_charge_energy_added"] = saved_val
         if saved_duration is not None:
             data["last_charge_duration_s"] = saved_duration
+            charge["last_charge_duration_s"] = saved_duration
         if saved_added_percent is not None:
             data["last_charge_added_percent"] = saved_added_percent
+            charge["last_charge_added_percent"] = saved_added_percent
 
         if isinstance(charge, dict):
             _apply_charge_session_payload(
