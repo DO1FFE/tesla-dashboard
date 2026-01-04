@@ -1047,6 +1047,8 @@ function batteryBar(level) {
 var lastChargeInfo = null;
 var lastChargeStop = null;
 var lastEnergyAdded = null;
+var letzteLadedauerMs = null;
+var letzterLadezuwachsProzent = null;
 
 function parseNumber(value) {
     if (value == null || value === '') {
@@ -1202,13 +1204,18 @@ function updateChargingInfo(charge) {
     }
 
     if (charge && charge.last_charge_duration_s != null && !isNaN(charge.last_charge_duration_s)) {
-        lastChargeDurationText = formatChargeDuration(Number(charge.last_charge_duration_s) * 1000);
+        letzteLadedauerMs = Number(charge.last_charge_duration_s) * 1000;
     }
     if (charge && charge.last_charge_added_percent != null && !isNaN(charge.last_charge_added_percent)) {
-        var lastChargePercentValue = Number(charge.last_charge_added_percent);
-        var lastChargePercentText = formatPercentDelta(lastChargePercentValue);
+        letzterLadezuwachsProzent = Number(charge.last_charge_added_percent);
+    }
+    if (letzteLadedauerMs != null) {
+        lastChargeDurationText = formatChargeDuration(letzteLadedauerMs);
+    }
+    if (letzterLadezuwachsProzent != null) {
+        var lastChargePercentText = formatPercentDelta(letzterLadezuwachsProzent);
         if (!lastChargePercentText) {
-            lastChargePercentText = lastChargePercentValue.toFixed(1);
+            lastChargePercentText = letzterLadezuwachsProzent.toFixed(1);
         }
         lastChargeAddedPercentText = lastChargePercentText;
     }
