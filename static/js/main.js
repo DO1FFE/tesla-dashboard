@@ -1172,6 +1172,8 @@ function updateChargingInfo(charge) {
 
     var durationText = null;
     var addedPercentText = null;
+    var lastChargeDurationText = null;
+    var lastChargeAddedPercentText = null;
     if (showFull) {
         var sessionStartRaw = charge ? charge.charge_session_start : null;
         if (sessionStartRaw == null && lastChargeInfo) {
@@ -1197,6 +1199,18 @@ function updateChargingInfo(charge) {
         if (startSoc != null && currentSoc != null) {
             addedPercentText = formatPercentDelta(currentSoc - startSoc);
         }
+    }
+
+    if (charge && charge.last_charge_duration_s != null && !isNaN(charge.last_charge_duration_s)) {
+        lastChargeDurationText = formatChargeDuration(Number(charge.last_charge_duration_s) * 1000);
+    }
+    if (charge && charge.last_charge_added_percent != null && !isNaN(charge.last_charge_added_percent)) {
+        var lastChargePercentValue = Number(charge.last_charge_added_percent);
+        var lastChargePercentText = formatPercentDelta(lastChargePercentValue);
+        if (!lastChargePercentText) {
+            lastChargePercentText = lastChargePercentValue.toFixed(1);
+        }
+        lastChargeAddedPercentText = lastChargePercentText;
     }
 
     var rows = [];
@@ -1246,6 +1260,12 @@ function updateChargingInfo(charge) {
         }
     } else if (state !== 'Charging' && lastEnergyAdded != null) {
         rows.push('<tr><th>Zuletzt hinzugefügte Energie:</th><td>' + lastEnergyAdded.toFixed(2) + ' kWh</td></tr>');
+    }
+    if (lastChargeDurationText) {
+        rows.push('<tr><th>Letze Ladedauer:</th><td>' + lastChargeDurationText + '</td></tr>');
+    }
+    if (lastChargeAddedPercentText) {
+        rows.push('<tr><th>Zuletzt hinzugefügte %:</th><td>' + lastChargeAddedPercentText + ' %</td></tr>');
     }
 
     if (rows.length) {
