@@ -79,6 +79,26 @@ Compress(app)
 socketio = SocketIO(app, async_mode="threading")
 
 
+def start_bg_task(target, *args, **kwargs):
+    """Starte eine Hintergrundaufgabe über Socket.IO."""
+    return socketio.start_background_task(target, *args, **kwargs)
+
+
+def start_named_bg_task(target, *args, thread_name=None, daemon=True, **kwargs):
+    """Starte eine benannte Hintergrundaufgabe mit Thread-Fallback."""
+    if socketio.async_mode == "threading":
+        thread = threading.Thread(
+            target=target,
+            args=args,
+            kwargs=kwargs,
+            name=thread_name,
+            daemon=daemon,
+        )
+        thread.start()
+        return thread
+    return socketio.start_background_task(target, *args, **kwargs)
+
+
 @app.after_request
 def disable_response_caching(resp):
     resp.headers.setdefault(
@@ -175,10 +195,11 @@ def _schedule_socketio_client_download():
         def _background_download():
             ensure_socketio_client(version)
 
-        _socketio_download_thread = threading.Thread(
-            target=_background_download, name="socketio-client-download", daemon=True
+        _socketio_download_thread = start_named_bg_task(
+            _background_download,
+            thread_name="socketio-client-download",
+            daemon=True,
         )
-        _socketio_download_thread.start()
 
 
 def socketio_client_script() -> str:
@@ -1813,10 +1834,10 @@ def _start_statistics_aggregation(interval=None):
         return
     if _aggregation_thread and _aggregation_thread.is_alive():
         return
-    _aggregation_thread = threading.Thread(
-        target=_statistics_aggregation_loop, args=(interval or AGGREGATION_INTERVAL,), daemon=True
+    _aggregation_thread = start_bg_task(
+        _statistics_aggregation_loop,
+        interval or AGGREGATION_INTERVAL,
     )
-    _aggregation_thread.start()
     _aggregation_initialized = True
 last_vehicle_state = _load_last_state()
 occupant_present = False
@@ -5117,9 +5138,8 @@ def _start_thread(vehicle_id):
     """Start background fetching thread for the given vehicle."""
     if vehicle_id in threads:
         return
-    t = threading.Thread(target=_fetch_loop, args=(vehicle_id,), daemon=True)
+    t = start_bg_task(_fetch_loop, vehicle_id)
     threads[vehicle_id] = t
-    t.start()
 
 
 # Taximeter instance using the existing fetch function and config-based tariff
