@@ -4478,6 +4478,9 @@ def _normalize_supercharger_sites(payload, drive_state):
                 miles = _to_float(site.get("distance_miles") or site.get("distance"))
                 if miles is not None:
                     distance_km = miles * MILES_TO_KM
+        if isinstance(distance_km, (int, float)) and distance_km > 30:
+            # Einträge ohne Distanzangabe bleiben sichtbar, daher nur numerisch filtern.
+            continue
 
         name = site.get("name") or site.get("site_name") or "Supercharger"
         available = _to_int(site.get("available_stalls"))
