@@ -1277,7 +1277,7 @@ function updateChargingInfo(charge, wurzelDaten) {
         rows.push('<tr><th>Zuletzt hinzugefügte Energie:</th><td>' + lastEnergyAdded.toFixed(2) + ' kWh</td></tr>');
     }
     if (lastChargeDurationText) {
-        rows.push('<tr><th>Letze Ladedauer:</th><td>' + lastChargeDurationText + '</td></tr>');
+        rows.push('<tr><th>Letzte Ladedauer:</th><td>' + lastChargeDurationText + '</td></tr>');
     }
     if (lastChargeAddedPercentText) {
         rows.push('<tr><th>Zuletzt hinzugefügte %:</th><td>' + lastChargeAddedPercentText + ' %</td></tr>');
