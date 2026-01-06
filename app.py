@@ -4979,17 +4979,38 @@ def _fetch_data_once(vehicle_id="default"):
 
         if saved_val is not None:
             data["last_charge_energy_added"] = saved_val
-        if saved_duration is not None:
-            data["last_charge_duration_s"] = saved_duration
-            charge["last_charge_duration_s"] = saved_duration
-        if saved_added_percent is not None:
-            data["last_charge_added_percent"] = saved_added_percent
-            charge["last_charge_added_percent"] = saved_added_percent
-
         if isinstance(charge, dict):
             _apply_charge_session_payload(
                 charge, session_start, session_start_soc, now
             )
+
+        live_duration = None
+        live_added_percent = None
+        if charging_state == "Charging" and session_start is not None:
+            try:
+                live_duration = int(
+                    max(0, (now - session_start).total_seconds())
+                )
+            except Exception:
+                live_duration = None
+            current_soc = _extract_current_charge_soc(charge)
+            if session_start_soc is not None and current_soc is not None:
+                live_added_percent = max(0, current_soc - session_start_soc)
+
+        duration_value = saved_duration
+        added_percent_value = saved_added_percent
+        if charging_state == "Charging":
+            if live_duration is not None:
+                duration_value = live_duration
+            if live_added_percent is not None:
+                added_percent_value = live_added_percent
+
+        if duration_value is not None:
+            data["last_charge_duration_s"] = duration_value
+            charge["last_charge_duration_s"] = duration_value
+        if added_percent_value is not None:
+            data["last_charge_added_percent"] = added_percent_value
+            charge["last_charge_added_percent"] = added_percent_value
 
         drive = data.get("drive_state", {})
         lat = drive.get("latitude")
