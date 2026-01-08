@@ -1176,6 +1176,8 @@ function updateChargingInfo(charge, wurzelDaten) {
     var addedPercentText = null;
     var lastChargeDurationText = null;
     var lastChargeAddedPercentText = null;
+    var lastChargeStartSoc = null;
+    var lastChargeEndSoc = null;
     if (showFull) {
         var sessionStartRaw = charge ? charge.charge_session_start : null;
         if (sessionStartRaw == null && lastChargeInfo) {
@@ -1226,6 +1228,21 @@ function updateChargingInfo(charge, wurzelDaten) {
             lastChargePercentText = letzterLadezuwachsProzent.toFixed(1);
         }
         lastChargeAddedPercentText = lastChargePercentText;
+    }
+    var letzterStartSocQuelle = charge ? charge.last_charge_start_soc : null;
+    if (letzterStartSocQuelle == null && wurzelDaten) {
+        letzterStartSocQuelle = wurzelDaten.last_charge_start_soc;
+    }
+    lastChargeStartSoc = parseNumber(letzterStartSocQuelle);
+    var letzterEndSocQuelle = charge ? charge.last_charge_end_soc : null;
+    if (letzterEndSocQuelle == null && wurzelDaten) {
+        letzterEndSocQuelle = wurzelDaten.last_charge_end_soc;
+    }
+    lastChargeEndSoc = parseNumber(letzterEndSocQuelle);
+    if (lastChargeAddedPercentText && lastChargeStartSoc != null && lastChargeEndSoc != null) {
+        var startSocText = Math.round(lastChargeStartSoc).toFixed(0);
+        var endSocText = Math.round(lastChargeEndSoc).toFixed(0);
+        lastChargeAddedPercentText = lastChargeAddedPercentText + ' (' + startSocText + '%-' + endSocText + '%)';
     }
 
     var rows = [];
