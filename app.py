@@ -2614,6 +2614,16 @@ def _last_charge_added_percent_file(vehicle_id):
     return os.path.join(vehicle_dir(vehicle_id), "last_charge_added_percent.txt")
 
 
+def _last_charge_start_soc_file(vehicle_id):
+    """Dateiname für den zuletzt gespeicherten Start-SOC."""
+    return os.path.join(vehicle_dir(vehicle_id), "last_charge_start_soc.txt")
+
+
+def _last_charge_end_soc_file(vehicle_id):
+    """Dateiname für den zuletzt gespeicherten End-SOC."""
+    return os.path.join(vehicle_dir(vehicle_id), "last_charge_end_soc.txt")
+
+
 def _load_last_charge_added_percent(vehicle_id):
     """Lade den zuletzt gespeicherten Ladeprozentsatz."""
     try:
@@ -2637,6 +2647,54 @@ def _save_last_charge_added_percent(vehicle_id, value):
         with open(
             _last_charge_added_percent_file(vehicle_id), "w", encoding="utf-8"
         ) as f:
+            f.write(str(value))
+    except Exception:
+        pass
+
+
+def _load_last_charge_start_soc(vehicle_id):
+    """Lade den zuletzt gespeicherten Start-SOC."""
+    try:
+        with open(_last_charge_start_soc_file(vehicle_id), "r", encoding="utf-8") as f:
+            value = f.read().strip()
+        if value == "":
+            return None
+        return _normalize_charge_soc(value)
+    except Exception:
+        return None
+
+
+def _load_last_charge_end_soc(vehicle_id):
+    """Lade den zuletzt gespeicherten End-SOC."""
+    try:
+        with open(_last_charge_end_soc_file(vehicle_id), "r", encoding="utf-8") as f:
+            value = f.read().strip()
+        if value == "":
+            return None
+        return _normalize_charge_soc(value)
+    except Exception:
+        return None
+
+
+def _save_last_charge_start_soc(vehicle_id, value):
+    """Speichere den zuletzt ermittelten Start-SOC."""
+    value = _normalize_charge_soc(value)
+    if value is None:
+        return
+    try:
+        with open(_last_charge_start_soc_file(vehicle_id), "w", encoding="utf-8") as f:
+            f.write(str(value))
+    except Exception:
+        pass
+
+
+def _save_last_charge_end_soc(vehicle_id, value):
+    """Speichere den zuletzt ermittelten End-SOC."""
+    value = _normalize_charge_soc(value)
+    if value is None:
+        return
+    try:
+        with open(_last_charge_end_soc_file(vehicle_id), "w", encoding="utf-8") as f:
             f.write(str(value))
     except Exception:
         pass
@@ -4837,19 +4895,31 @@ def _fetch_data_once(vehicle_id="default"):
         last_charging_state = None
         last_duration = None
         last_added_percent = None
+        last_start_soc = None
+        last_end_soc = None
         if isinstance(cached, dict):
             last_val = cached.get("last_charge_energy_added")
             last_duration = cached.get("last_charge_duration_s")
             last_added_percent = cached.get("last_charge_added_percent")
+            last_start_soc = cached.get("last_charge_start_soc")
+            last_end_soc = cached.get("last_charge_end_soc")
             cached_charge = cached.get("charge_state", {})
             if isinstance(cached_charge, dict):
                 last_charging_state = cached_charge.get("charging_state")
+                if last_start_soc is None:
+                    last_start_soc = cached_charge.get("last_charge_start_soc")
+                if last_end_soc is None:
+                    last_end_soc = cached_charge.get("last_charge_end_soc")
         if last_val is None:
             last_val = _load_last_energy(cache_id)
         if last_duration is None:
             last_duration = _load_last_charge_duration(cache_id)
         if last_added_percent is None:
             last_added_percent = _load_last_charge_added_percent(cache_id)
+        if last_start_soc is None:
+            last_start_soc = _load_last_charge_start_soc(cache_id)
+        if last_end_soc is None:
+            last_end_soc = _load_last_charge_end_soc(cache_id)
 
         charge = data.get("charge_state")
         if not isinstance(charge, dict):
@@ -4860,6 +4930,8 @@ def _fetch_data_once(vehicle_id="default"):
         saved_val = last_val
         saved_duration = last_duration
         saved_added_percent = last_added_percent
+        saved_start_soc = last_start_soc
+        saved_end_soc = last_end_soc
         now = datetime.now(LOCAL_TZ)
 
         session_start = _charging_session_start.get(cache_id)
@@ -4964,6 +5036,11 @@ def _fetch_data_once(vehicle_id="default"):
             if added_percent is not None:
                 _save_last_charge_added_percent(cache_id, added_percent)
                 saved_added_percent = added_percent
+            if start_soc is not None and current_soc is not None:
+                _save_last_charge_start_soc(cache_id, start_soc)
+                _save_last_charge_end_soc(cache_id, current_soc)
+                saved_start_soc = start_soc
+                saved_end_soc = current_soc
             session_start = None
             session_start_soc = None
 
@@ -5011,6 +5088,12 @@ def _fetch_data_once(vehicle_id="default"):
         if added_percent_value is not None:
             data["last_charge_added_percent"] = added_percent_value
             charge["last_charge_added_percent"] = added_percent_value
+        if saved_start_soc is not None:
+            data["last_charge_start_soc"] = saved_start_soc
+            charge["last_charge_start_soc"] = saved_start_soc
+        if saved_end_soc is not None:
+            data["last_charge_end_soc"] = saved_end_soc
+            charge["last_charge_end_soc"] = saved_end_soc
 
         drive = data.get("drive_state", {})
         lat = drive.get("latitude")
