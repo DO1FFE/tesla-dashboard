@@ -1229,6 +1229,9 @@ function updateChargingInfo(charge, wurzelDaten) {
         }
         lastChargeAddedPercentText = lastChargePercentText;
     }
+    if (lastChargeAddedPercentText && lastChargeAddedPercentText.indexOf('%') === -1) {
+        lastChargeAddedPercentText = lastChargeAddedPercentText + '%';
+    }
     var letzterStartSocQuelle = charge ? charge.last_charge_start_soc : null;
     if (letzterStartSocQuelle == null && wurzelDaten) {
         letzterStartSocQuelle = wurzelDaten.last_charge_start_soc;
@@ -1297,7 +1300,7 @@ function updateChargingInfo(charge, wurzelDaten) {
         rows.push('<tr><th>Letzte Ladedauer:</th><td>' + lastChargeDurationText + '</td></tr>');
     }
     if (lastChargeAddedPercentText) {
-        rows.push('<tr><th>Zuletzt hinzugefügte %:</th><td>' + lastChargeAddedPercentText + ' %</td></tr>');
+        rows.push('<tr><th>Zuletzt hinzugefügte %:</th><td>' + lastChargeAddedPercentText + '</td></tr>');
     }
 
     if (rows.length) {
