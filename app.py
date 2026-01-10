@@ -2702,6 +2702,7 @@ def _save_last_charge_end_soc(vehicle_id, value):
 
 _charging_session_start = {}
 _charging_session_start_soc = {}
+_charging_session_last_soc = {}
 _recently_logged_sessions = set()
 _energy_log_lock = threading.Lock()
 _last_energy_markers = {}
@@ -2728,6 +2729,11 @@ def _session_start_file(vehicle_id):
 def _session_start_soc_file(vehicle_id):
     """Dateiname für den Start-SOC der aktuellen Ladesession."""
     return os.path.join(vehicle_dir(vehicle_id), "charge_session_start_soc.txt")
+
+
+def _session_last_soc_file(vehicle_id):
+    """Dateiname für den zuletzt bekannten SOC der aktuellen Ladesession."""
+    return os.path.join(vehicle_dir(vehicle_id), "charge_session_last_soc.txt")
 
 
 def _load_session_start(vehicle_id):
@@ -2792,6 +2798,25 @@ def _load_session_start_soc(vehicle_id):
         return None
 
 
+def _load_session_last_soc(vehicle_id):
+    """Lese den zuletzt bekannten SOC der aktuellen Ladesession."""
+    last_soc = _charging_session_last_soc.get(vehicle_id)
+    if last_soc is not None:
+        return last_soc
+    try:
+        with open(_session_last_soc_file(vehicle_id), "r", encoding="utf-8") as f:
+            value = f.read().strip()
+        if value == "":
+            return None
+        last_soc = _normalize_charge_soc(value)
+        if last_soc is None:
+            return None
+        _charging_session_last_soc[vehicle_id] = last_soc
+        return last_soc
+    except Exception:
+        return None
+
+
 def _save_session_start(vehicle_id, start_dt):
     """Persist the charging session start timestamp for ``vehicle_id``."""
     if start_dt is None:
@@ -2829,13 +2854,29 @@ def _save_session_start_soc(vehicle_id, start_soc):
         pass
 
 
+def _save_session_last_soc(vehicle_id, last_soc):
+    """Speichere den zuletzt bekannten SOC der Ladesession."""
+    last_soc = _normalize_charge_soc(last_soc)
+    if last_soc is None:
+        return
+    try:
+        os.makedirs(vehicle_dir(vehicle_id), exist_ok=True)
+        with open(_session_last_soc_file(vehicle_id), "w", encoding="utf-8") as f:
+            f.write(str(last_soc))
+        _charging_session_last_soc[vehicle_id] = last_soc
+    except Exception:
+        pass
+
+
 def _start_charging_session(vehicle_id, start_dt, charge_state):
     """Setze Startzeit und Start-SOC für eine neue Ladesession."""
     if start_dt is None:
         return None
     _save_session_start(vehicle_id, start_dt)
+    _clear_session_last_soc(vehicle_id)
     start_soc = _extract_current_charge_soc(charge_state)
     _save_session_start_soc(vehicle_id, start_soc)
+    _save_session_last_soc(vehicle_id, start_soc)
     return start_soc
 
 
@@ -2850,6 +2891,7 @@ def _clear_session_start(vehicle_id):
     except Exception:
         pass
     _clear_session_start_soc(vehicle_id)
+    _clear_session_last_soc(vehicle_id)
 
 
 def _clear_session_start_soc(vehicle_id):
@@ -2857,6 +2899,17 @@ def _clear_session_start_soc(vehicle_id):
     _charging_session_start_soc.pop(vehicle_id, None)
     try:
         os.remove(_session_start_soc_file(vehicle_id))
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
+
+def _clear_session_last_soc(vehicle_id):
+    """Lösche den zuletzt bekannten SOC der Ladesession."""
+    _charging_session_last_soc.pop(vehicle_id, None)
+    try:
+        os.remove(_session_last_soc_file(vehicle_id))
     except FileNotFoundError:
         pass
     except Exception:
@@ -4927,6 +4980,7 @@ def _fetch_data_once(vehicle_id="default"):
             data["charge_state"] = charge
         val = charge.get("charge_energy_added")
         charging_state = charge.get("charging_state")
+        current_soc = _extract_current_charge_soc(charge)
         saved_val = last_val
         saved_duration = last_duration
         saved_added_percent = last_added_percent
@@ -4940,12 +4994,18 @@ def _fetch_data_once(vehicle_id="default"):
         session_start_soc = _charging_session_start_soc.get(cache_id)
         if session_start_soc is None:
             session_start_soc = _load_session_start_soc(cache_id)
+        session_last_soc = _charging_session_last_soc.get(cache_id)
+        if session_last_soc is None:
+            session_last_soc = _load_session_last_soc(cache_id)
 
         if charging_state == "Charging" and session_start is None:
             session_start = now
             session_start_soc = _start_charging_session(
                 cache_id, session_start, charge
             )
+        if charging_state == "Charging" and current_soc is not None:
+            _save_session_last_soc(cache_id, current_soc)
+            session_last_soc = current_soc
 
         session_ended = False
         if charging_state in ("Complete", "Disconnected"):
@@ -4996,9 +5056,9 @@ def _fetch_data_once(vehicle_id="default"):
             else:
                 duration_s = None
             start_soc = session_start_soc or _load_session_start_soc(cache_id)
-            current_soc = _extract_current_charge_soc(charge)
-            if start_soc is not None and current_soc is not None:
-                added_percent = max(0, current_soc - start_soc)
+            end_soc = current_soc if current_soc is not None else session_last_soc
+            if start_soc is not None and end_soc is not None:
+                added_percent = max(0, end_soc - start_soc)
             else:
                 added_percent = None
             should_log = True
@@ -5036,11 +5096,11 @@ def _fetch_data_once(vehicle_id="default"):
             if added_percent is not None:
                 _save_last_charge_added_percent(cache_id, added_percent)
                 saved_added_percent = added_percent
-            if start_soc is not None and current_soc is not None:
+            if start_soc is not None and end_soc is not None:
                 _save_last_charge_start_soc(cache_id, start_soc)
-                _save_last_charge_end_soc(cache_id, current_soc)
+                _save_last_charge_end_soc(cache_id, end_soc)
                 saved_start_soc = start_soc
-                saved_end_soc = current_soc
+                saved_end_soc = end_soc
             session_start = None
             session_start_soc = None
 
@@ -5070,7 +5130,6 @@ def _fetch_data_once(vehicle_id="default"):
                 )
             except Exception:
                 live_duration = None
-            current_soc = _extract_current_charge_soc(charge)
             if session_start_soc is not None and current_soc is not None:
                 live_added_percent = max(0, current_soc - session_start_soc)
 
