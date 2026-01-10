@@ -5006,6 +5006,9 @@ def _fetch_data_once(vehicle_id="default"):
         if charging_state == "Charging" and current_soc is not None:
             _save_session_last_soc(cache_id, current_soc)
             session_last_soc = current_soc
+        end_soc_letzter = current_soc
+        if end_soc_letzter is None:
+            end_soc_letzter = session_last_soc
 
         session_ended = False
         if charging_state in ("Complete", "Disconnected"):
@@ -5056,7 +5059,7 @@ def _fetch_data_once(vehicle_id="default"):
             else:
                 duration_s = None
             start_soc = session_start_soc or _load_session_start_soc(cache_id)
-            end_soc = current_soc if current_soc is not None else session_last_soc
+            end_soc = end_soc_letzter
             if start_soc is not None and end_soc is not None:
                 added_percent = max(0, end_soc - start_soc)
             else:
@@ -5096,10 +5099,11 @@ def _fetch_data_once(vehicle_id="default"):
             if added_percent is not None:
                 _save_last_charge_added_percent(cache_id, added_percent)
                 saved_added_percent = added_percent
-            if start_soc is not None and end_soc is not None:
+            if start_soc is not None:
                 _save_last_charge_start_soc(cache_id, start_soc)
-                _save_last_charge_end_soc(cache_id, end_soc)
                 saved_start_soc = start_soc
+            if end_soc is not None:
+                _save_last_charge_end_soc(cache_id, end_soc)
                 saved_end_soc = end_soc
             session_start = None
             session_start_soc = None
