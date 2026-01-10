@@ -5011,7 +5011,8 @@ def _fetch_data_once(vehicle_id="default"):
             end_soc_letzter = session_last_soc
 
         session_ended = False
-        if charging_state in ("Complete", "Disconnected"):
+        end_states = ("Complete", "Disconnected", "Stopped", "NoPower")
+        if charging_state in end_states:
             session_ended = True
         elif last_charging_state == "Charging" and charging_state != "Charging":
             session_ended = True
@@ -5042,12 +5043,11 @@ def _fetch_data_once(vehicle_id="default"):
             last_val = val
 
         value_to_log = None
-        if charging_state in ("Complete", "Disconnected"):
+        if session_ended:
             if val is not None and val > 0:
                 value_to_log = val
             elif val is None and last_val is not None and last_val > 0:
                 value_to_log = last_val
-        if value_to_log is not None:
             start_time = session_start or _load_session_start(cache_id)
             if start_time is not None:
                 try:
@@ -5065,7 +5065,9 @@ def _fetch_data_once(vehicle_id="default"):
             else:
                 added_percent = None
             should_log = True
-            if start_time is None:
+            if value_to_log is None:
+                should_log = False
+            elif start_time is None:
                 try:
                     prev_amount = float(saved_val)
                 except (TypeError, ValueError):
@@ -5090,7 +5092,7 @@ def _fetch_data_once(vehicle_id="default"):
             else:
                 logged = False
             _clear_session_start(cache_id)
-            if logged:
+            if logged and value_to_log is not None:
                 _save_last_energy(cache_id, value_to_log)
                 saved_val = value_to_log
             if duration_s is not None:
