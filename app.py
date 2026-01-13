@@ -5028,16 +5028,21 @@ def _fetch_data_once(vehicle_id="default"):
         if charging_state == "Charging" and current_soc is not None:
             _save_session_last_soc(cache_id, current_soc)
             session_last_soc = current_soc
-        end_soc_letzter = current_soc
-        if end_soc_letzter is None:
-            end_soc_letzter = session_last_soc
-
         session_ended = False
         end_states = ("Complete", "Disconnected", "Stopped", "NoPower")
-        if charging_state in end_states:
+        session_aktiv = session_start is not None
+        if charging_state in end_states and (
+            last_charging_state == "Charging" or session_aktiv
+        ):
             session_ended = True
         elif last_charging_state == "Charging" and charging_state != "Charging":
             session_ended = True
+
+        end_soc_letzter = None
+        if session_ended:
+            end_soc_letzter = current_soc
+            if end_soc_letzter is None:
+                end_soc_letzter = session_last_soc
 
         if val is not None:
             if last_val is not None and val < last_val:
