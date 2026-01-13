@@ -4026,6 +4026,23 @@ def _merge_parking_value(prev_total, prev_source, new_raw, tolerance=0.01):
     return combined, source
 
 
+def _normalize_state_percentages(online, offline, asleep):
+    """Normalisiert Prozentwerte, um negative Ausgaben zu verhindern."""
+    total = float(online) + float(offline) + float(asleep)
+    if total <= 0:
+        return 0.0, 0.0, 0.0
+    if total > 100.0:
+        faktor = 100.0 / total
+        online = round(online * faktor, 2)
+        offline = round(offline * faktor, 2)
+        asleep = round(asleep * faktor, 2)
+    total = online + offline + asleep
+    diff = round(100.0 - total, 2)
+    if diff > 0:
+        offline = round(offline + diff, 2)
+    return online, offline, asleep
+
+
 def compute_statistics():
     """Compute daily statistics and save them to ``STAT_FILE``."""
     vid = _default_vehicle_id or default_vehicle_id()
@@ -4080,12 +4097,17 @@ def compute_statistics():
         stats[day]["_park_km_total"] = km_total
         stats[day]["_park_km_source"] = km_source
     for day, val in stats.items():
-        total = 24 * 3600
-        online = round(val.get("online", 0.0) / total * 100, 2)
-        offline = round(val.get("offline", 0.0) / total * 100, 2)
-        asleep = round(val.get("asleep", 0.0) / total * 100, 2)
-        diff = round(100.0 - (online + offline + asleep), 2)
-        offline = round(offline + diff, 2)
+        erwartete_sekunden = 24 * 3600
+        gesamt_sekunden = (
+            float(val.get("online", 0.0))
+            + float(val.get("offline", 0.0))
+            + float(val.get("asleep", 0.0))
+        )
+        divisor = max(erwartete_sekunden, gesamt_sekunden) if gesamt_sekunden else erwartete_sekunden
+        online = round(val.get("online", 0.0) / divisor * 100, 2)
+        offline = round(val.get("offline", 0.0) / divisor * 100, 2)
+        asleep = round(val.get("asleep", 0.0) / divisor * 100, 2)
+        online, offline, asleep = _normalize_state_percentages(online, offline, asleep)
         val["online"] = online
         val["offline"] = offline
         val["asleep"] = asleep
@@ -6026,9 +6048,12 @@ def _prepare_statistics_payload():
                 "park_energy_pct": round(entry.get("park_energy_pct", 0.0), 2),
                 "park_km": round(entry.get("park_km", 0.0), 2),
             }
-            total = row["online"] + row["offline"] + row["asleep"]
-            diff = round(100.0 - total, 2)
-            row["offline"] = round(row["offline"] + diff, 2)
+            online, offline, asleep = _normalize_state_percentages(
+                row["online"], row["offline"], row["asleep"]
+            )
+            row["online"] = online
+            row["offline"] = offline
+            row["asleep"] = asleep
             rows.append(row)
             current["online_sum"] += entry.get("online", 0.0)
             current["offline_sum"] += entry.get("offline", 0.0)
@@ -6054,9 +6079,12 @@ def _prepare_statistics_payload():
             "park_energy_pct": round(data.get("park_energy_pct", 0.0), 2),
             "park_km": round(data.get("park_km", 0.0), 2),
         }
-        total = row["online"] + row["offline"] + row["asleep"]
-        diff = round(100.0 - total, 2)
-        row["offline"] = round(row["offline"] + diff, 2)
+        online, offline, asleep = _normalize_state_percentages(
+            row["online"], row["offline"], row["asleep"]
+        )
+        row["online"] = online
+        row["offline"] = offline
+        row["asleep"] = asleep
         monthly_rows.append(row)
 
     rows = monthly_rows + rows
@@ -6075,9 +6103,12 @@ def _prepare_statistics_payload():
             "park_energy_pct": round(current["park_energy_pct"], 2),
             "park_km": round(current["park_km"], 2),
         }
-        total = summary["online"] + summary["offline"] + summary["asleep"]
-        diff = round(100.0 - total, 2)
-        summary["offline"] = round(summary["offline"] + diff, 2)
+        online, offline, asleep = _normalize_state_percentages(
+            summary["online"], summary["offline"], summary["asleep"]
+        )
+        summary["online"] = online
+        summary["offline"] = offline
+        summary["asleep"] = asleep
     # highlight today's statistics and current vehicle state
     today = datetime.now(LOCAL_TZ).date().isoformat()
     vid = str(_default_vehicle_id or "default")
