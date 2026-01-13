@@ -2633,7 +2633,7 @@ def _load_last_charge_added_percent(vehicle_id):
             value = f.read().strip()
         if value == "":
             return None
-        return int(float(value))
+        return _normalize_charge_soc(value)
     except Exception:
         return None
 
