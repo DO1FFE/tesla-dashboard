@@ -5025,6 +5025,16 @@ def _fetch_data_once(vehicle_id="default"):
             session_start_soc = _start_charging_session(
                 cache_id, session_start, charge
             )
+        if (
+            charging_state == "Charging"
+            and session_start is not None
+            and session_start_soc is None
+            and current_soc is not None
+        ):
+            session_start_soc = current_soc
+            _save_session_start_soc(cache_id, current_soc)
+            _save_session_last_soc(cache_id, current_soc)
+            session_last_soc = current_soc
         if charging_state == "Charging" and current_soc is not None:
             _save_session_last_soc(cache_id, current_soc)
             session_last_soc = current_soc
