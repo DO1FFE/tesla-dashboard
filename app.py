@@ -2875,6 +2875,12 @@ def _start_charging_session(vehicle_id, start_dt, charge_state):
     _save_session_start(vehicle_id, start_dt)
     _clear_session_last_soc(vehicle_id)
     start_soc = _extract_current_charge_soc(charge_state)
+    if start_soc is None and isinstance(charge_state, dict):
+        start_soc = _normalize_charge_soc(
+            charge_state.get("usable_battery_level")
+        )
+        if start_soc is None:
+            start_soc = _normalize_charge_soc(charge_state.get("battery_level"))
     _save_session_start_soc(vehicle_id, start_soc)
     _save_session_last_soc(vehicle_id, start_soc)
     return start_soc
@@ -5096,6 +5102,12 @@ def _fetch_data_once(vehicle_id="default"):
             else:
                 duration_s = None
             start_soc = session_start_soc or _load_session_start_soc(cache_id)
+            if start_soc is None:
+                start_soc = _normalize_charge_soc(
+                    charge.get("charge_session_start_soc")
+                )
+            if start_soc is None:
+                start_soc = session_last_soc
             end_soc = end_soc_letzter
             if start_soc is not None and end_soc is not None:
                 added_percent = max(0, end_soc - start_soc)
