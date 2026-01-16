@@ -2877,6 +2877,10 @@ def _start_charging_session(vehicle_id, start_dt, charge_state):
     start_soc = _extract_current_charge_soc(charge_state)
     if start_soc is None and isinstance(charge_state, dict):
         start_soc = _normalize_charge_soc(
+            charge_state.get("charge_session_start_soc")
+        )
+    if start_soc is None and isinstance(charge_state, dict):
+        start_soc = _normalize_charge_soc(
             charge_state.get("usable_battery_level")
         )
         if start_soc is None:
@@ -5101,13 +5105,18 @@ def _fetch_data_once(vehicle_id="default"):
                     duration_s = None
             else:
                 duration_s = None
-            start_soc = session_start_soc or _load_session_start_soc(cache_id)
+            start_soc = session_start_soc
+            charge_start_soc = _normalize_charge_soc(
+                charge.get("charge_session_start_soc")
+            )
+            start_soc_basis = start_soc is not None or charge_start_soc is not None
             if start_soc is None:
-                start_soc = _normalize_charge_soc(
-                    charge.get("charge_session_start_soc")
-                )
-            if start_soc is None:
+                start_soc = charge_start_soc
+            if start_soc is None and start_soc_basis:
                 start_soc = session_last_soc
+            if start_soc is not None:
+                _save_last_charge_start_soc(cache_id, start_soc)
+                saved_start_soc = start_soc
             end_soc = end_soc_letzter
             if start_soc is not None and end_soc is not None:
                 added_percent = max(0, end_soc - start_soc)
@@ -5150,9 +5159,6 @@ def _fetch_data_once(vehicle_id="default"):
             if added_percent is not None:
                 _save_last_charge_added_percent(cache_id, added_percent)
                 saved_added_percent = added_percent
-            if start_soc is not None:
-                _save_last_charge_start_soc(cache_id, start_soc)
-                saved_start_soc = start_soc
             if end_soc is not None:
                 _save_last_charge_end_soc(cache_id, end_soc)
                 saved_end_soc = end_soc
