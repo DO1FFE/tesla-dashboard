@@ -5046,6 +5046,8 @@ def _fetch_data_once(vehicle_id="default"):
         ):
             session_start_soc = current_soc
             _save_session_start_soc(cache_id, current_soc)
+            _save_last_charge_start_soc(cache_id, current_soc)
+            saved_start_soc = current_soc
             _save_session_last_soc(cache_id, current_soc)
             session_last_soc = current_soc
         if charging_state in ("Charging", "Starting") and current_soc is not None:
@@ -5066,6 +5068,9 @@ def _fetch_data_once(vehicle_id="default"):
             end_soc_letzter = current_soc
             if end_soc_letzter is None:
                 end_soc_letzter = session_last_soc
+            if end_soc_letzter is not None:
+                _save_last_charge_end_soc(cache_id, end_soc_letzter)
+                saved_end_soc = end_soc_letzter
 
         if val is not None:
             if last_val is not None and val < last_val:
