@@ -5030,13 +5030,16 @@ def _fetch_data_once(vehicle_id="default"):
         if session_last_soc is None:
             session_last_soc = _load_session_last_soc(cache_id)
 
-        if charging_state == "Charging" and session_start is None:
+        if (
+            charging_state in ("Charging", "Starting")
+            and session_start is None
+        ):
             session_start = now
             session_start_soc = _start_charging_session(
                 cache_id, session_start, charge
             )
         if (
-            charging_state == "Charging"
+            charging_state in ("Charging", "Starting")
             and session_start is not None
             and session_start_soc is None
             and current_soc is not None
@@ -5045,7 +5048,7 @@ def _fetch_data_once(vehicle_id="default"):
             _save_session_start_soc(cache_id, current_soc)
             _save_session_last_soc(cache_id, current_soc)
             session_last_soc = current_soc
-        if charging_state == "Charging" and current_soc is not None:
+        if charging_state in ("Charging", "Starting") and current_soc is not None:
             _save_session_last_soc(cache_id, current_soc)
             session_last_soc = current_soc
         session_ended = False
@@ -5079,7 +5082,7 @@ def _fetch_data_once(vehicle_id="default"):
                     _clear_session_start(cache_id)
                     session_start = None
                     session_start_soc = None
-                    if charging_state == "Charging":
+                    if charging_state in ("Charging", "Starting"):
                         session_start = now
                         session_start_soc = _start_charging_session(
                             cache_id, session_start, charge
@@ -5166,7 +5169,7 @@ def _fetch_data_once(vehicle_id="default"):
             session_start_soc = None
 
         if (
-            charging_state == "Charging"
+            charging_state in ("Charging", "Starting")
             and session_start is None
             and (val is None or val >= 0)
         ):
