@@ -1229,8 +1229,12 @@ function updateChargingInfo(charge, wurzelDaten) {
         }
         lastChargeAddedPercentText = lastChargePercentText;
     }
-    if (lastChargeAddedPercentText && lastChargeAddedPercentText.indexOf('%') === -1) {
-        lastChargeAddedPercentText = lastChargeAddedPercentText + '%';
+    if (lastChargeAddedPercentText) {
+        lastChargeAddedPercentText = String(lastChargeAddedPercentText).trim();
+        lastChargeAddedPercentText = lastChargeAddedPercentText.replace(/\s*%+\s*$/, '');
+        if (lastChargeAddedPercentText) {
+            lastChargeAddedPercentText = lastChargeAddedPercentText + '%';
+        }
     }
     var letzterStartSocQuelle = charge ? charge.last_charge_start_soc : null;
     if (letzterStartSocQuelle == null && wurzelDaten) {
@@ -1242,10 +1246,18 @@ function updateChargingInfo(charge, wurzelDaten) {
         letzterEndSocQuelle = wurzelDaten.last_charge_end_soc;
     }
     lastChargeEndSoc = parseNumber(letzterEndSocQuelle);
-    if (lastChargeAddedPercentText && lastChargeStartSoc != null && lastChargeEndSoc != null) {
+    var lastChargeSocText = null;
+    if (lastChargeStartSoc != null && lastChargeEndSoc != null) {
         var startSocText = Math.round(lastChargeStartSoc).toFixed(0);
         var endSocText = Math.round(lastChargeEndSoc).toFixed(0);
-        lastChargeAddedPercentText = lastChargeAddedPercentText + ' (' + startSocText + '%-' + endSocText + '%)';
+        lastChargeSocText = '(' + startSocText + '%-' + endSocText + '%)';
+    }
+    if (lastChargeSocText) {
+        if (lastChargeAddedPercentText) {
+            lastChargeAddedPercentText = lastChargeAddedPercentText + ' ' + lastChargeSocText;
+        } else {
+            lastChargeAddedPercentText = '– ' + lastChargeSocText;
+        }
     }
 
     var rows = [];
