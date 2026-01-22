@@ -1049,6 +1049,8 @@ var lastChargeStop = null;
 var lastEnergyAdded = null;
 var letzteLadedauerMs = null;
 var letzterLadezuwachsProzent = null;
+var lastChargeSessionStartMs = null;
+var lastChargingState = null;
 
 function parseNumber(value) {
     if (value == null || value === '') {
@@ -1146,6 +1148,22 @@ function updateChargingInfo(charge, wurzelDaten) {
 
     var state = charge.charging_state;
     var now = Date.now();
+    var sessionStartMsAktuell = parseChargeSessionStart(charge.charge_session_start);
+    var hatLadeStart = state === 'Charging' || state === 'Starting';
+    var neuerLadeStart = false;
+    if (sessionStartMsAktuell != null && lastChargeSessionStartMs != null && sessionStartMsAktuell !== lastChargeSessionStartMs) {
+        neuerLadeStart = true;
+    }
+    if (hatLadeStart && lastChargingState && lastChargingState !== 'Charging' && lastChargingState !== 'Starting') {
+        neuerLadeStart = true;
+    }
+    if (hatLadeStart && lastChargeStop != null) {
+        neuerLadeStart = true;
+    }
+    if (neuerLadeStart) {
+        letzterLadezuwachsProzent = null;
+        letzteLadedauerMs = null;
+    }
 
     if (state === 'Charging') {
         lastChargeInfo = JSON.parse(JSON.stringify(charge));
@@ -1200,8 +1218,10 @@ function updateChargingInfo(charge, wurzelDaten) {
                 currentSoc = parseNumber(lastChargeInfo.usable_battery_level);
             }
         }
+        var berechneterZuwachsProzent = null;
         if (startSoc != null && currentSoc != null) {
-            addedPercentText = formatPercentDelta(currentSoc - startSoc);
+            berechneterZuwachsProzent = currentSoc - startSoc;
+            addedPercentText = formatPercentDelta(berechneterZuwachsProzent);
         }
     }
 
@@ -1218,6 +1238,8 @@ function updateChargingInfo(charge, wurzelDaten) {
     }
     if (letzterLadezuwachsQuelle != null && !isNaN(letzterLadezuwachsQuelle)) {
         letzterLadezuwachsProzent = Number(letzterLadezuwachsQuelle);
+    } else if (typeof berechneterZuwachsProzent !== 'undefined' && berechneterZuwachsProzent != null) {
+        letzterLadezuwachsProzent = berechneterZuwachsProzent;
     }
     if (letzteLadedauerMs != null) {
         lastChargeDurationText = formatChargeDuration(letzteLadedauerMs);
@@ -1320,6 +1342,11 @@ function updateChargingInfo(charge, wurzelDaten) {
     } else {
         $info.empty().hide();
     }
+
+    if (sessionStartMsAktuell != null) {
+        lastChargeSessionStartMs = sessionStartMsAktuell;
+    }
+    lastChargingState = state;
 }
 
 function updateNavBar(drive) {
