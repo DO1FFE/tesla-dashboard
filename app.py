@@ -4492,6 +4492,28 @@ def _fleet_access_token(tesla):
     return None
 
 
+def _tessie_battery_temp(vid):
+    """Hole die Batterietemperatur über die Tessie-API."""
+
+    cfg = load_config()
+    token = cfg.get("tessie_api_token")
+    if not token:
+        return None
+    if vid is None:
+        return None
+
+    url = f"https://api.tessie.com/vehicles/{vid}/status"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(url, headers=headers, timeout=TESLA_REQUEST_TIMEOUT)
+    resp.raise_for_status()
+    payload = resp.json()
+    try:
+        log_api_data("tessie_status", sanitize(payload), vehicle_id=vid)
+    except Exception:
+        pass
+    return _extract_battery_temp(payload)
+
+
 def _fleet_battery_temp(tesla, vehicle, vid):
     """Fetch battery temperature via Fleet API when configured."""
 
@@ -4551,6 +4573,7 @@ def _fetch_battery_temp(tesla, vehicle, vid):
     """Try to enrich charge_state with a battery temperature reading."""
 
     for func in (
+        lambda: _tessie_battery_temp(vid),
         lambda: _fleet_battery_temp(tesla, vehicle, vid),
         lambda: _owner_battery_temp(vehicle, vid),
     ):
@@ -5729,6 +5752,8 @@ def api_config():
         cfg["phone_number"] = True
     if "infobip_api_key" in cfg:
         cfg["infobip_api_key"] = True
+    if "tessie_api_token" in cfg:
+        cfg["tessie_api_token"] = True
     cfg.pop("infobip_base_url", None)
     return jsonify(cfg)
 
@@ -5887,6 +5912,10 @@ def config_page():
         keep_infobip_api_key = infobip_api_key == SECRET_PLACEHOLDER
         if keep_infobip_api_key:
             infobip_api_key = ""
+        tessie_api_token = request.form.get("tessie_api_token", "").strip()
+        keep_tessie_api_token = tessie_api_token == SECRET_PLACEHOLDER
+        if keep_tessie_api_token:
+            tessie_api_token = ""
         infobip_base_url = request.form.get("infobip_base_url", "").strip()
         sms_sender_id = request.form.get("sms_sender_id", "").strip()
         sms_enabled = "sms_enabled" in request.form
@@ -5953,6 +5982,10 @@ def config_page():
             cfg["infobip_api_key"] = infobip_api_key
         elif not keep_infobip_api_key and "infobip_api_key" in cfg:
             cfg.pop("infobip_api_key")
+        if tessie_api_token:
+            cfg["tessie_api_token"] = tessie_api_token
+        elif not keep_tessie_api_token and "tessie_api_token" in cfg:
+            cfg.pop("tessie_api_token")
         if infobip_base_url:
             cfg["infobip_base_url"] = infobip_base_url
         elif "infobip_base_url" in cfg:
@@ -6019,6 +6052,8 @@ def config_page():
         display_cfg["aprs_passcode"] = SECRET_PLACEHOLDER
     if display_cfg.get("infobip_api_key"):
         display_cfg["infobip_api_key"] = SECRET_PLACEHOLDER
+    if display_cfg.get("tessie_api_token"):
+        display_cfg["tessie_api_token"] = SECRET_PLACEHOLDER
     return render_template(
         "config.html",
         items=CONFIG_ITEMS,
