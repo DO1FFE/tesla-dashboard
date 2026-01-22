@@ -4504,23 +4504,23 @@ def _fleet_access_token(tesla):
     return None
 
 
-def _tessie_battery_temp(vid):
+def _tessie_battery_temp(vin):
     """Hole die Batterietemperatur über die Tessie-API."""
 
     cfg = load_config()
     token = cfg.get("tessie_api_token")
     if not token:
         return None
-    if vid is None:
+    if vin is None:
         return None
 
-    url = f"https://api.tessie.com/vehicles/{vid}/battery"
+    url = f"https://api.tessie.com/{vin}/battery"
     headers = {"Authorization": f"Bearer {token}"}
     resp = requests.get(url, headers=headers, timeout=TESLA_REQUEST_TIMEOUT)
     resp.raise_for_status()
     payload = resp.json()
     try:
-        log_api_data("tessie_battery", sanitize(payload), vehicle_id=vid)
+        log_api_data("tessie_battery", sanitize(payload), vehicle_id=vin)
     except Exception:
         pass
     battery_temp = _extract_battery_temp(payload)
@@ -4584,7 +4584,7 @@ def _owner_battery_temp(vehicle, vid):
     return None
 
 
-def _fetch_battery_temp(tesla, vehicle, vid):
+def _fetch_battery_temp(tesla, vehicle, vin):
     """Ergänze charge_state nur über die Tessie-API um die Batterietemperatur."""
 
     cfg = load_config()
@@ -4594,9 +4594,12 @@ def _fetch_battery_temp(tesla, vehicle, vid):
             "Kein Tessie-Token vorhanden; es wird keine alternative API für battery_temp genutzt."
         )
         return None
+    if vin is None:
+        logging.info("Keine VIN vorhanden; Tessie-Abfrage für battery_temp wird übersprungen.")
+        return None
 
     try:
-        return _tessie_battery_temp(vid)
+        return _tessie_battery_temp(vin)
     except Exception as exc:
         _log_api_error(exc)
     return None
@@ -4801,6 +4804,17 @@ def get_vehicle_data(vehicle_id=None, state=None):
     if vid is None and _default_vehicle_id is not None:
         vid = _default_vehicle_id
 
+    vin = None
+    try:
+        if isinstance(vehicle, dict):
+            vin = vehicle.get("vin")
+        else:
+            vin = getattr(vehicle, "vin", None)
+            if vin is None:
+                vin = vehicle.get("vin")
+    except Exception:
+        vin = None
+
     if state is None:
         try:
             state = _refresh_state(vehicle)
@@ -4833,7 +4847,7 @@ def get_vehicle_data(vehicle_id=None, state=None):
             charge_state = {}
             sanitized["charge_state"] = charge_state
         if "battery_temp" not in charge_state:
-            battery_temp = _fetch_battery_temp(tesla, vehicle, vid)
+            battery_temp = _fetch_battery_temp(tesla, vehicle, vin)
             if battery_temp is not None:
                 charge_state["battery_temp"] = battery_temp
     except Exception as exc:
