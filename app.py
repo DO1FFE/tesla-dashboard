@@ -5192,7 +5192,10 @@ def _fetch_data_once(vehicle_id="default"):
 
         live_duration = None
         live_added_percent = None
-        if charging_state == "Charging" and session_start is not None:
+        if (
+            charging_state in ("Charging", "Starting")
+            and session_start is not None
+        ):
             try:
                 live_duration = int(
                     max(0, (now - session_start).total_seconds())
@@ -5204,7 +5207,7 @@ def _fetch_data_once(vehicle_id="default"):
 
         duration_value = saved_duration
         added_percent_value = saved_added_percent
-        if charging_state == "Charging":
+        if charging_state in ("Charging", "Starting"):
             if live_duration is not None:
                 duration_value = live_duration
             if live_added_percent is not None:
