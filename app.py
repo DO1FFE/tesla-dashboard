@@ -4585,19 +4585,20 @@ def _owner_battery_temp(vehicle, vid):
 
 
 def _fetch_battery_temp(tesla, vehicle, vid):
-    """Try to enrich charge_state with a battery temperature reading."""
+    """Ergänze charge_state nur über die Tessie-API um die Batterietemperatur."""
 
-    for func in (
-        lambda: _tessie_battery_temp(vid),
-        lambda: _fleet_battery_temp(tesla, vehicle, vid),
-        lambda: _owner_battery_temp(vehicle, vid),
-    ):
-        try:
-            value = func()
-            if value is not None:
-                return value
-        except Exception as exc:
-            _log_api_error(exc)
+    cfg = load_config()
+    token = cfg.get("tessie_api_token")
+    if not token:
+        logging.info(
+            "Kein Tessie-Token vorhanden; es wird keine alternative API für battery_temp genutzt."
+        )
+        return None
+
+    try:
+        return _tessie_battery_temp(vid)
+    except Exception as exc:
+        _log_api_error(exc)
     return None
 
 
