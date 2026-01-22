@@ -4444,11 +4444,14 @@ def get_vehicle_state(vehicle_id=None):
 
 
 def _extract_battery_temp(payload):
-    """Return the first ``battery_temp`` field found in a nested payload."""
+    """Gibt die erste gefundene Batterietemperatur aus einem Payload zurück."""
+
+    schluessel = ("battery_temp", "battery_temperature")
 
     if isinstance(payload, dict):
-        if "battery_temp" in payload:
-            return payload.get("battery_temp")
+        for key in schluessel:
+            if key in payload:
+                return payload.get(key)
         for value in payload.values():
             found = _extract_battery_temp(value)
             if found is not None:
@@ -4511,7 +4514,10 @@ def _tessie_battery_temp(vid):
         log_api_data("tessie_status", sanitize(payload), vehicle_id=vid)
     except Exception:
         pass
-    return _extract_battery_temp(payload)
+    battery_temp = _extract_battery_temp(payload)
+    if battery_temp is None:
+        logging.info("Keine Batterietemperatur im Tessie-Status gefunden.")
+    return battery_temp
 
 
 def _fleet_battery_temp(tesla, vehicle, vid):
