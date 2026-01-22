@@ -4446,9 +4446,18 @@ def get_vehicle_state(vehicle_id=None):
 def _extract_battery_temp(payload):
     """Gibt die erste gefundene Batterietemperatur aus einem Payload zurück."""
 
-    schluessel = ("battery_temp", "battery_temperature")
+    schluessel = ("battery_temp", "battery_temperature", "module_temp_min", "module_temp_max")
 
     if isinstance(payload, dict):
+        if "module_temp_min" in payload or "module_temp_max" in payload:
+            temp_min = payload.get("module_temp_min")
+            temp_max = payload.get("module_temp_max")
+            if temp_min is not None and temp_max is not None:
+                return (temp_min + temp_max) / 2
+            if temp_min is not None:
+                return temp_min
+            if temp_max is not None:
+                return temp_max
         for key in schluessel:
             if key in payload:
                 return payload.get(key)
@@ -4505,13 +4514,13 @@ def _tessie_battery_temp(vid):
     if vid is None:
         return None
 
-    url = f"https://api.tessie.com/vehicles/{vid}/status"
+    url = f"https://api.tessie.com/vehicles/{vid}/battery"
     headers = {"Authorization": f"Bearer {token}"}
     resp = requests.get(url, headers=headers, timeout=TESLA_REQUEST_TIMEOUT)
     resp.raise_for_status()
     payload = resp.json()
     try:
-        log_api_data("tessie_status", sanitize(payload), vehicle_id=vid)
+        log_api_data("tessie_battery", sanitize(payload), vehicle_id=vid)
     except Exception:
         pass
     battery_temp = _extract_battery_temp(payload)
