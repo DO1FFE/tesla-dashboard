@@ -543,7 +543,13 @@ function handleData(data) {
     updateV2LInfos(charge, drive);
     updateChargingInfo(charge, data);
     var climate = data.climate_state || {};
-    updateThermometers(climate.inside_temp, climate.outside_temp, charge.battery_temp);
+    updateThermometers(
+        climate.inside_temp,
+        climate.outside_temp,
+        charge.battery_temp,
+        charge.module_temp_min,
+        charge.module_temp_max
+    );
     updateClimateStatus(climate.is_climate_on);
     updateClimateMode(climate.climate_keeper_mode);
     updateCabinProtection(climate.cabin_overheat_protection);
@@ -1005,7 +1011,7 @@ function updateOdometer(value) {
     $('#odometer-value').text(formatted + ' km');
 }
 
-function updateThermometers(inside, outside, battery) {
+function updateThermometers(inside, outside, battery, batteryMin, batteryMax) {
     var range = MAX_TEMP - MIN_TEMP;
     function set(prefix, temp, labelPrefix) {
         var $level = $('#' + prefix + '-level');
@@ -1029,12 +1035,41 @@ function updateThermometers(inside, outside, battery) {
         }
         $level.attr('y', y).attr('height', h).css('fill', color);
         $bulb.css('fill', color);
-        var label = missing ? '-.- °C' : temp.toFixed(1) + ' °C';
-        $label.text(labelPrefix + ': ' + label);
+        if (labelPrefix !== null && labelPrefix !== undefined) {
+            var label = missing ? '-.- °C' : temp.toFixed(1) + ' °C';
+            $label.text(labelPrefix + ': ' + label);
+        }
     }
+
+    function formatTemp(value) {
+        if (value == null || isNaN(value)) {
+            return '-.- °C';
+        }
+        return value.toFixed(1) + ' °C';
+    }
+
+    var minVal = parseNumber(batteryMin);
+    var maxVal = parseNumber(batteryMax);
+    var avgVal = null;
+    if (minVal != null && maxVal != null) {
+        avgVal = (minVal + maxVal) / 2;
+    } else {
+        var baseVal = parseNumber(battery);
+        if (baseVal != null) {
+            avgVal = baseVal;
+        } else if (minVal != null) {
+            avgVal = minVal;
+        } else if (maxVal != null) {
+            avgVal = maxVal;
+        }
+    }
+
     set('inside', inside, 'Innen');
     set('outside', outside, 'Außen');
-    set('battery', battery, 'Batterie');
+    set('battery', avgVal, null);
+
+    $('#battery-temp-min').text('Batterie min: ' + formatTemp(minVal));
+    $('#battery-temp-max').text('Batterie max: ' + formatTemp(maxVal));
 }
 
 function updateBatteryIndicator(level, rangeMiles, chargingState, heaterOn) {
