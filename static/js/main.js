@@ -8,6 +8,7 @@ var announcementTimer = null;
 var lastConfigJSON = null;
 var lastApiInterval = null;
 var lastApiIntervalIdle = null;
+var statusAbfrageTimer = null;
 var parkStartTime = null;
 var currentGear = null;
 var THERMOMETER_IDS = ['thermometer-inside', 'thermometer-outside', 'thermometer-battery'];
@@ -176,6 +177,24 @@ function parseAnnouncements(text) {
         });
     }
     return arr.slice(0, 3);
+}
+
+function istOfflineOderSchlaeft(status) {
+    if (typeof status !== 'string') {
+        return false;
+    }
+    var st = status.toLowerCase();
+    return st === 'offline' || st === 'asleep';
+}
+
+function planeNaechsteStatusabfrage() {
+    if (statusAbfrageTimer) {
+        clearTimeout(statusAbfrageTimer);
+    }
+    var intervall = lastApiIntervalIdle || 30000;
+    statusAbfrageTimer = setTimeout(function() {
+        startStreamIfOnline();
+    }, intervall);
 }
 
 function startAnnouncementCycle() {
@@ -1713,6 +1732,10 @@ function startStream() {
             updateVehicleState(st);
             updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
             updateSoftwareUpdate(resp.software_update);
+            if (istOfflineOderSchlaeft(st)) {
+                planeNaechsteStatusabfrage();
+                return;
+            }
             $.getJSON('/api/data/' + currentVehicle, function(data) {
                 if (data && !data.error) {
                     handleData(data);
@@ -1729,7 +1752,9 @@ function startStream() {
         updateZoomDisplay();
         // Attempt to reconnect after a short delay in case the browser has
         // suspended the connection while running in the background.
-        setTimeout(startStreamIfOnline, 5000);
+        if (!statusAbfrageTimer) {
+            setTimeout(startStreamIfOnline, 5000);
+        }
     };
 }
 
@@ -1737,12 +1762,20 @@ function startStreamIfOnline() {
     if (!currentVehicle) {
         return;
     }
+    if (statusAbfrageTimer) {
+        clearTimeout(statusAbfrageTimer);
+        statusAbfrageTimer = null;
+    }
     showLoading();
     $.getJSON('/api/state/' + currentVehicle, function(resp) {
         var st = resp.state;
         updateVehicleState(st);
         updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
         updateSoftwareUpdate(resp.software_update);
+        if (istOfflineOderSchlaeft(st)) {
+            planeNaechsteStatusabfrage();
+            return;
+        }
         startStream();
         $.getJSON('/api/data/' + currentVehicle, function(data) {
             if (data && !data.error) {
