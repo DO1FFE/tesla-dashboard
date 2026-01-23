@@ -1766,13 +1766,13 @@ function startStreamIfOnline() {
         clearTimeout(statusAbfrageTimer);
         statusAbfrageTimer = null;
     }
-    showLoading();
     $.getJSON('/api/state/' + currentVehicle, function(resp) {
         var st = resp.state;
         updateVehicleState(st);
         updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
         updateSoftwareUpdate(resp.software_update);
         if (istOfflineOderSchlaeft(st)) {
+            hideLoading();
             planeNaechsteStatusabfrage();
             return;
         }
