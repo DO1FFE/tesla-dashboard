@@ -111,6 +111,26 @@ letzte_anfrage_pro_vin = {}
 letzte_batterie_temp_pro_vin = {}
 tessie_anfrage_lock = threading.Lock()
 
+
+def _cache_battery_temp(vin, battery_temp):
+    """Speichere eine gültige Batterietemperatur im Cache."""
+    if vin is None or battery_temp is None:
+        return
+    try:
+        temp_value = float(battery_temp)
+    except (TypeError, ValueError):
+        return
+    with tessie_anfrage_lock:
+        letzte_batterie_temp_pro_vin[vin] = temp_value
+
+
+def _cached_battery_temp(vin):
+    """Lese die letzte Batterietemperatur aus dem Cache."""
+    if vin is None:
+        return None
+    with tessie_anfrage_lock:
+        return letzte_batterie_temp_pro_vin.get(vin)
+
 """Utilities for serving a compatible Socket.IO client script.
 
 ``ensure_socketio_client`` downloads the script into ``static/js`` if it is not
@@ -4891,10 +4911,19 @@ def get_vehicle_data(vehicle_id=None, state=None):
         if not isinstance(charge_state, dict):
             charge_state = {}
             sanitized["charge_state"] = charge_state
-        if "battery_temp" not in charge_state:
+        battery_temp = charge_state.get("battery_temp")
+        if battery_temp is not None:
+            _cache_battery_temp(vin, battery_temp)
+        if battery_temp is None:
             battery_temp = _fetch_battery_temp(tesla, vehicle, vin)
+        if battery_temp is None:
+            battery_temp = _cached_battery_temp(vin)
             if battery_temp is not None:
-                charge_state["battery_temp"] = battery_temp
+                logging.info(
+                    "Nutze gepufferte Batterietemperatur für VIN %s.", vin
+                )
+        if battery_temp is not None:
+            charge_state["battery_temp"] = battery_temp
     except Exception as exc:
         _log_api_error(exc)
     try:
