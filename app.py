@@ -5767,7 +5767,18 @@ def api_version():
 @app.route("/api/clients")
 def api_clients():
     """Return the current number of connected streaming clients."""
-    count = sum(len(v) for v in subscribers.values())
+    now = time.time()
+    count = 0
+    expired = []
+    for ip, data in list(active_clients.items()):
+        last_seen = data.get("last_seen", now)
+        pages = data.get("pages", [])
+        if now - last_seen > CLIENT_TIMEOUT or not pages:
+            expired.append(ip)
+            continue
+        count += 1
+    for ip in expired:
+        active_clients.pop(ip, None)
     return jsonify({"clients": count})
 
 
