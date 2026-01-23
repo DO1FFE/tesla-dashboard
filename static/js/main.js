@@ -18,6 +18,7 @@ var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 18;
 var superchargerMarkers = [];
 var lastSuperchargerData = null;
+var letzteKartenPosition = null;
 
 function normalizeShiftState(shift) {
     if (shift === null || shift === undefined) {
@@ -185,6 +186,18 @@ function istOfflineOderSchlaeft(status) {
     }
     var st = status.toLowerCase();
     return st === 'offline' || st === 'asleep';
+}
+
+function positionIstNeu(lat, lng) {
+    if (!isFinite(lat) || !isFinite(lng)) {
+        return false;
+    }
+    if (!letzteKartenPosition) {
+        return true;
+    }
+    var diffLat = Math.abs(lat - letzteKartenPosition[0]);
+    var diffLng = Math.abs(lng - letzteKartenPosition[1]);
+    return diffLat > 1e-6 || diffLng > 1e-6;
 }
 
 function planeNaechsteStatusabfrage() {
@@ -573,11 +586,15 @@ function handleData(data) {
         alarm = vehicle.alarm_state;
     }
     updateAlarmPopup(alarm);
-    var lat = drive.latitude;
-    var lng = drive.longitude;
+    var lat = Number(drive.latitude);
+    var lng = Number(drive.longitude);
     var slide = false;
-    if (lat && lng) {
-        if (typeof marker.slideTo === 'function') {
+    var offline = istOfflineOderSchlaeft(data.state);
+    if (isFinite(lat) && isFinite(lng)) {
+        var coordsNeu = positionIstNeu(lat, lng);
+        if (offline) {
+            marker.setLatLng([lat, lng]);
+        } else if (typeof marker.slideTo === 'function') {
             marker.slideTo([lat, lng], {duration: 1000});
             slide = true;
         } else {
@@ -591,15 +608,22 @@ function handleData(data) {
         if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
             zoom = map.getZoom();
         }
-        zoomSetByApp = true;
-        map.flyTo([lat, lng], zoom);
-        updateZoomDisplay();
+        if (!offline || coordsNeu || !letzteKartenPosition) {
+            zoomSetByApp = true;
+            if (offline) {
+                map.setView([lat, lng], zoom, {animate: false});
+            } else {
+                map.flyTo([lat, lng], zoom);
+            }
+            updateZoomDisplay();
+        }
         if (typeof drive.heading === 'number') {
             var displayHeading = adjustHeadingForReverse(drive.heading, drive.shift_state);
             marker.setRotationAngle(displayHeading);
         }
-    } else {
-        // Fall back to Essen if no coordinates are available
+        letzteKartenPosition = [lat, lng];
+    } else if (!letzteKartenPosition && !offline) {
+        // Auf Standardposition zurücksetzen, wenn keine Koordinaten vorliegen
         var zoom = DEFAULT_ZOOM;
         if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
             zoom = map.getZoom();
