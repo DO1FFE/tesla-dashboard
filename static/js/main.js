@@ -1031,6 +1031,11 @@ function updateOdometer(value) {
 
 function updateThermometers(inside, outside, battery) {
     var range = MAX_TEMP - MIN_TEMP;
+    if (battery != null && !isNaN(battery)) {
+        letzteBatterieTemperatur = battery;
+    } else if (letzteBatterieTemperatur != null) {
+        battery = letzteBatterieTemperatur;
+    }
     function set(prefix, temp, labelPrefix) {
         var $level = $('#' + prefix + '-level');
         var $bulb = $('#' + prefix + '-bulb');
@@ -1094,6 +1099,7 @@ var letzteLadedauerMs = null;
 var letzterLadezuwachsProzent = null;
 var lastChargeSessionStartMs = null;
 var lastChargingState = null;
+var letzteBatterieTemperatur = null;
 
 function parseNumber(value) {
     if (value == null || value === '') {
