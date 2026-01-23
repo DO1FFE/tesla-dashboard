@@ -4316,12 +4316,20 @@ def sanitize(data):
     return data
 
 
-def _cached_vehicle_list(tesla, ttl=86400):
-    """Return vehicle list with basic time-based caching."""
+def _cached_vehicle_list(tesla, ttl=86400, allow_refresh=True):
+    """Gibt die Fahrzeugliste mit einfachem Zeit-Cache zurück."""
     global _vehicle_list_cache, _vehicle_list_cache_ts, _default_vehicle_id
     now = time.time()
     with _vehicle_list_lock:
-        if not _vehicle_list_cache or now - _vehicle_list_cache_ts > ttl:
+        cache_stale = now - _vehicle_list_cache_ts > ttl
+        if not _vehicle_list_cache:
+            # Ohne Cache ist ein einmaliger Abruf nötig, damit eine Auswahl möglich bleibt.
+            needs_refresh = True
+        elif cache_stale and allow_refresh:
+            needs_refresh = True
+        else:
+            needs_refresh = False
+        if needs_refresh:
             try:
                 _vehicle_list_cache = tesla.vehicle_list()
                 _vehicle_list_cache_ts = now
@@ -4418,7 +4426,8 @@ def get_vehicle_state(vehicle_id=None):
     if tesla is None:
         return {"error": "Missing Tesla credentials or teslapy not installed"}
 
-    vehicles = _cached_vehicle_list(tesla)
+    allow_refresh = not (state in {"offline", "asleep"} and not occupant_present)
+    vehicles = _cached_vehicle_list(tesla, allow_refresh=allow_refresh)
     if not vehicles:
         return {"error": "No vehicles found"}
 
