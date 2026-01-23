@@ -1734,6 +1734,11 @@ function startStream() {
             updateSoftwareUpdate(resp.software_update);
             if (istOfflineOderSchlaeft(st)) {
                 planeNaechsteStatusabfrage();
+                $.getJSON('/api/data/' + currentVehicle, function(data) {
+                    if (data && !data.error) {
+                        handleData(data);
+                    }
+                });
                 return;
             }
             $.getJSON('/api/data/' + currentVehicle, function(data) {
@@ -1774,6 +1779,11 @@ function startStreamIfOnline() {
         updateSoftwareUpdate(resp.software_update);
         if (istOfflineOderSchlaeft(st)) {
             planeNaechsteStatusabfrage();
+            $.getJSON('/api/data/' + currentVehicle, function(data) {
+                if (data && !data.error) {
+                    handleData(data);
+                }
+            });
             return;
         }
         startStream();
