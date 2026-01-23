@@ -106,6 +106,10 @@ GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
 TESLA_REQUEST_TIMEOUT = float(os.getenv("TESLA_REQUEST_TIMEOUT", "5"))
 CLIENT_TIMEOUT = int(os.getenv("CLIENT_TIMEOUT", "60"))
 SECRET_PLACEHOLDER = "********"
+TESLA_TESSIE_MIN_INTERVAL = 5
+letzte_anfrage_pro_vin = {}
+letzte_batterie_temp_pro_vin = {}
+tessie_anfrage_lock = threading.Lock()
 
 """Utilities for serving a compatible Socket.IO client script.
 
@@ -4525,7 +4529,22 @@ def _tessie_battery_temp(vin):
 
     url = f"https://api.tessie.com/{vin}/battery"
     headers = {"Authorization": f"Bearer {token}"}
-    resp = requests.get(url, headers=headers, timeout=TESLA_REQUEST_TIMEOUT)
+    with tessie_anfrage_lock:
+        jetzt = time.monotonic()
+        letzte_anfrage = letzte_anfrage_pro_vin.get(vin)
+        if letzte_anfrage is not None:
+            verbleibend = TESLA_TESSIE_MIN_INTERVAL - (jetzt - letzte_anfrage)
+            if verbleibend > 0:
+                logging.info(
+                    "Tessie-Abfrage für VIN %s wird um %.1f Sekunden verzögert.",
+                    vin,
+                    verbleibend,
+                )
+                time.sleep(verbleibend)
+        try:
+            resp = requests.get(url, headers=headers, timeout=TESLA_REQUEST_TIMEOUT)
+        finally:
+            letzte_anfrage_pro_vin[vin] = time.monotonic()
     resp.raise_for_status()
     payload = resp.json()
     try:
@@ -4534,7 +4553,17 @@ def _tessie_battery_temp(vin):
         pass
     battery_temp = _extract_battery_temp(payload)
     if battery_temp is None:
+        with tessie_anfrage_lock:
+            letzte_bekannte_temp = letzte_batterie_temp_pro_vin.get(vin)
+        if letzte_bekannte_temp is not None:
+            logging.info(
+                "Keine aktuelle Batterietemperatur im Tessie-Status; nutze letzten Wert."
+            )
+            return letzte_bekannte_temp
         logging.info("Keine Batterietemperatur im Tessie-Status gefunden.")
+        return None
+    with tessie_anfrage_lock:
+        letzte_batterie_temp_pro_vin[vin] = battery_temp
     return battery_temp
 
 
@@ -4611,6 +4640,13 @@ def _fetch_battery_temp(tesla, vehicle, vin):
         return _tessie_battery_temp(vin)
     except Exception as exc:
         _log_api_error(exc)
+        with tessie_anfrage_lock:
+            letzte_bekannte_temp = letzte_batterie_temp_pro_vin.get(vin)
+        if letzte_bekannte_temp is not None:
+            logging.info(
+                "Tessie-Abfrage fehlgeschlagen; nutze zuletzt bekannte Batterietemperatur."
+            )
+            return letzte_bekannte_temp
     return None
 
 
