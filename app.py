@@ -106,6 +106,9 @@ GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
 TESLA_REQUEST_TIMEOUT = float(os.getenv("TESLA_REQUEST_TIMEOUT", "5"))
 CLIENT_TIMEOUT = int(os.getenv("CLIENT_TIMEOUT", "60"))
 SECRET_PLACEHOLDER = "********"
+TESLA_TESSIE_MIN_INTERVAL = 5
+letzte_anfrage_pro_vin = {}
+tessie_anfrage_lock = threading.Lock()
 
 """Utilities for serving a compatible Socket.IO client script.
 
@@ -4525,7 +4528,22 @@ def _tessie_battery_temp(vin):
 
     url = f"https://api.tessie.com/{vin}/battery"
     headers = {"Authorization": f"Bearer {token}"}
-    resp = requests.get(url, headers=headers, timeout=TESLA_REQUEST_TIMEOUT)
+    with tessie_anfrage_lock:
+        jetzt = time.monotonic()
+        letzte_anfrage = letzte_anfrage_pro_vin.get(vin)
+        if letzte_anfrage is not None:
+            verbleibend = TESLA_TESSIE_MIN_INTERVAL - (jetzt - letzte_anfrage)
+            if verbleibend > 0:
+                logging.info(
+                    "Tessie-Abfrage für VIN %s wird um %.1f Sekunden verzögert.",
+                    vin,
+                    verbleibend,
+                )
+                time.sleep(verbleibend)
+        try:
+            resp = requests.get(url, headers=headers, timeout=TESLA_REQUEST_TIMEOUT)
+        finally:
+            letzte_anfrage_pro_vin[vin] = time.monotonic()
     resp.raise_for_status()
     payload = resp.json()
     try:
