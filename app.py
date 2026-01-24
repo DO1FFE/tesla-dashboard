@@ -109,8 +109,6 @@ SECRET_PLACEHOLDER = "********"
 TESLA_TESSIE_MIN_INTERVAL = 5
 letzte_anfrage_pro_vin = {}
 letzte_batterie_temp_pro_vin = {}
-letzte_wetterdaten_pro_vin = {}
-letzte_firmware_alerts_pro_vin = {}
 tessie_anfrage_lock = threading.Lock()
 
 
@@ -132,49 +130,6 @@ def _cached_battery_temp(vin):
         return None
     with tessie_anfrage_lock:
         return letzte_batterie_temp_pro_vin.get(vin)
-
-
-def _cache_tessie_wetter(vin, daten):
-    """Speichere gültige Tessie-Wetterdaten im Cache."""
-    if vin is None or daten is None:
-        return
-    with tessie_anfrage_lock:
-        letzte_wetterdaten_pro_vin[vin] = daten
-
-
-def _cached_tessie_wetter(vin):
-    """Lese die letzten Tessie-Wetterdaten aus dem Cache."""
-    if vin is None:
-        return None
-    with tessie_anfrage_lock:
-        return letzte_wetterdaten_pro_vin.get(vin)
-
-
-def _cache_tessie_firmware_alerts(vin, alerts):
-    """Speichere gültige Tessie-Firmware-Alerts im Cache."""
-    if vin is None or alerts is None:
-        return
-    with tessie_anfrage_lock:
-        letzte_firmware_alerts_pro_vin[vin] = alerts
-
-
-def _cached_tessie_firmware_alerts(vin):
-    """Lese die letzten Tessie-Firmware-Alerts aus dem Cache."""
-    if vin is None:
-        return None
-    with tessie_anfrage_lock:
-        return letzte_firmware_alerts_pro_vin.get(vin)
-
-
-def _ensure_tessie_felder(payload):
-    """Stelle sicher, dass Tessie-Felder im Payload vorhanden sind."""
-    if not isinstance(payload, dict):
-        return payload
-    payload.setdefault("weather", None)
-    firmware_alerts = payload.get("firmware_alerts")
-    if not isinstance(firmware_alerts, list):
-        payload["firmware_alerts"] = []
-    return payload
 
 """Utilities for serving a compatible Socket.IO client script.
 
@@ -1024,8 +979,6 @@ CONFIG_ITEMS = [
     {"id": "park-since", "desc": "Parkdauer"},
     {"id": "sms-form", "desc": "SMS-Formular"},
     {"id": "supercharger-list", "desc": "Supercharger in der Nähe"},
-    {"id": "weather-box", "desc": "Wetter"},
-    {"id": "firmware-alerts", "desc": "Firmware-Warnungen"},
 ]
 
 
@@ -4634,97 +4587,6 @@ def _tessie_battery_temp(vin):
     return battery_temp
 
 
-def _tessie_weather(vin):
-    """Hole Wetterdaten über die Tessie-API."""
-
-    cfg = load_config()
-    token = cfg.get("tessie_api_token")
-    if not token:
-        return None
-    if vin is None:
-        return None
-
-    url = f"https://api.tessie.com/{vin}/weather"
-    headers = {"Authorization": f"Bearer {token}"}
-    with tessie_anfrage_lock:
-        jetzt = time.monotonic()
-        letzte_anfrage = letzte_anfrage_pro_vin.get(vin)
-        if letzte_anfrage is not None:
-            verbleibend = TESLA_TESSIE_MIN_INTERVAL - (jetzt - letzte_anfrage)
-            if verbleibend > 0:
-                logging.info(
-                    "Tessie-Abfrage für VIN %s wird um %.1f Sekunden verzögert.",
-                    vin,
-                    verbleibend,
-                )
-                time.sleep(verbleibend)
-        try:
-            resp = requests.get(url, headers=headers, timeout=TESLA_REQUEST_TIMEOUT)
-        finally:
-            letzte_anfrage_pro_vin[vin] = time.monotonic()
-    resp.raise_for_status()
-    payload = resp.json()
-    sanitized_payload = sanitize(payload)
-    try:
-        log_api_data("tessie_weather", sanitized_payload, vehicle_id=vin)
-    except Exception:
-        pass
-    _cache_tessie_wetter(vin, sanitized_payload)
-    return sanitized_payload
-
-
-def _tessie_firmware_alerts(vin):
-    """Hole Firmware-Alerts über die Tessie-API."""
-
-    cfg = load_config()
-    token = cfg.get("tessie_api_token")
-    if not token:
-        return None
-    if vin is None:
-        return None
-
-    url = f"https://api.tessie.com/{vin}/firmware_alerts"
-    headers = {"Authorization": f"Bearer {token}"}
-    with tessie_anfrage_lock:
-        jetzt = time.monotonic()
-        letzte_anfrage = letzte_anfrage_pro_vin.get(vin)
-        if letzte_anfrage is not None:
-            verbleibend = TESLA_TESSIE_MIN_INTERVAL - (jetzt - letzte_anfrage)
-            if verbleibend > 0:
-                logging.info(
-                    "Tessie-Abfrage für VIN %s wird um %.1f Sekunden verzögert.",
-                    vin,
-                    verbleibend,
-                )
-                time.sleep(verbleibend)
-        try:
-            resp = requests.get(url, headers=headers, timeout=TESLA_REQUEST_TIMEOUT)
-        finally:
-            letzte_anfrage_pro_vin[vin] = time.monotonic()
-    resp.raise_for_status()
-    payload = resp.json()
-    sanitized_payload = sanitize(payload)
-    try:
-        log_api_data("tessie_firmware_alerts", sanitized_payload, vehicle_id=vin)
-    except Exception:
-        pass
-
-    alerts = sanitized_payload
-    if isinstance(sanitized_payload, dict):
-        possible_alerts = sanitized_payload.get("alerts")
-        if possible_alerts is None:
-            possible_alerts = sanitized_payload.get("firmware_alerts")
-        if isinstance(possible_alerts, list):
-            alerts = possible_alerts
-        else:
-            alerts = []
-    elif not isinstance(alerts, list):
-        alerts = []
-
-    _cache_tessie_firmware_alerts(vin, alerts)
-    return alerts
-
-
 def _fleet_battery_temp(tesla, vehicle, vid):
     """Fetch battery temperature via Fleet API when configured."""
 
@@ -5044,41 +4906,6 @@ def get_vehicle_data(vehicle_id=None, state=None):
     track_drive_path(vehicle_data)
     sanitized = sanitize(vehicle_data)
     sanitized["state"] = state
-    try:
-        cfg = load_config()
-        tessie_token = cfg.get("tessie_api_token")
-        wetterdaten = None
-        firmware_alerts = []
-        if tessie_token and vin:
-            try:
-                wetterdaten = _tessie_weather(vin)
-            except Exception as exc:
-                _log_api_error(exc)
-                wetterdaten = _cached_tessie_wetter(vin)
-                if wetterdaten is not None:
-                    logging.info(
-                        "Tessie-Wetterdaten nicht verfügbar; nutze letzten Cache-Wert."
-                    )
-            try:
-                firmware_alerts = _tessie_firmware_alerts(vin)
-            except Exception as exc:
-                _log_api_error(exc)
-                firmware_alerts = _cached_tessie_firmware_alerts(vin)
-                if firmware_alerts is not None:
-                    logging.info(
-                        "Tessie-Firmware-Alerts nicht verfügbar; nutze letzten Cache-Wert."
-                    )
-        if wetterdaten is None:
-            sanitized["weather"] = None
-        else:
-            sanitized["weather"] = wetterdaten
-        if not isinstance(firmware_alerts, list):
-            firmware_alerts = []
-        sanitized["firmware_alerts"] = firmware_alerts
-    except Exception as exc:
-        _log_api_error(exc)
-        sanitized.setdefault("weather", None)
-        sanitized.setdefault("firmware_alerts", [])
     try:
         charge_state = sanitized.get("charge_state")
         if not isinstance(charge_state, dict):
@@ -5572,13 +5399,7 @@ def _fetch_data_once(vehicle_id="default"):
 
     if isinstance(data, dict):
         data["_live"] = live
-    response_data = data
-    if isinstance(data, dict) and not live:
-        response_data = dict(data)
-        _ensure_tessie_felder(response_data)
-    elif isinstance(data, dict):
-        _ensure_tessie_felder(response_data)
-    latest_data[cache_id] = response_data
+    latest_data[cache_id] = data
     if isinstance(data, dict):
         try:
             cached_copy = dict(data)
@@ -5587,8 +5408,8 @@ def _fetch_data_once(vehicle_id="default"):
         except Exception:
             pass
         for q in subscribers.get(cache_id, []):
-            q.put(response_data)
-    return response_data
+            q.put(data)
+    return data
 
 
 def _sleep_idle(seconds):
