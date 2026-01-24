@@ -141,7 +141,9 @@ var TOGGLE_DEFAULTS = {
     'loading-msg': true,
     'park-since': true,
     'sms-form': true,
-    'supercharger-list': true
+    'supercharger-list': true,
+    'weather-box': true,
+    'firmware-alerts': true
 };
 
 function applyThermometerCompatibility(cfg) {
@@ -481,6 +483,149 @@ function updateSuperchargerList(data) {
     });
 }
 
+function formatZahl(value, digits) {
+    var num = Number(value);
+    if (!isFinite(num)) {
+        return null;
+    }
+    return num.toLocaleString('de-DE', {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits
+    });
+}
+
+function formatWetterWind(speed, direction) {
+    var speedText = formatZahl(speed, 1);
+    var dirNum = Number(direction);
+    var hasDir = isFinite(dirNum);
+    if (!speedText && !hasDir) {
+        return null;
+    }
+    if (speedText && hasDir) {
+        return speedText + ' m/s (' + dirNum.toFixed(0) + '°)';
+    }
+    if (speedText) {
+        return speedText + ' m/s';
+    }
+    return dirNum.toFixed(0) + '°';
+}
+
+function formatZeitstempel(value) {
+    var num = Number(value);
+    if (!isFinite(num)) {
+        return null;
+    }
+    var ms = num;
+    if (num < 1e12) {
+        ms = num * 1000;
+    }
+    var datum = new Date(ms);
+    if (isNaN(datum.getTime())) {
+        return null;
+    }
+    return datum.toLocaleString('de-DE', {
+        dateStyle: 'medium',
+        timeStyle: 'short'
+    });
+}
+
+function updateWeather(weather) {
+    var $list = $('#weather-items');
+    if (!$list.length) {
+        return;
+    }
+    $list.empty();
+    if (!weather || typeof weather !== 'object') {
+        $list.append($('<li class="empty">').text('Keine Wetterdaten verfügbar.'));
+        return;
+    }
+    var temperatur = formatZahl(weather.temperature, 1);
+    var gefuehlt = formatZahl(weather.feels_like, 1);
+    var windText = formatWetterWind(weather.wind_speed, weather.wind_direction);
+    var feuchte = formatZahl(weather.humidity, 0);
+    var niederschlag = null;
+    if (weather.precipitation != null) {
+        var niederschlagWert = formatZahl(weather.precipitation, 1);
+        if (niederschlagWert) {
+            niederschlag = niederschlagWert + ' mm';
+        }
+    }
+    var bedingung = weather.condition ? String(weather.condition) : null;
+    var items = [
+        {label: 'Temperatur', value: temperatur ? temperatur + ' °C' : 'k. A.'},
+        {label: 'Gefühlt', value: gefuehlt ? gefuehlt + ' °C' : 'k. A.'},
+        {label: 'Wind', value: windText || 'k. A.'},
+        {label: 'Luftfeuchte', value: feuchte ? feuchte + ' %' : 'k. A.'},
+        {label: 'Niederschlag', value: niederschlag || 'k. A.'},
+        {label: 'Bedingung', value: bedingung || 'k. A.'}
+    ];
+    items.forEach(function(item) {
+        var $li = $('<li>');
+        var $row = $('<div class="row">');
+        $row.append($('<span class="name">').text(item.label));
+        $row.append($('<span class="meta">').text(item.value));
+        $li.append($row);
+        $list.append($li);
+    });
+}
+
+function translateWert(value, map, fallback) {
+    if (value == null || value === '') {
+        return fallback;
+    }
+    var key = String(value).toLowerCase();
+    return map[key] || String(value);
+}
+
+function updateFirmwareAlerts(alerts) {
+    var $list = $('#firmware-alert-items');
+    if (!$list.length) {
+        return;
+    }
+    $list.empty();
+    if (!Array.isArray(alerts) || !alerts.length) {
+        $list.append($('<li class="empty">').text('Keine Firmware-Warnungen.'));
+        return;
+    }
+    var severityMap = {
+        critical: 'Kritisch',
+        high: 'Hoch',
+        medium: 'Mittel',
+        low: 'Niedrig',
+        info: 'Info'
+    };
+    var statusMap = {
+        open: 'Offen',
+        active: 'Aktiv',
+        resolved: 'Behoben',
+        closed: 'Geschlossen',
+        acknowledged: 'Bestätigt'
+    };
+    alerts.forEach(function(alert) {
+        if (!alert) {
+            return;
+        }
+        var name = alert.name || 'Firmware-Warnung';
+        var severity = translateWert(alert.severity, severityMap, 'Unbekannt');
+        var status = translateWert(alert.status, statusMap, 'Unbekannt');
+        var datum = formatZeitstempel(alert.timestamp) || 'Unbekannt';
+        var metaParts = [
+            'Schweregrad: ' + severity,
+            'Status: ' + status,
+            'Datum: ' + datum
+        ];
+        var $li = $('<li>');
+        var $row = $('<div class="row">');
+        $row.append($('<span class="name">').text(name));
+        $row.append($('<span class="meta">').text(metaParts.join(' · ')));
+        $li.append($row);
+        if (alert.description) {
+            $li.append($('<div class="description">').text(String(alert.description)));
+        }
+        $list.append($li);
+    });
+}
+
 function updateHeader(data) {
     var info = '';
     if (data) {
@@ -642,6 +787,8 @@ function handleData(data) {
         $('#address-error').hide();
     }
     updateSuperchargerList(data);
+    updateWeather(data.weather);
+    updateFirmwareAlerts(data.firmware_alerts);
 
     // Show destination flag and route line if navigation is active
     if (drive.active_route_destination && drive.active_route_latitude && drive.active_route_longitude) {

@@ -272,6 +272,97 @@ select {
   color: #bbb;
 }
 
+#weather-box,
+#firmware-alerts {
+  display: block;
+  width: 100%;
+  margin: 10px 0;
+  padding: 10px;
+  background: var(--surface-color);
+  border: 1px solid #444;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  box-sizing: border-box;
+}
+
+#weather-box h3,
+#firmware-alerts h3 {
+  margin-top: 0;
+  margin-bottom: 8px;
+  font-size: 1.05em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#weather-box h3::before {
+  content: "🌦️";
+  color: var(--accent-color);
+}
+
+#firmware-alerts h3::before {
+  content: "⚠️";
+  color: var(--accent-color);
+}
+
+#weather-box ul,
+#firmware-alerts ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+#weather-box li,
+#firmware-alerts li {
+  background: var(--surface-color);
+  border: 1px solid #555;
+  border-radius: 6px;
+  padding: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+#weather-box li .row,
+#firmware-alerts li .row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#weather-box li .name,
+#firmware-alerts li .name {
+  font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#weather-box li .meta,
+#firmware-alerts li .meta {
+  font-size: 0.9em;
+  color: #ccc;
+  flex: 0 0 auto;
+  text-align: right;
+  white-space: nowrap;
+}
+
+#firmware-alerts li .description {
+  margin-top: 6px;
+  font-size: 0.9em;
+  color: #cfcfcf;
+}
+
+#weather-box li.empty,
+#firmware-alerts li.empty {
+  border-style: dashed;
+  text-align: center;
+  color: #bbb;
+}
+
 #location-address {
   position: absolute;
   left: 50%;
