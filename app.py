@@ -1024,6 +1024,8 @@ CONFIG_ITEMS = [
     {"id": "park-since", "desc": "Parkdauer"},
     {"id": "sms-form", "desc": "SMS-Formular"},
     {"id": "supercharger-list", "desc": "Supercharger in der Nähe"},
+    {"id": "weather-box", "desc": "Wetter"},
+    {"id": "firmware-alerts", "desc": "Firmware-Warnungen"},
 ]
 
 
