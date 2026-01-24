@@ -1454,36 +1454,12 @@ function updateChargingInfo(charge, wurzelDaten) {
             lastChargeAddedPercentText = lastChargeAddedPercentText + '%';
         }
     }
-    var letzterStartSocQuelle = charge ? charge.starting_battery : null;
-    if (letzterStartSocQuelle == null && lastChargeInfo) {
-        letzterStartSocQuelle = lastChargeInfo.starting_battery;
-    }
-    if (letzterStartSocQuelle == null && wurzelDaten) {
-        letzterStartSocQuelle = wurzelDaten.starting_battery;
-    }
-    if (letzterStartSocQuelle == null && charge) {
-        letzterStartSocQuelle = charge.last_charge_start_soc;
-    }
-    if (letzterStartSocQuelle == null && lastChargeInfo) {
-        letzterStartSocQuelle = lastChargeInfo.last_charge_start_soc;
-    }
+    var letzterStartSocQuelle = charge ? charge.last_charge_start_soc : null;
     if (letzterStartSocQuelle == null && wurzelDaten) {
         letzterStartSocQuelle = wurzelDaten.last_charge_start_soc;
     }
     lastChargeStartSoc = parseNumber(letzterStartSocQuelle);
-    var letzterEndSocQuelle = charge ? charge.ending_battery : null;
-    if (letzterEndSocQuelle == null && lastChargeInfo) {
-        letzterEndSocQuelle = lastChargeInfo.ending_battery;
-    }
-    if (letzterEndSocQuelle == null && wurzelDaten) {
-        letzterEndSocQuelle = wurzelDaten.ending_battery;
-    }
-    if (letzterEndSocQuelle == null && charge) {
-        letzterEndSocQuelle = charge.last_charge_end_soc;
-    }
-    if (letzterEndSocQuelle == null && lastChargeInfo) {
-        letzterEndSocQuelle = lastChargeInfo.last_charge_end_soc;
-    }
+    var letzterEndSocQuelle = charge ? charge.last_charge_end_soc : null;
     if (letzterEndSocQuelle == null && wurzelDaten) {
         letzterEndSocQuelle = wurzelDaten.last_charge_end_soc;
     }
