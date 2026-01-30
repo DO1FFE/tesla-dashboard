@@ -1232,6 +1232,9 @@ function updateChargingInfo(charge, wurzelDaten) {
     }
 
     var showFull = false;
+    var startSoc = null;
+    var currentSoc = null;
+    var berechneterZuwachsProzent = null;
     if (state === 'Charging') {
         showFull = true;
     } else if (lastChargeStop && now - lastChargeStop <= 600000) {
@@ -1253,11 +1256,11 @@ function updateChargingInfo(charge, wurzelDaten) {
         var sessionStartMs = parseChargeSessionStart(sessionStartRaw);
         durationText = formatChargeDuration(sessionStartMs != null ? now - sessionStartMs : null);
 
-        var startSoc = parseNumber(charge ? charge.charge_session_start_soc : null);
+        startSoc = parseNumber(charge ? charge.charge_session_start_soc : null);
         if (startSoc == null && lastChargeInfo) {
             startSoc = parseNumber(lastChargeInfo.charge_session_start_soc);
         }
-        var currentSoc = parseNumber(charge ? charge.battery_level : null);
+        currentSoc = parseNumber(charge ? charge.battery_level : null);
         if (currentSoc == null && charge) {
             currentSoc = parseNumber(charge.usable_battery_level);
         }
@@ -1267,7 +1270,6 @@ function updateChargingInfo(charge, wurzelDaten) {
                 currentSoc = parseNumber(lastChargeInfo.usable_battery_level);
             }
         }
-        var berechneterZuwachsProzent = null;
         if (startSoc != null && currentSoc != null) {
             berechneterZuwachsProzent = currentSoc - startSoc;
             addedPercentText = formatPercentDelta(berechneterZuwachsProzent);
@@ -1285,10 +1287,13 @@ function updateChargingInfo(charge, wurzelDaten) {
     if (letzterLadezuwachsQuelle == null && wurzelDaten) {
         letzterLadezuwachsQuelle = wurzelDaten.last_charge_added_percent;
     }
+    var letzteLadezuwachsQuelleTyp = null;
     if (letzterLadezuwachsQuelle != null && !isNaN(letzterLadezuwachsQuelle)) {
         letzterLadezuwachsProzent = Number(letzterLadezuwachsQuelle);
-    } else if (typeof berechneterZuwachsProzent !== 'undefined' && berechneterZuwachsProzent != null) {
+        letzteLadezuwachsQuelleTyp = 'letzte_session';
+    } else if (berechneterZuwachsProzent != null) {
         letzterLadezuwachsProzent = berechneterZuwachsProzent;
+        letzteLadezuwachsQuelleTyp = 'aktuelle_session';
     }
     if (letzteLadedauerMs != null) {
         lastChargeDurationText = formatChargeDuration(letzteLadedauerMs);
@@ -1307,16 +1312,21 @@ function updateChargingInfo(charge, wurzelDaten) {
             lastChargeAddedPercentText = lastChargeAddedPercentText + '%';
         }
     }
-    var letzterStartSocQuelle = charge ? charge.last_charge_start_soc : null;
-    if (letzterStartSocQuelle == null && wurzelDaten) {
-        letzterStartSocQuelle = wurzelDaten.last_charge_start_soc;
+    if (letzteLadezuwachsQuelleTyp === 'letzte_session') {
+        var letzterStartSocQuelle = charge ? charge.last_charge_start_soc : null;
+        if (letzterStartSocQuelle == null && wurzelDaten) {
+            letzterStartSocQuelle = wurzelDaten.last_charge_start_soc;
+        }
+        lastChargeStartSoc = parseNumber(letzterStartSocQuelle);
+        var letzterEndSocQuelle = charge ? charge.last_charge_end_soc : null;
+        if (letzterEndSocQuelle == null && wurzelDaten) {
+            letzterEndSocQuelle = wurzelDaten.last_charge_end_soc;
+        }
+        lastChargeEndSoc = parseNumber(letzterEndSocQuelle);
+    } else if (letzteLadezuwachsQuelleTyp === 'aktuelle_session') {
+        lastChargeStartSoc = parseNumber(startSoc);
+        lastChargeEndSoc = parseNumber(currentSoc);
     }
-    lastChargeStartSoc = parseNumber(letzterStartSocQuelle);
-    var letzterEndSocQuelle = charge ? charge.last_charge_end_soc : null;
-    if (letzterEndSocQuelle == null && wurzelDaten) {
-        letzterEndSocQuelle = wurzelDaten.last_charge_end_soc;
-    }
-    lastChargeEndSoc = parseNumber(letzterEndSocQuelle);
     var lastChargeSocText = null;
     if (lastChargeStartSoc != null && lastChargeEndSoc != null) {
         var startSocText = Math.round(lastChargeStartSoc).toFixed(0);
