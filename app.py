@@ -2892,6 +2892,39 @@ def _save_session_last_soc(vehicle_id, last_soc):
         pass
 
 
+def _parse_charge_session_start(start_value):
+    """Parse den Startzeitpunkt der Ladesession aus Fahrzeugdaten."""
+    if start_value is None:
+        return None
+    if isinstance(start_value, datetime):
+        if start_value.tzinfo is None:
+            return start_value.replace(tzinfo=LOCAL_TZ)
+        return start_value.astimezone(LOCAL_TZ)
+    if isinstance(start_value, (int, float)):
+        try:
+            timestamp = float(start_value)
+        except (TypeError, ValueError):
+            return None
+        if timestamp > 1_000_000_000_000:
+            timestamp /= 1000.0
+        try:
+            return datetime.fromtimestamp(timestamp, LOCAL_TZ)
+        except Exception:
+            return None
+    if isinstance(start_value, str):
+        candidate = start_value.strip()
+        if candidate.endswith("Z"):
+            candidate = candidate[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(candidate)
+        except Exception:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=LOCAL_TZ)
+        return parsed.astimezone(LOCAL_TZ)
+    return None
+
+
 def _start_charging_session(vehicle_id, start_dt, charge_state):
     """Setze Startzeit und Start-SOC für eine neue Ladesession."""
     if start_dt is None:
@@ -5156,6 +5189,29 @@ def _fetch_data_once(vehicle_id="default"):
         session_last_soc = _charging_session_last_soc.get(cache_id)
         if session_last_soc is None:
             session_last_soc = _load_session_last_soc(cache_id)
+
+        charge_session_start = _parse_charge_session_start(
+            charge.get("charge_session_start")
+        )
+        charge_session_start_soc = _normalize_charge_soc(
+            charge.get("charge_session_start_soc")
+        )
+
+        if (
+            charge_session_start is not None
+            and charge_session_start != session_start
+        ):
+            _clear_session_start(cache_id)
+            session_start = charge_session_start
+            session_start_soc = _start_charging_session(
+                cache_id, session_start, charge
+            )
+        if (
+            charge_session_start_soc is not None
+            and charge_session_start_soc != session_start_soc
+        ):
+            session_start_soc = charge_session_start_soc
+            _save_session_start_soc(cache_id, session_start_soc)
 
         if (
             charging_state in ("Charging", "Starting")
