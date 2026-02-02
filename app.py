@@ -5179,6 +5179,7 @@ def _fetch_data_once(vehicle_id="default"):
         saved_start_soc = last_start_soc
         saved_end_soc = last_end_soc
         now = datetime.now(LOCAL_TZ)
+        new_session_started = False
 
         session_start = _charging_session_start.get(cache_id)
         if session_start is None:
@@ -5206,6 +5207,7 @@ def _fetch_data_once(vehicle_id="default"):
             session_start_soc = _start_charging_session(
                 cache_id, session_start, charge
             )
+            new_session_started = True
         if (
             charge_session_start_soc is not None
             and charge_session_start_soc != session_start_soc
@@ -5221,6 +5223,7 @@ def _fetch_data_once(vehicle_id="default"):
             session_start_soc = _start_charging_session(
                 cache_id, session_start, charge
             )
+            new_session_started = True
         if (
             charging_state in ("Charging", "Starting")
             and session_start is not None
@@ -5229,8 +5232,6 @@ def _fetch_data_once(vehicle_id="default"):
         ):
             session_start_soc = current_soc
             _save_session_start_soc(cache_id, current_soc)
-            _save_last_charge_start_soc(cache_id, current_soc)
-            saved_start_soc = current_soc
             _save_session_last_soc(cache_id, current_soc)
             session_last_soc = current_soc
         if charging_state in ("Charging", "Starting") and current_soc is not None:
@@ -5275,6 +5276,7 @@ def _fetch_data_once(vehicle_id="default"):
                         session_start_soc = _start_charging_session(
                             cache_id, session_start, charge
                         )
+                        new_session_started = True
                 else:
                     # Während aktivem Laden keinen Session-Reset erzwingen.
                     val = last_val
@@ -5365,6 +5367,7 @@ def _fetch_data_once(vehicle_id="default"):
             session_start_soc = _start_charging_session(
                 cache_id, session_start, charge
             )
+            new_session_started = True
 
         if saved_val is not None:
             data["last_charge_energy_added"] = saved_val
@@ -5396,18 +5399,28 @@ def _fetch_data_once(vehicle_id="default"):
             if live_added_percent is not None:
                 added_percent_value = live_added_percent
 
-        if duration_value is not None:
-            data["last_charge_duration_s"] = duration_value
-            charge["last_charge_duration_s"] = duration_value
-        if added_percent_value is not None:
-            data["last_charge_added_percent"] = added_percent_value
-            charge["last_charge_added_percent"] = added_percent_value
-        if saved_start_soc is not None:
-            data["last_charge_start_soc"] = saved_start_soc
-            charge["last_charge_start_soc"] = saved_start_soc
-        if saved_end_soc is not None:
-            data["last_charge_end_soc"] = saved_end_soc
-            charge["last_charge_end_soc"] = saved_end_soc
+        if new_session_started and isinstance(charge, dict):
+            for feld in (
+                "last_charge_duration_s",
+                "last_charge_added_percent",
+                "last_charge_start_soc",
+                "last_charge_end_soc",
+            ):
+                data.pop(feld, None)
+                charge.pop(feld, None)
+        if not new_session_started:
+            if duration_value is not None:
+                data["last_charge_duration_s"] = duration_value
+                charge["last_charge_duration_s"] = duration_value
+            if added_percent_value is not None:
+                data["last_charge_added_percent"] = added_percent_value
+                charge["last_charge_added_percent"] = added_percent_value
+            if saved_start_soc is not None:
+                data["last_charge_start_soc"] = saved_start_soc
+                charge["last_charge_start_soc"] = saved_start_soc
+            if saved_end_soc is not None:
+                data["last_charge_end_soc"] = saved_end_soc
+                charge["last_charge_end_soc"] = saved_end_soc
 
         drive = data.get("drive_state", {})
         lat = drive.get("latitude")

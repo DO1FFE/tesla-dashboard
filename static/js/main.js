@@ -1288,10 +1288,19 @@ function updateChargingInfo(charge, wurzelDaten) {
         letzterLadezuwachsQuelle = wurzelDaten.last_charge_added_percent;
     }
     var letzteLadezuwachsQuelleTyp = null;
-    if (letzterLadezuwachsQuelle != null && !isNaN(letzterLadezuwachsQuelle)) {
+    var neuerLadeStartOhneStartSoc = neuerLadeStart && startSoc == null;
+    if (
+        letzterLadezuwachsQuelle != null
+        && !isNaN(letzterLadezuwachsQuelle)
+        && !neuerLadeStartOhneStartSoc
+    ) {
         letzterLadezuwachsProzent = Number(letzterLadezuwachsQuelle);
         letzteLadezuwachsQuelleTyp = 'letzte_session';
     } else if (berechneterZuwachsProzent != null) {
+        letzterLadezuwachsProzent = berechneterZuwachsProzent;
+        letzteLadezuwachsQuelleTyp = 'aktuelle_session';
+    }
+    if (neuerLadeStart && berechneterZuwachsProzent != null) {
         letzterLadezuwachsProzent = berechneterZuwachsProzent;
         letzteLadezuwachsQuelleTyp = 'aktuelle_session';
     }
