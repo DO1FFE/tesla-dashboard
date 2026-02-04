@@ -207,16 +207,55 @@ select {
   margin-bottom: 6px;
 }
 
-.map-view-menu label {
+.map-view-label {
   display: block;
   margin-bottom: 4px;
   font-weight: 600;
 }
 
-.map-view-menu select {
-  width: 100%;
+.map-view-options {
+  display: flex;
+  gap: 4px;
+  padding: 2px;
+  border-radius: 6px;
+  background: #2a2a2a;
+}
+
+.map-view-option {
+  position: relative;
+  flex: 1;
+}
+
+.map-view-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.map-view-option span {
+  display: block;
   padding: 4px 6px;
   border-radius: 4px;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  border: 1px solid transparent;
+}
+
+.map-view-option input:checked + span {
+  background: var(--accent-color);
+  color: #fff;
+}
+
+.map-view-option input:not(:checked) + span {
+  background: #2a2a2a;
+  color: var(--text-color);
+  border-color: #444;
+}
+
+.map-view-option input:focus + span {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 1px;
 }
 
 /* Layer-Umschalter im Kartenlayout */
