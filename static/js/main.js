@@ -98,12 +98,18 @@ var esriLabelLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/se
     pane: 'labels',
     zIndex: 650
 });
-var hybridLayer = L.layerGroup([esriLayer, esriLabelLayer]);
+var esriHybridLayer = L.layerGroup([esriLayer, esriLabelLayer]);
+var usgsLayer = L.tileLayer('https://basemap.nationalmap.gov/ArcGIS/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Kacheln © U.S. Geological Survey (USGS) — The National Map'
+});
+var usgsHybridLayer = L.layerGroup([usgsLayer, esriLabelLayer]);
 var kartenAnsichtOptionen = document.querySelectorAll('input[name="map-view"]');
 var kartenAnsichtMenu = document.getElementById('map-view-menu');
 var kartenAnsichtLayer = {
     standard: osmLayer,
-    hybrid: hybridLayer,
+    hybrid: esriHybridLayer,
+    'hybrid-esri': esriHybridLayer,
+    'hybrid-usgs': usgsHybridLayer,
     satellit: esriLayer
 };
 var aktiveKartenAnsicht = osmLayer;
