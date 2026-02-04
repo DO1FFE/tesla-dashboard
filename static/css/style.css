@@ -178,6 +178,47 @@ select {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
 }
 
+/* Kartenansicht-Auswahl */
+.map-view-menu {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 500;
+  background: var(--surface-color);
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 6px 8px;
+  color: var(--text-color);
+  min-width: 140px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+.map-view-menu summary {
+  cursor: pointer;
+  list-style: none;
+  font-weight: 600;
+}
+
+.map-view-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.map-view-menu[open] summary {
+  margin-bottom: 6px;
+}
+
+.map-view-menu label {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.map-view-menu select {
+  width: 100%;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
 /* Layer-Umschalter im Kartenlayout */
 .leaflet-control-layers {
   background: var(--surface-color);

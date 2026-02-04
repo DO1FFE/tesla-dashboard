@@ -70,7 +70,49 @@ var esriLabelLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/se
     attribution: 'Beschriftungen © Esri'
 });
 var hybridLayer = L.layerGroup([esriLayer, esriLabelLayer]);
-L.control.layers({'Standard': osmLayer, 'Hybrid': hybridLayer, 'Satellit': esriLayer}, null, {position: 'topright'}).addTo(map);
+var kartenAnsichtSelect = document.getElementById('map-view-select');
+var kartenAnsichtMenu = document.getElementById('map-view-menu');
+var kartenAnsichtLayer = {
+    standard: osmLayer,
+    hybrid: hybridLayer,
+    satellit: esriLayer
+};
+var aktiveKartenAnsicht = osmLayer;
+
+function setzeKartenAnsicht(ansicht) {
+    var zielLayer = kartenAnsichtLayer[ansicht] || osmLayer;
+    if (aktiveKartenAnsicht && map.hasLayer(aktiveKartenAnsicht)) {
+        map.removeLayer(aktiveKartenAnsicht);
+    }
+    aktiveKartenAnsicht = zielLayer;
+    if (!map.hasLayer(aktiveKartenAnsicht)) {
+        map.addLayer(aktiveKartenAnsicht);
+    }
+}
+
+if (kartenAnsichtSelect) {
+    kartenAnsichtSelect.addEventListener('change', function() {
+        setzeKartenAnsicht(kartenAnsichtSelect.value);
+    });
+    setzeKartenAnsicht(kartenAnsichtSelect.value);
+}
+
+if (kartenAnsichtMenu && L && L.DomEvent) {
+    L.DomEvent.disableClickPropagation(kartenAnsichtMenu);
+    L.DomEvent.disableScrollPropagation(kartenAnsichtMenu);
+    if (kartenAnsichtSelect) {
+        kartenAnsichtSelect.addEventListener('focus', function() {
+            if (map.dragging) {
+                map.dragging.disable();
+            }
+        });
+        kartenAnsichtSelect.addEventListener('blur', function() {
+            if (map.dragging) {
+                map.dragging.enable();
+            }
+        });
+    }
+}
 // Adjust map when the viewport size changes (e.g., on mobile rotation)
 $(window).on('resize', function() {
     map.invalidateSize();

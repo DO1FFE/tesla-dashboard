@@ -27,6 +27,17 @@
             <div id="address-error" class="address-error"></div>
         </div>
         <div id="zoom-level"></div>
+        <details class="map-view-menu" id="map-view-menu">
+            <summary>Ansicht</summary>
+            <div class="map-view-content">
+                <label for="map-view-select">Kartenansicht</label>
+                <select id="map-view-select">
+                    <option value="standard" selected>Standard</option>
+                    <option value="hybrid">Hybrid</option>
+                    <option value="satellit">Satellit</option>
+                </select>
+            </div>
+        </details>
     </div>
     <script>
         window.APP_VERSION = "{{ version }}";
