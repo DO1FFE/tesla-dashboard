@@ -1,98 +1,23 @@
 var DEFAULT_ZOOM = 18;
 
-function erstelleAttributionsKontrolle(karte) {
-    if (!karte || !L || !L.Control || !L.Control.Attribution) {
-        return null;
-    }
-    var BenutzerAttribution = L.Control.Attribution.extend({
-        _update: function() {
-            if (!this._map) {
-                return;
-            }
-            var attributionen = [];
-            for (var eintrag in this._attributions) {
-                if (this._attributions[eintrag]) {
-                    attributionen.push(eintrag);
-                }
-            }
-            this._container.innerHTML = attributionen.join('<br>');
-        }
-    });
-    var kontrolle = new BenutzerAttribution({ prefix: false });
-    kontrolle.addTo(karte);
-    return kontrolle;
-}
-
 var map = L.map('map', { attributionControl: false }).setView([51.4556, 7.0116], DEFAULT_ZOOM);
 erstelleAttributionsKontrolle(map);
-var labelsPane = map.createPane('labels');
-labelsPane.style.zIndex = 650;
-labelsPane.style.pointerEvents = 'none';
-var osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
-}).addTo(map);
-var esriLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    attribution: 'Tiles © Esri — Quelle: Esri, i-cubed, USDA, USGS, AEX, GeoEye, ' +
-        'Getmapping, Aerogrid, IGN, IGP, UPR-EGP ' +
-        'und die GIS-User-Community'
-});
-var esriLabelLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-    attribution: 'Beschriftungen © Esri',
-    pane: 'labels',
-    zIndex: 650
-});
-var esriHybridLayer = L.layerGroup([esriLayer, esriLabelLayer]);
-var usgsLayer = L.tileLayer('https://basemap.nationalmap.gov/ArcGIS/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}', {
-    attribution: 'Kacheln © U.S. Geological Survey (USGS) — The National Map'
-});
-var usgsHybridLayer = L.layerGroup([usgsLayer, esriLabelLayer]);
 var kartenAnsichtOptionen = document.querySelectorAll('input[name="map-view"]');
 var kartenAnsichtMenu = document.getElementById('map-view-menu');
-var kartenAnsichtLayer = {
-    standard: osmLayer,
-    hybrid: esriHybridLayer,
-    'hybrid-esri': esriHybridLayer,
-    'hybrid-usgs': usgsHybridLayer,
-    satellit: esriLayer
-};
-var aktiveKartenAnsicht = osmLayer;
+var layerKonfiguration = erstelleKartenLayerKonfiguration(map, {
+    labelsPaneName: 'labels',
+    labelsPaneZIndex: 650,
+    labelsPanePointerEvents: 'none'
+});
+var kartenAnsichtLayer = layerKonfiguration.kartenAnsichtLayer;
+var aktiveKartenAnsicht = layerKonfiguration.aktiveKartenAnsicht;
 
-function setzeKartenAnsicht(ansicht) {
-    var zielLayer = kartenAnsichtLayer[ansicht] || osmLayer;
-    if (aktiveKartenAnsicht && map.hasLayer(aktiveKartenAnsicht)) {
-        map.removeLayer(aktiveKartenAnsicht);
-    }
-    aktiveKartenAnsicht = zielLayer;
-    if (!map.hasLayer(aktiveKartenAnsicht)) {
-        map.addLayer(aktiveKartenAnsicht);
-    }
-}
-
-function ermittleAktiveKartenAnsicht() {
-    for (var i = 0; i < kartenAnsichtOptionen.length; i++) {
-        if (kartenAnsichtOptionen[i].checked) {
-            return kartenAnsichtOptionen[i].value;
-        }
-    }
-    return 'standard';
-}
-
-function bindeKartenAnsichtOptionen() {
-    if (!kartenAnsichtOptionen.length) {
-        return;
-    }
-    var handleChange = function(event) {
-        if (event.target && event.target.checked) {
-            setzeKartenAnsicht(event.target.value);
-        }
-    };
-    for (var i = 0; i < kartenAnsichtOptionen.length; i++) {
-        kartenAnsichtOptionen[i].addEventListener('change', handleChange);
-    }
-    setzeKartenAnsicht(ermittleAktiveKartenAnsicht());
-}
-
-bindeKartenAnsichtOptionen();
+aktiveKartenAnsicht = bindeKartenAnsichtOptionen(
+    map,
+    kartenAnsichtLayer,
+    kartenAnsichtOptionen,
+    aktiveKartenAnsicht
+);
 
 if (kartenAnsichtMenu && L && L.DomEvent) {
     L.DomEvent.disableClickPropagation(kartenAnsichtMenu);
