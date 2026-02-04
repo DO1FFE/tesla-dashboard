@@ -96,7 +96,15 @@ def disable_response_caching(resp):
     )
     resp.headers.setdefault("Pragma", "no-cache")
     resp.headers.setdefault("Expires", "0")
+    _set_robots_header(resp)
     return resp
+
+
+def _set_robots_header(resp):
+    """Setze Standardregeln für Suchmaschinen."""
+    if request.path in {"/", "/statistik", "/robots.txt"}:
+        return
+    resp.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
 
 
 __version__ = get_version()
@@ -5580,6 +5588,12 @@ def index():
         config=cfg,
         socketio_client_script=socketio_client_script(),
     )
+
+
+@app.route("/robots.txt")
+def robots_txt():
+    """Liefere robots.txt aus dem Static-Verzeichnis."""
+    return send_from_directory("static", "robots.txt")
 
 
 @app.route("/map")
