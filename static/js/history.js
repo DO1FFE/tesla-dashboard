@@ -4,9 +4,15 @@ var osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
 }).addTo(map);
 var esriLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    attribution: 'Tiles © Esri — Quelle: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP und die GIS-User-Community'
+    attribution: 'Tiles © Esri — Quelle: Esri, i-cubed, USDA, USGS, AEX, GeoEye, ' +
+        'Getmapping, Aerogrid, IGN, IGP, UPR-EGP ' +
+        'und die GIS-User-Community'
 });
-L.control.layers({'Standard': osmLayer, 'Satellit': esriLayer}, null, {position: 'topright'}).addTo(map);
+var esriLabelLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Beschriftungen © Esri'
+});
+var hybridLayer = L.layerGroup([esriLayer, esriLabelLayer]);
+L.control.layers({'Standard': osmLayer, 'Hybrid': hybridLayer, 'Satellit': esriLayer}, null, {position: 'topright'}).addTo(map);
 
 var MILES_TO_KM = 1.60934;
 
