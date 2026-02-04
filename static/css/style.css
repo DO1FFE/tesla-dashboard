@@ -178,6 +178,20 @@ select {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
 }
 
+/* Layer-Umschalter im Kartenlayout */
+.leaflet-control-layers {
+  background: var(--surface-color);
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 6px 8px;
+  color: var(--text-color);
+}
+
+.leaflet-control-layers label {
+  color: var(--text-color);
+  margin: 2px 0;
+}
+
 #map-container {
   display: flex;
   align-items: flex-start;

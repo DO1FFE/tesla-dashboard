@@ -36,9 +36,13 @@
     }
 
     var map = L.map(mapEl).setView(DEFAULT_POS, DEFAULT_ZOOM);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    var osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
     }).addTo(map);
+    var esriLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles © Esri — Quelle: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP und die GIS-User-Community'
+    });
+    L.control.layers({'Standard': osmLayer, 'Satellit': esriLayer}, null, {position: 'topright'}).addTo(map);
     var heatLayer = null;
     var controlsEl = document.getElementById('heatmap-controls');
     if (controlsEl) {
