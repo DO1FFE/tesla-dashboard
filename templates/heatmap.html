@@ -96,7 +96,19 @@
             {% endfor %}
         </select>
     </div>
-    <div id="map" aria-live="polite"></div>
+    <div id="map" aria-live="polite">
+        <details class="map-view-menu" id="map-view-menu">
+            <summary>Ansicht</summary>
+            <div class="map-view-content">
+                <label for="map-view-select">Kartenansicht</label>
+                <select id="map-view-select">
+                    <option value="standard" selected>Standard</option>
+                    <option value="hybrid">Hybrid</option>
+                    <option value="satellit">Satellit</option>
+                </select>
+            </div>
+        </details>
+    </div>
     <div id="status-bar">
         <span id="loading-status">Lade Heatmap-Daten…</span>
         <span id="error-status" class="address-error"></span>
