@@ -1,5 +1,30 @@
 var DEFAULT_ZOOM = 18;
-var map = L.map('map').setView([51.4556, 7.0116], DEFAULT_ZOOM);
+
+function erstelleAttributionsKontrolle(karte) {
+    if (!karte || !L || !L.Control || !L.Control.Attribution) {
+        return null;
+    }
+    var BenutzerAttribution = L.Control.Attribution.extend({
+        _update: function() {
+            if (!this._map) {
+                return;
+            }
+            var attributionen = [];
+            for (var eintrag in this._attributions) {
+                if (this._attributions[eintrag]) {
+                    attributionen.push(eintrag);
+                }
+            }
+            this._container.innerHTML = attributionen.join('<br>');
+        }
+    });
+    var kontrolle = new BenutzerAttribution({ prefix: false });
+    kontrolle.addTo(karte);
+    return kontrolle;
+}
+
+var map = L.map('map', { attributionControl: false }).setView([51.4556, 7.0116], DEFAULT_ZOOM);
+erstelleAttributionsKontrolle(map);
 var labelsPane = map.createPane('labels');
 labelsPane.style.zIndex = 650;
 labelsPane.style.pointerEvents = 'none';

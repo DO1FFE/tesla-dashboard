@@ -20,6 +20,29 @@ var superchargerMarkers = [];
 var lastSuperchargerData = null;
 var letzteKartenPosition = null;
 
+function erstelleAttributionsKontrolle(karte) {
+    if (!karte || !L || !L.Control || !L.Control.Attribution) {
+        return null;
+    }
+    var BenutzerAttribution = L.Control.Attribution.extend({
+        _update: function() {
+            if (!this._map) {
+                return;
+            }
+            var attributionen = [];
+            for (var eintrag in this._attributions) {
+                if (this._attributions[eintrag]) {
+                    attributionen.push(eintrag);
+                }
+            }
+            this._container.innerHTML = attributionen.join('<br>');
+        }
+    });
+    var kontrolle = new BenutzerAttribution({ prefix: false });
+    kontrolle.addTo(karte);
+    return kontrolle;
+}
+
 function normalizeShiftState(shift) {
     if (shift === null || shift === undefined) {
         return null;
@@ -57,7 +80,8 @@ function adjustHeadingForReverse(heading, shift) {
 }
 // Initialize the map roughly centered on Essen with a high zoom until
 // coordinates from the API are received.
-var map = L.map('map').setView(DEFAULT_POS, DEFAULT_ZOOM);
+var map = L.map('map', { attributionControl: false }).setView(DEFAULT_POS, DEFAULT_ZOOM);
+erstelleAttributionsKontrolle(map);
 var labelsPane = map.createPane('labels');
 labelsPane.style.zIndex = 650;
 labelsPane.style.pointerEvents = 'none';
