@@ -1,5 +1,8 @@
 var DEFAULT_ZOOM = 18;
 var map = L.map('map').setView([51.4556, 7.0116], DEFAULT_ZOOM);
+var labelsPane = map.createPane('labels');
+labelsPane.style.zIndex = 650;
+labelsPane.style.pointerEvents = 'none';
 var osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: 'Kartendaten © OpenStreetMap-Mitwirkende'
 }).addTo(map);
@@ -9,7 +12,9 @@ var esriLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/service
         'und die GIS-User-Community'
 });
 var esriLabelLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-    attribution: 'Beschriftungen © Esri'
+    attribution: 'Beschriftungen © Esri',
+    pane: 'labels',
+    zIndex: 650
 });
 var hybridLayer = L.layerGroup([esriLayer, esriLabelLayer]);
 var kartenAnsichtOptionen = document.querySelectorAll('input[name="map-view"]');
