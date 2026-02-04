@@ -70,7 +70,7 @@ var esriLabelLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/se
     attribution: 'Beschriftungen © Esri'
 });
 var hybridLayer = L.layerGroup([esriLayer, esriLabelLayer]);
-var kartenAnsichtSelect = document.getElementById('map-view-select');
+var kartenAnsichtOptionen = document.querySelectorAll('input[name="map-view"]');
 var kartenAnsichtMenu = document.getElementById('map-view-menu');
 var kartenAnsichtLayer = {
     standard: osmLayer,
@@ -90,27 +90,55 @@ function setzeKartenAnsicht(ansicht) {
     }
 }
 
-if (kartenAnsichtSelect) {
-    kartenAnsichtSelect.addEventListener('change', function() {
-        setzeKartenAnsicht(kartenAnsichtSelect.value);
-    });
-    setzeKartenAnsicht(kartenAnsichtSelect.value);
+function ermittleAktiveKartenAnsicht() {
+    for (var i = 0; i < kartenAnsichtOptionen.length; i++) {
+        if (kartenAnsichtOptionen[i].checked) {
+            return kartenAnsichtOptionen[i].value;
+        }
+    }
+    return 'standard';
 }
+
+function bindeKartenAnsichtOptionen() {
+    if (!kartenAnsichtOptionen.length) {
+        return;
+    }
+    var handleChange = function(event) {
+        if (event.target && event.target.checked) {
+            setzeKartenAnsicht(event.target.value);
+        }
+    };
+    for (var i = 0; i < kartenAnsichtOptionen.length; i++) {
+        kartenAnsichtOptionen[i].addEventListener('change', handleChange);
+    }
+    setzeKartenAnsicht(ermittleAktiveKartenAnsicht());
+}
+
+bindeKartenAnsichtOptionen();
 
 if (kartenAnsichtMenu && L && L.DomEvent) {
     L.DomEvent.disableClickPropagation(kartenAnsichtMenu);
     L.DomEvent.disableScrollPropagation(kartenAnsichtMenu);
-    if (kartenAnsichtSelect) {
-        kartenAnsichtSelect.addEventListener('focus', function() {
+    if (kartenAnsichtOptionen.length) {
+        var deaktiviereZiehen = function(event) {
+            if (event) {
+                event.stopPropagation();
+            }
             if (map.dragging) {
                 map.dragging.disable();
             }
-        });
-        kartenAnsichtSelect.addEventListener('blur', function() {
+        };
+        var aktiviereZiehen = function() {
             if (map.dragging) {
                 map.dragging.enable();
             }
-        });
+        };
+        for (var i = 0; i < kartenAnsichtOptionen.length; i++) {
+            kartenAnsichtOptionen[i].addEventListener('focus', deaktiviereZiehen);
+            kartenAnsichtOptionen[i].addEventListener('blur', aktiviereZiehen);
+            kartenAnsichtOptionen[i].addEventListener('pointerdown', deaktiviereZiehen);
+            kartenAnsichtOptionen[i].addEventListener('touchstart', deaktiviereZiehen);
+        }
     }
 }
 // Adjust map when the viewport size changes (e.g., on mobile rotation)

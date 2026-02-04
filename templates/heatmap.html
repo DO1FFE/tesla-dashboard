@@ -100,12 +100,21 @@
         <details class="map-view-menu" id="map-view-menu">
             <summary>Ansicht</summary>
             <div class="map-view-content">
-                <label for="map-view-select">Kartenansicht</label>
-                <select id="map-view-select">
-                    <option value="standard" selected>Standard</option>
-                    <option value="hybrid">Hybrid</option>
-                    <option value="satellit">Satellit</option>
-                </select>
+                <span class="map-view-label" id="map-view-label">Kartenansicht</span>
+                <div class="map-view-options" role="radiogroup" aria-labelledby="map-view-label">
+                    <label class="map-view-option">
+                        <input type="radio" name="map-view" value="standard" checked>
+                        <span>Standard</span>
+                    </label>
+                    <label class="map-view-option">
+                        <input type="radio" name="map-view" value="hybrid">
+                        <span>Hybrid</span>
+                    </label>
+                    <label class="map-view-option">
+                        <input type="radio" name="map-view" value="satellit">
+                        <span>Satellit</span>
+                    </label>
+                </div>
             </div>
         </details>
     </div>
