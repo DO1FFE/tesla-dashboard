@@ -44,11 +44,12 @@
         var osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap'
         }).addTo(karte);
+        var esriAttribution = '© Esri';
         var esriLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            attribution: '© Esri'
+            attribution: esriAttribution
         });
         var esriLabelOptionen = {
-            attribution: '© Esri'
+            attribution: esriAttribution
         };
         if (labelsPane) {
             esriLabelOptionen.pane = labelsPaneName;
@@ -58,7 +59,11 @@
             'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
             esriLabelOptionen
         );
-        var esriHybridLayer = L.layerGroup([esriLayer, esriLabelLayer]);
+        var esriStrassenLabelLayer = L.tileLayer(
+            'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+            esriLabelOptionen
+        );
+        var esriHybridLayer = L.layerGroup([esriLayer, esriLabelLayer, esriStrassenLabelLayer]);
         var kartenAnsichtLayer = {
             standard: osmLayer,
             hybrid: esriHybridLayer,
@@ -71,6 +76,7 @@
             osmLayer: osmLayer,
             esriLayer: esriLayer,
             esriLabelLayer: esriLabelLayer,
+            esriStrassenLabelLayer: esriStrassenLabelLayer,
             esriHybridLayer: esriHybridLayer,
             kartenAnsichtLayer: kartenAnsichtLayer,
             aktiveKartenAnsicht: osmLayer
