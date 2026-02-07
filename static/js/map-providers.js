@@ -61,15 +61,10 @@
             esriLabelOptionen
         );
         var esriHybridLayer = L.layerGroup([esriLayer, esriLabelLayer]);
-        var usgsLayer = L.tileLayer('https://basemap.nationalmap.gov/ArcGIS/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}', {
-            attribution: 'Kacheln © U.S. Geological Survey (USGS) — The National Map'
-        });
-        var usgsHybridLayer = L.layerGroup([usgsLayer, esriLabelLayer]);
         var kartenAnsichtLayer = {
             standard: osmLayer,
             hybrid: esriHybridLayer,
             'hybrid-esri': esriHybridLayer,
-            'hybrid-usgs': usgsHybridLayer,
             satellit: esriLayer
         };
 
@@ -79,8 +74,6 @@
             esriLayer: esriLayer,
             esriLabelLayer: esriLabelLayer,
             esriHybridLayer: esriHybridLayer,
-            usgsLayer: usgsLayer,
-            usgsHybridLayer: usgsHybridLayer,
             kartenAnsichtLayer: kartenAnsichtLayer,
             aktiveKartenAnsicht: osmLayer
         };
