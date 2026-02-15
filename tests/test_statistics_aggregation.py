@@ -128,3 +128,52 @@ def test_api_statistics_triggers_tick_when_thread_missing(monkeypatch, tmp_path)
     assert today_row is not None
     assert today_row["km"] == expected_km
     assert today_row["speed"] == expected_speed
+
+
+def test_state_backfill_und_increment_verteilen_offenen_zeitraum_nicht_doppelt(monkeypatch, tmp_path):
+    db_path = tmp_path / "stats.db"
+    monkeypatch.setenv("STATISTICS_DB_PATH", str(db_path))
+
+    import app
+
+    importlib.reload(app)
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(app, "_default_vehicle_id", "1")
+
+    now_ts = 1_700_000_000
+    log_ts = now_ts - 3600
+    log_dt = datetime.fromtimestamp(log_ts, app.LOCAL_TZ)
+
+    state_path = pathlib.Path(app.resolve_log_path("1", "state.log"))
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        f'{log_dt.strftime("%Y-%m-%d %H:%M:%S,000")} {{"state": "online"}}\n',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(app.time, "time", lambda: now_ts)
+
+    app._statistics_aggregation_tick()
+
+    conn = app._statistics_conn()
+    first = conn.execute(
+        "SELECT date, online, offline, asleep FROM statistics_aggregate WHERE scope='daily'"
+    ).fetchone()
+    conn.close()
+
+    assert first is not None
+    assert first[1] == 4.17
+    assert first[2] == 95.83
+    assert first[3] == 0.0
+
+    app._statistics_aggregation_tick()
+
+    conn = app._statistics_conn()
+    second = conn.execute(
+        "SELECT date, online, offline, asleep FROM statistics_aggregate WHERE scope='daily'"
+    ).fetchone()
+    conn.close()
+
+    assert second is not None
+    assert second[0] == first[0]
+    assert second[1:] == first[1:]
