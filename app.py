@@ -4104,20 +4104,28 @@ def _merge_parking_value(prev_total, prev_source, new_raw, tolerance=0.01):
 
 
 def _normalize_state_percentages(online, offline, asleep):
-    """Normalisiert Prozentwerte, um negative Ausgaben zu verhindern."""
-    total = float(online) + float(offline) + float(asleep)
+    """Normalisiert Prozentwerte, ohne ``offline`` systematisch zu bevorzugen."""
+    werte = {
+        "online": max(float(online), 0.0),
+        "offline": max(float(offline), 0.0),
+        "asleep": max(float(asleep), 0.0),
+    }
+    total = sum(werte.values())
     if total <= 0:
         return 0.0, 0.0, 0.0
     if total > 100.0:
         faktor = 100.0 / total
-        online = round(online * faktor, 2)
-        offline = round(offline * faktor, 2)
-        asleep = round(asleep * faktor, 2)
-    total = online + offline + asleep
+        werte = {key: round(val * faktor, 2) for key, val in werte.items()}
+    else:
+        werte = {key: round(val, 2) for key, val in werte.items()}
+
+    total = werte["online"] + werte["offline"] + werte["asleep"]
     diff = round(100.0 - total, 2)
-    if diff > 0:
-        offline = round(offline + diff, 2)
-    return online, offline, asleep
+    if diff:
+        ziel = max(werte, key=werte.get)
+        werte[ziel] = round(max(0.0, werte[ziel] + diff), 2)
+
+    return werte["online"], werte["offline"], werte["asleep"]
 
 
 def compute_statistics():
@@ -4174,20 +4182,23 @@ def compute_statistics():
         stats[day]["_park_km_total"] = km_total
         stats[day]["_park_km_source"] = km_source
     for day, val in stats.items():
-        erwartete_sekunden = 24 * 3600
         gesamt_sekunden = (
             float(val.get("online", 0.0))
             + float(val.get("offline", 0.0))
             + float(val.get("asleep", 0.0))
         )
-        divisor = max(erwartete_sekunden, gesamt_sekunden) if gesamt_sekunden else erwartete_sekunden
-        online = round(val.get("online", 0.0) / divisor * 100, 2)
-        offline = round(val.get("offline", 0.0) / divisor * 100, 2)
-        asleep = round(val.get("asleep", 0.0) / divisor * 100, 2)
+        val["observed_seconds"] = round(gesamt_sekunden, 2)
+        if gesamt_sekunden > 0:
+            online = round(val.get("online", 0.0) / gesamt_sekunden * 100, 2)
+            offline = round(val.get("offline", 0.0) / gesamt_sekunden * 100, 2)
+            asleep = round(val.get("asleep", 0.0) / gesamt_sekunden * 100, 2)
+        else:
+            online = offline = asleep = 0.0
         online, offline, asleep = _normalize_state_percentages(online, offline, asleep)
         val["online"] = online
         val["offline"] = offline
         val["asleep"] = asleep
+        val.setdefault("observed_seconds", 0.0)
         val.setdefault("km", 0.0)
         val.setdefault("speed", 0.0)
         val.setdefault("energy", 0.0)
