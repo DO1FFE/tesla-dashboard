@@ -1266,6 +1266,9 @@ def _ensure_statistics_tables(conn):
             online REAL DEFAULT 0.0,
             offline REAL DEFAULT 0.0,
             asleep REAL DEFAULT 0.0,
+            online_seconds REAL DEFAULT 0.0,
+            offline_seconds REAL DEFAULT 0.0,
+            asleep_seconds REAL DEFAULT 0.0,
             km REAL DEFAULT 0.0,
             speed REAL DEFAULT 0.0,
             energy REAL DEFAULT 0.0,
@@ -1275,6 +1278,15 @@ def _ensure_statistics_tables(conn):
         )
         """
     )
+    existing_columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(statistics_aggregate)").fetchall()
+    }
+    for column in ("online_seconds", "offline_seconds", "asleep_seconds"):
+        if column not in existing_columns:
+            conn.execute(
+                f"ALTER TABLE statistics_aggregate ADD COLUMN {column} REAL DEFAULT 0.0"
+            )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS statistics_meta (
@@ -1336,33 +1348,66 @@ def _statistics_missing_recent_days(conn, days=3):
 
 def _load_daily_from_db(conn):
     cur = conn.execute(
-        "SELECT date, online, offline, asleep, km, speed, energy, park_energy_pct, park_km FROM statistics_aggregate WHERE scope='daily'"
+        """
+        SELECT date, online, offline, asleep,
+               online_seconds, offline_seconds, asleep_seconds,
+               km, speed, energy, park_energy_pct, park_km
+        FROM statistics_aggregate
+        WHERE scope='daily'
+        """
     )
     data = {}
     for row in cur.fetchall():
+        online_seconds = float(row[4] or 0.0)
+        offline_seconds = float(row[5] or 0.0)
+        asleep_seconds = float(row[6] or 0.0)
+        if online_seconds <= 0 and offline_seconds <= 0 and asleep_seconds <= 0:
+            online_seconds = float(row[1] or 0.0) / 100.0 * 86400.0
+            offline_seconds = float(row[2] or 0.0) / 100.0 * 86400.0
+            asleep_seconds = float(row[3] or 0.0) / 100.0 * 86400.0
         data[row[0]] = {
             "online": float(row[1] or 0.0),
             "offline": float(row[2] or 0.0),
             "asleep": float(row[3] or 0.0),
-            "km": float(row[4] or 0.0),
-            "speed": float(row[5] or 0.0),
-            "energy": float(row[6] or 0.0),
-            "park_energy_pct": float(row[7] or 0.0),
-            "park_km": float(row[8] or 0.0),
+            "online_seconds": online_seconds,
+            "offline_seconds": offline_seconds,
+            "asleep_seconds": asleep_seconds,
+            "km": float(row[7] or 0.0),
+            "speed": float(row[8] or 0.0),
+            "energy": float(row[9] or 0.0),
+            "park_energy_pct": float(row[10] or 0.0),
+            "park_km": float(row[11] or 0.0),
         }
     return data
 
 
 def _write_daily_row(conn, day, payload, scope="daily"):
+    online_seconds = float(payload.get("online_seconds", 0.0) or 0.0)
+    offline_seconds = float(payload.get("offline_seconds", 0.0) or 0.0)
+    asleep_seconds = float(payload.get("asleep_seconds", 0.0) or 0.0)
+    if online_seconds <= 0 and offline_seconds <= 0 and asleep_seconds <= 0:
+        online_seconds = float(payload.get("online", 0.0) or 0.0) / 100.0 * 86400.0
+        offline_seconds = float(payload.get("offline", 0.0) or 0.0) / 100.0 * 86400.0
+        asleep_seconds = float(payload.get("asleep", 0.0) or 0.0) / 100.0 * 86400.0
+    online, offline, asleep = _percentages_from_seconds(
+        online_seconds, offline_seconds, asleep_seconds
+    )
+
     conn.execute(
         """
         INSERT INTO statistics_aggregate (
-            scope, date, online, offline, asleep, km, speed, energy, park_energy_pct, park_km
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            scope, date,
+            online, offline, asleep,
+            online_seconds, offline_seconds, asleep_seconds,
+            km, speed, energy, park_energy_pct, park_km
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(scope, date) DO UPDATE SET
             online=excluded.online,
             offline=excluded.offline,
             asleep=excluded.asleep,
+            online_seconds=excluded.online_seconds,
+            offline_seconds=excluded.offline_seconds,
+            asleep_seconds=excluded.asleep_seconds,
             km=excluded.km,
             speed=excluded.speed,
             energy=excluded.energy,
@@ -1372,9 +1417,12 @@ def _write_daily_row(conn, day, payload, scope="daily"):
         (
             scope,
             day,
-            payload.get("online", 0.0),
-            payload.get("offline", 0.0),
-            payload.get("asleep", 0.0),
+            online,
+            offline,
+            asleep,
+            round(online_seconds, 6),
+            round(offline_seconds, 6),
+            round(asleep_seconds, 6),
             payload.get("km", 0.0),
             payload.get("speed", 0.0),
             payload.get("energy", 0.0),
@@ -1386,10 +1434,25 @@ def _write_daily_row(conn, day, payload, scope="daily"):
 
 def _merge_daily_row(conn, day, payload):
     current = _load_daily_from_db(conn).get(day, {})
+    online_seconds = round(
+        float(current.get("online_seconds", 0.0)) + payload.get("online_seconds", 0.0), 6
+    )
+    offline_seconds = round(
+        float(current.get("offline_seconds", 0.0)) + payload.get("offline_seconds", 0.0), 6
+    )
+    asleep_seconds = round(
+        float(current.get("asleep_seconds", 0.0)) + payload.get("asleep_seconds", 0.0), 6
+    )
+    online, offline, asleep = _percentages_from_seconds(
+        online_seconds, offline_seconds, asleep_seconds
+    )
     merged = {
-        "online": round(float(current.get("online", 0.0)) + payload.get("online", 0.0), 6),
-        "offline": round(float(current.get("offline", 0.0)) + payload.get("offline", 0.0), 6),
-        "asleep": round(float(current.get("asleep", 0.0)) + payload.get("asleep", 0.0), 6),
+        "online": online,
+        "offline": offline,
+        "asleep": asleep,
+        "online_seconds": online_seconds,
+        "offline_seconds": offline_seconds,
+        "asleep_seconds": asleep_seconds,
         "km": round(float(current.get("km", 0.0)) + payload.get("km", 0.0), 6),
         "speed": max(float(current.get("speed", 0.0)), payload.get("speed", 0.0)),
         "energy": round(float(current.get("energy", 0.0)) + payload.get("energy", 0.0), 6),
@@ -1405,7 +1468,12 @@ def _merge_daily_row(conn, day, payload):
 def _rebuild_monthly_scope(conn):
     conn.execute("DELETE FROM statistics_aggregate WHERE scope='monthly'")
     cur = conn.execute(
-        "SELECT date, online, offline, asleep, km, speed, energy, park_energy_pct, park_km FROM statistics_aggregate WHERE scope='daily'"
+        """
+        SELECT date, online_seconds, offline_seconds, asleep_seconds,
+               km, speed, energy, park_energy_pct, park_km
+        FROM statistics_aggregate
+        WHERE scope='daily'
+        """
     )
     monthly = {}
     for row in cur.fetchall():
@@ -1413,36 +1481,39 @@ def _rebuild_monthly_scope(conn):
         m = monthly.setdefault(
             month,
             {
-                "online_sum": 0.0,
-                "offline_sum": 0.0,
-                "asleep_sum": 0.0,
+                "online_seconds": 0.0,
+                "offline_seconds": 0.0,
+                "asleep_seconds": 0.0,
                 "km": 0.0,
                 "speed": 0.0,
                 "energy": 0.0,
                 "park_energy_pct": 0.0,
                 "park_km": 0.0,
-                "count": 0,
             },
         )
-        m["online_sum"] += float(row[1] or 0.0)
-        m["offline_sum"] += float(row[2] or 0.0)
-        m["asleep_sum"] += float(row[3] or 0.0)
+        m["online_seconds"] += float(row[1] or 0.0)
+        m["offline_seconds"] += float(row[2] or 0.0)
+        m["asleep_seconds"] += float(row[3] or 0.0)
         m["km"] += float(row[4] or 0.0)
         m["speed"] = max(m["speed"], float(row[5] or 0.0))
         m["energy"] += float(row[6] or 0.0)
         m["park_energy_pct"] += float(row[7] or 0.0)
         m["park_km"] += float(row[8] or 0.0)
-        m["count"] += 1
 
     for month, payload in monthly.items():
-        cnt = payload["count"] or 1
+        online, offline, asleep = _percentages_from_seconds(
+            payload["online_seconds"], payload["offline_seconds"], payload["asleep_seconds"]
+        )
         _write_daily_row(
             conn,
             month,
             {
-                "online": round(payload["online_sum"] / cnt, 2),
-                "offline": round(payload["offline_sum"] / cnt, 2),
-                "asleep": round(payload["asleep_sum"] / cnt, 2),
+                "online": online,
+                "offline": offline,
+                "asleep": asleep,
+                "online_seconds": round(payload["online_seconds"], 6),
+                "offline_seconds": round(payload["offline_seconds"], 6),
+                "asleep_seconds": round(payload["asleep_seconds"], 6),
                 "km": round(payload["km"], 2),
                 "speed": round(payload["speed"], 2),
                 "energy": round(payload["energy"], 2),
@@ -1504,15 +1575,13 @@ def _distribute_state_duration(conn, start, end, state):
     if end <= start:
         return
     current = start
-    total_seconds = 24 * 3600
     while current < end:
         day = datetime.fromtimestamp(current, LOCAL_TZ).date()
         next_day = datetime.combine(day + timedelta(days=1), datetime.min.time(), LOCAL_TZ).timestamp()
         segment_end = min(end, next_day)
         duration = segment_end - current
-        pct = round(duration / total_seconds * 100.0, 6)
         key = state if state in {"online", "offline", "asleep"} else "offline"
-        _merge_daily_row(conn, day.isoformat(), {key: pct})
+        _merge_daily_row(conn, day.isoformat(), {f"{key}_seconds": duration})
         current = segment_end
 
 
@@ -4139,6 +4208,19 @@ def _normalize_state_percentages(
     return werte["online"], werte["offline"], werte["asleep"]
 
 
+def _percentages_from_seconds(online_seconds, offline_seconds, asleep_seconds):
+    online_seconds = max(float(online_seconds or 0.0), 0.0)
+    offline_seconds = max(float(offline_seconds or 0.0), 0.0)
+    asleep_seconds = max(float(asleep_seconds or 0.0), 0.0)
+    observed_seconds = online_seconds + offline_seconds + asleep_seconds
+    if observed_seconds <= 0:
+        return 0.0, 0.0, 0.0
+    online = round(online_seconds / observed_seconds * 100.0, 2)
+    offline = round(offline_seconds / observed_seconds * 100.0, 2)
+    asleep = round(asleep_seconds / observed_seconds * 100.0, 2)
+    return _normalize_state_percentages(online, offline, asleep)
+
+
 def compute_statistics():
     """Compute daily statistics and save them to ``STAT_FILE``."""
     vid = _default_vehicle_id or default_vehicle_id()
@@ -4193,22 +4275,20 @@ def compute_statistics():
         stats[day]["_park_km_total"] = km_total
         stats[day]["_park_km_source"] = km_source
     for day, val in stats.items():
-        gesamt_sekunden = (
-            float(val.get("online", 0.0))
-            + float(val.get("offline", 0.0))
-            + float(val.get("asleep", 0.0))
-        )
+        online_seconds = float(val.get("online", 0.0))
+        offline_seconds = float(val.get("offline", 0.0))
+        asleep_seconds = float(val.get("asleep", 0.0))
+        gesamt_sekunden = online_seconds + offline_seconds + asleep_seconds
         val["observed_seconds"] = round(gesamt_sekunden, 2)
-        if gesamt_sekunden > 0:
-            online = round(val.get("online", 0.0) / gesamt_sekunden * 100, 2)
-            offline = round(val.get("offline", 0.0) / gesamt_sekunden * 100, 2)
-            asleep = round(val.get("asleep", 0.0) / gesamt_sekunden * 100, 2)
-        else:
-            online = offline = asleep = 0.0
-        online, offline, asleep = _normalize_state_percentages(online, offline, asleep)
+        online, offline, asleep = _percentages_from_seconds(
+            online_seconds, offline_seconds, asleep_seconds
+        )
         val["online"] = online
         val["offline"] = offline
         val["asleep"] = asleep
+        val["online_seconds"] = round(online_seconds, 6)
+        val["offline_seconds"] = round(offline_seconds, 6)
+        val["asleep_seconds"] = round(asleep_seconds, 6)
         val.setdefault("observed_seconds", 0.0)
         val.setdefault("km", 0.0)
         val.setdefault("speed", 0.0)
@@ -4307,19 +4387,35 @@ def _load_monthly_statistics():
         conn = _statistics_conn()
         _ensure_statistics_tables(conn)
         cur = conn.execute(
-            "SELECT date, online, offline, asleep, km, speed, energy, park_energy_pct, park_km FROM statistics_aggregate WHERE scope='monthly'"
+            """
+            SELECT date, online, offline, asleep,
+                   online_seconds, offline_seconds, asleep_seconds,
+                   km, speed, energy, park_energy_pct, park_km
+            FROM statistics_aggregate
+            WHERE scope='monthly'
+            """
         )
         data = {}
         for row in cur.fetchall():
+            online_seconds = float(row[4] or 0.0)
+            offline_seconds = float(row[5] or 0.0)
+            asleep_seconds = float(row[6] or 0.0)
+            if online_seconds <= 0 and offline_seconds <= 0 and asleep_seconds <= 0:
+                online_seconds = float(row[1] or 0.0) / 100.0 * 86400.0
+                offline_seconds = float(row[2] or 0.0) / 100.0 * 86400.0
+                asleep_seconds = float(row[3] or 0.0) / 100.0 * 86400.0
             data[row[0]] = {
                 "online": float(row[1] or 0.0),
                 "offline": float(row[2] or 0.0),
                 "asleep": float(row[3] or 0.0),
-                "km": float(row[4] or 0.0),
-                "speed": float(row[5] or 0.0),
-                "energy": float(row[6] or 0.0),
-                "park_energy_pct": float(row[7] or 0.0),
-                "park_km": float(row[8] or 0.0),
+                "online_seconds": online_seconds,
+                "offline_seconds": offline_seconds,
+                "asleep_seconds": asleep_seconds,
+                "km": float(row[7] or 0.0),
+                "speed": float(row[8] or 0.0),
+                "energy": float(row[9] or 0.0),
+                "park_energy_pct": float(row[10] or 0.0),
+                "park_km": float(row[11] or 0.0),
             }
         conn.close()
         return data
@@ -6325,9 +6421,9 @@ def _prepare_statistics_payload():
     current_month = datetime.now(LOCAL_TZ).strftime("%Y-%m")
     rows = []
     current = {
-        "online_sum": 0.0,
-        "offline_sum": 0.0,
-        "asleep_sum": 0.0,
+        "online_seconds": 0.0,
+        "offline_seconds": 0.0,
+        "asleep_seconds": 0.0,
         "km": 0.0,
         "speed": 0.0,
         "energy": 0.0,
@@ -6338,27 +6434,26 @@ def _prepare_statistics_payload():
     for day in sorted(stats.keys()):
         entry = stats[day]
         if day.startswith(current_month):
+            online, offline, asleep = _percentages_from_seconds(
+                entry.get("online_seconds", 0.0),
+                entry.get("offline_seconds", 0.0),
+                entry.get("asleep_seconds", 0.0),
+            )
             row = {
                 "date": day,
-                "online": round(entry.get("online", 0.0), 2),
-                "offline": round(entry.get("offline", 0.0), 2),
-                "asleep": round(entry.get("asleep", 0.0), 2),
+                "online": online,
+                "offline": offline,
+                "asleep": asleep,
                 "km": round(entry.get("km", 0.0), 2),
                 "speed": int(round(entry.get("speed", 0.0))),
                 "energy": round(entry.get("energy", 0.0), 2),
                 "park_energy_pct": round(entry.get("park_energy_pct", 0.0), 2),
                 "park_km": round(entry.get("park_km", 0.0), 2),
             }
-            online, offline, asleep = _normalize_state_percentages(
-                row["online"], row["offline"], row["asleep"]
-            )
-            row["online"] = online
-            row["offline"] = offline
-            row["asleep"] = asleep
             rows.append(row)
-            current["online_sum"] += entry.get("online", 0.0)
-            current["offline_sum"] += entry.get("offline", 0.0)
-            current["asleep_sum"] += entry.get("asleep", 0.0)
+            current["online_seconds"] += entry.get("online_seconds", 0.0)
+            current["offline_seconds"] += entry.get("offline_seconds", 0.0)
+            current["asleep_seconds"] += entry.get("asleep_seconds", 0.0)
             current["km"] += entry.get("km", 0.0)
             current["energy"] += entry.get("energy", 0.0)
             current["park_energy_pct"] += entry.get("park_energy_pct", 0.0)
@@ -6369,47 +6464,42 @@ def _prepare_statistics_payload():
     monthly_rows = []
     for month in sorted(monthly_data.keys()):
         data = monthly_data[month]
+        online, offline, asleep = _percentages_from_seconds(
+            data.get("online_seconds", 0.0),
+            data.get("offline_seconds", 0.0),
+            data.get("asleep_seconds", 0.0),
+        )
         row = {
             "date": month,
-            "online": round(data.get("online", 0.0), 2),
-            "offline": round(data.get("offline", 0.0), 2),
-            "asleep": round(data.get("asleep", 0.0), 2),
+            "online": online,
+            "offline": offline,
+            "asleep": asleep,
             "km": round(data.get("km", 0.0), 2),
             "speed": int(round(data.get("speed", 0.0))),
             "energy": round(data.get("energy", 0.0), 2),
             "park_energy_pct": round(data.get("park_energy_pct", 0.0), 2),
             "park_km": round(data.get("park_km", 0.0), 2),
         }
-        online, offline, asleep = _normalize_state_percentages(
-            row["online"], row["offline"], row["asleep"]
-        )
-        row["online"] = online
-        row["offline"] = offline
-        row["asleep"] = asleep
         monthly_rows.append(row)
 
     rows = monthly_rows + rows
 
     summary = None
     if current["count"]:
-        cnt = current["count"]
+        online, offline, asleep = _percentages_from_seconds(
+            current["online_seconds"], current["offline_seconds"], current["asleep_seconds"]
+        )
         summary = {
             "date": current_month,
-            "online": round(current["online_sum"] / cnt, 2),
-            "offline": round(current["offline_sum"] / cnt, 2),
-            "asleep": round(current["asleep_sum"] / cnt, 2),
+            "online": online,
+            "offline": offline,
+            "asleep": asleep,
             "km": round(current["km"], 2),
             "speed": int(round(current["speed"])),
             "energy": round(current["energy"], 2),
             "park_energy_pct": round(current["park_energy_pct"], 2),
             "park_km": round(current["park_km"], 2),
         }
-        online, offline, asleep = _normalize_state_percentages(
-            summary["online"], summary["offline"], summary["asleep"]
-        )
-        summary["online"] = online
-        summary["offline"] = offline
-        summary["asleep"] = asleep
     # highlight today's statistics and current vehicle state
     today = datetime.now(LOCAL_TZ).date().isoformat()
     vid = str(_default_vehicle_id or "default")
