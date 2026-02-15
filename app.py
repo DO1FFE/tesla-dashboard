@@ -1785,11 +1785,13 @@ def _initial_statistics_backfill(conn):
     conn.commit()
     _rebuild_monthly_scope(conn)
     _snapshot_trip_file_state(conn)
+    backfill_now = None
     try:
         with open(resolve_log_path(_default_vehicle_id or default_vehicle_id(), "state.log"), "r", encoding="utf-8") as handle:
             last_line = None
             for line in handle:
                 last_line = line
+            backfill_now = time.time()
             if last_line:
                 idx = last_line.find("{")
                 ts_str = last_line[:idx].strip() if idx != -1 else None
@@ -1798,7 +1800,7 @@ def _initial_statistics_backfill(conn):
                     try:
                         data = json.loads(last_line[idx:])
                         _set_meta(conn, "state_last_state", data.get("state"))
-                        _set_meta(conn, "state_last_ts", ts_dt.timestamp())
+                        _set_meta(conn, "state_last_ts", backfill_now if backfill_now is not None else ts_dt.timestamp())
                     except Exception:
                         pass
     except Exception:
