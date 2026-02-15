@@ -1484,6 +1484,7 @@ def _rebuild_monthly_scope(conn):
                 "online_seconds": 0.0,
                 "offline_seconds": 0.0,
                 "asleep_seconds": 0.0,
+                "observed_seconds": 0.0,
                 "km": 0.0,
                 "speed": 0.0,
                 "energy": 0.0,
@@ -1494,6 +1495,7 @@ def _rebuild_monthly_scope(conn):
         m["online_seconds"] += float(row[1] or 0.0)
         m["offline_seconds"] += float(row[2] or 0.0)
         m["asleep_seconds"] += float(row[3] or 0.0)
+        m["observed_seconds"] += float(row[1] or 0.0) + float(row[2] or 0.0) + float(row[3] or 0.0)
         m["km"] += float(row[4] or 0.0)
         m["speed"] = max(m["speed"], float(row[5] or 0.0))
         m["energy"] += float(row[6] or 0.0)
@@ -1501,9 +1503,14 @@ def _rebuild_monthly_scope(conn):
         m["park_km"] += float(row[8] or 0.0)
 
     for month, payload in monthly.items():
-        online, offline, asleep = _percentages_from_seconds(
-            payload["online_seconds"], payload["offline_seconds"], payload["asleep_seconds"]
-        )
+        observed_seconds_sum = payload["observed_seconds"]
+        if observed_seconds_sum <= 0:
+            online, offline, asleep = 0.0, 0.0, 0.0
+        else:
+            online = round(payload["online_seconds"] / observed_seconds_sum * 100.0, 2)
+            offline = round(payload["offline_seconds"] / observed_seconds_sum * 100.0, 2)
+            asleep = round(payload["asleep_seconds"] / observed_seconds_sum * 100.0, 2)
+            online, offline, asleep = _normalize_state_percentages(online, offline, asleep)
         _write_daily_row(
             conn,
             month,
@@ -6424,6 +6431,7 @@ def _prepare_statistics_payload():
         "online_seconds": 0.0,
         "offline_seconds": 0.0,
         "asleep_seconds": 0.0,
+        "observed_seconds": 0.0,
         "km": 0.0,
         "speed": 0.0,
         "energy": 0.0,
@@ -6454,6 +6462,11 @@ def _prepare_statistics_payload():
             current["online_seconds"] += entry.get("online_seconds", 0.0)
             current["offline_seconds"] += entry.get("offline_seconds", 0.0)
             current["asleep_seconds"] += entry.get("asleep_seconds", 0.0)
+            current["observed_seconds"] += (
+                entry.get("online_seconds", 0.0)
+                + entry.get("offline_seconds", 0.0)
+                + entry.get("asleep_seconds", 0.0)
+            )
             current["km"] += entry.get("km", 0.0)
             current["energy"] += entry.get("energy", 0.0)
             current["park_energy_pct"] += entry.get("park_energy_pct", 0.0)
@@ -6486,9 +6499,14 @@ def _prepare_statistics_payload():
 
     summary = None
     if current["count"]:
-        online, offline, asleep = _percentages_from_seconds(
-            current["online_seconds"], current["offline_seconds"], current["asleep_seconds"]
-        )
+        observed_seconds_sum = current["observed_seconds"]
+        if observed_seconds_sum <= 0:
+            online, offline, asleep = 0.0, 0.0, 0.0
+        else:
+            online = round(current["online_seconds"] / observed_seconds_sum * 100.0, 2)
+            offline = round(current["offline_seconds"] / observed_seconds_sum * 100.0, 2)
+            asleep = round(current["asleep_seconds"] / observed_seconds_sum * 100.0, 2)
+            online, offline, asleep = _normalize_state_percentages(online, offline, asleep)
         summary = {
             "date": current_month,
             "online": online,
