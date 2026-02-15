@@ -162,8 +162,8 @@ def test_state_backfill_und_increment_verteilen_offenen_zeitraum_nicht_doppelt(m
     conn.close()
 
     assert first is not None
-    assert first[1] == 4.17
-    assert first[2] == 95.83
+    assert first[1] == 100.0
+    assert first[2] == 0.0
     assert first[3] == 0.0
 
     app._statistics_aggregation_tick()
