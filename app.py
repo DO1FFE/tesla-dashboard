@@ -113,6 +113,9 @@ RECEIPT_TIME_FORMAT = "%d.%m.%Y %H:%M"
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
 TESLA_REQUEST_TIMEOUT = float(os.getenv("TESLA_REQUEST_TIMEOUT", "5"))
 CLIENT_TIMEOUT = int(os.getenv("CLIENT_TIMEOUT", "60"))
+STATE_PERCENT_NORMALIZE_TOLERANCE = max(
+    0.0, float(os.getenv("STATE_PERCENT_NORMALIZE_TOLERANCE", "0.05"))
+)
 SECRET_PLACEHOLDER = "********"
 TESLA_TESSIE_MIN_INTERVAL = 5
 letzte_anfrage_pro_vin = {}
@@ -4103,8 +4106,10 @@ def _merge_parking_value(prev_total, prev_source, new_raw, tolerance=0.01):
     return combined, source
 
 
-def _normalize_state_percentages(online, offline, asleep):
-    """Normalisiert Prozentwerte, ohne ``offline`` systematisch zu bevorzugen."""
+def _normalize_state_percentages(
+    online, offline, asleep, tolerance=STATE_PERCENT_NORMALIZE_TOLERANCE
+):
+    """Normalisiert Prozentwerte und korrigiert nur kleine Rundungsdifferenzen."""
     werte = {
         "online": max(float(online), 0.0),
         "offline": max(float(offline), 0.0),
@@ -4119,9 +4124,15 @@ def _normalize_state_percentages(online, offline, asleep):
     else:
         werte = {key: round(val, 2) for key, val in werte.items()}
 
-    total = werte["online"] + werte["offline"] + werte["asleep"]
+    total = round(werte["online"] + werte["offline"] + werte["asleep"], 2)
+
+    if total > 100.0:
+        faktor = 100.0 / total
+        werte = {key: round(val * faktor, 2) for key, val in werte.items()}
+        total = round(werte["online"] + werte["offline"] + werte["asleep"], 2)
+
     diff = round(100.0 - total, 2)
-    if diff:
+    if abs(diff) <= tolerance and diff:
         ziel = max(werte, key=werte.get)
         werte[ziel] = round(max(0.0, werte[ziel] + diff), 2)
 
