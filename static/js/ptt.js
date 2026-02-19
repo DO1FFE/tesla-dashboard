@@ -1,8 +1,23 @@
 (function () {
   const socket = io();
   const pttBtn = document.getElementById('ptt-btn');
+  const pttDesc = document.getElementById('ptt-desc');
   const levelMeter = document.getElementById('audio-level');
-  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+  if (!AudioContextClass) {
+    if (pttBtn) {
+      pttBtn.disabled = true;
+      pttBtn.classList.remove('active-btn');
+    }
+    if (pttDesc) {
+      pttDesc.textContent = 'Push-to-Talk wird von diesem Browser nicht unterstützt.';
+    }
+    console.warn('PTT disabled: AudioContext is not available in this browser.');
+    return;
+  }
+
+  const audioCtx = new AudioContextClass();
 
   function playPing() {
     return audioCtx.resume().then(() => {
