@@ -5245,7 +5245,7 @@ def _fetch_data_once(vehicle_id="default"):
 
     data = None
     live = False
-    if state == "online" or occupant_present:
+    if state == "online":
         data = get_vehicle_data(vid, state=state)
         if (
             isinstance(data, dict)
