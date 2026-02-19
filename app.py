@@ -5792,10 +5792,7 @@ def trip_history():
             heading = float(raw_heading)
         except (TypeError, ValueError):
             heading = 0.0
-        gear = _normalize_shift_state(first[6]) if len(first) >= 7 else None
         heading = heading % 360.0
-        if gear == "R":
-            heading = (heading + 180.0) % 360.0
     weekly, monthly = compute_trip_summaries()
     cfg = load_config()
     response = make_response(
