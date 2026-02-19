@@ -5010,6 +5010,15 @@ def _fetch_nearby_superchargers(vehicle, drive_state, vid):
 
 def get_vehicle_data(vehicle_id=None, state=None):
     """Fetch vehicle data for a given vehicle id."""
+    vid = vehicle_id if vehicle_id is not None else _default_vehicle_id
+
+    if state is not None and state != "online":
+        payload = {"state": state}
+        if vid is not None:
+            payload["id_s"] = str(vid)
+        log_api_data("get_vehicle_data", payload, vehicle_id=vid)
+        return payload
+
     tesla = get_tesla()
     if tesla is None:
         return {"error": "Missing Tesla credentials or teslapy not installed"}
@@ -5057,7 +5066,6 @@ def get_vehicle_data(vehicle_id=None, state=None):
             return {"error": "Vehicle unavailable", "state": "offline"}
 
     if state != "online":
-        
         payload = {"state": state}
         if vid is not None:
             payload["id_s"] = str(vid)
