@@ -21,7 +21,7 @@ This is a simple Flask application that displays real-time data from a Tesla veh
     ```
 
 4. Open `http://localhost:8013` in your browser (the server listens on `0.0.0.0:8013`).
-5. On the configuration page (`/config`) you can set your APRS call sign, passcode and an optional comment to transmit position packets via an EU APRS-IS server. You may also enable an additional WX packet using a separate call sign. Temperatures are included in Celsius within the comment. Positions are sent at most every 30 seconds while driving and at least every 10 minutes even without changes. WX packets obey the same limits and are only transmitted when the outside temperature changes or after ten minutes without an update. The page also lets you adjust the Tesla API polling interval, the idle interval, the deep-sleep recheck interval, and disable the announcement text.
+5. On the configuration page (`/config`) you can set your APRS call sign, passcode and an optional comment to transmit position packets via an EU APRS-IS server. You may also enable an additional WX packet using a separate call sign. Temperatures are included in Celsius within the comment. Positions are sent at most every 30 seconds while driving and at least every 10 minutes even without changes. WX packets obey the same limits and are only transmitted when the outside temperature changes or after ten minutes without an update. The page also lets you adjust the Tesla API polling interval and disable the announcement text.
 6. You can also enter the driver's phone number in international format (for example `+491701234567`), your Infobip API key and an optional sender ID here. Leave the sender field empty if the account does not support custom senders. SMS messages to the driver can be enabled or disabled and you may choose whether they are only allowed while driving or at any time. When restricted to driving mode, messages are still allowed for five minutes after parking.
 7. When sending a text message the sender's name is requested as well. The entire message including the name must not exceed 160 characters.
 
@@ -75,11 +75,8 @@ All required JavaScript and CSS libraries are bundled under `static/` so the das
 The backend continuously polls the Tesla API and pushes new data to clients using Server-Sent Events (SSE). The frontend never talks to the Tesla API directly. It only requests data from the backend using the `/api/...` endpoints so tokens remain secure on the server.
 The frontend first checks `/api/state` to make sure the car is online before
 opening the streaming connection. When the vehicle is reported as `offline` or
-`asleep` it keeps showing cached data and only performs rare `/api/data`
-rechecks based on the configured deep-sleep interval. The backend follows the
-same deep-idle strategy and refreshes the Tesla state only occasionally while
-no activity indicators are present. The dashboard never wakes the vehicle
-automatically.
+`asleep` no further API requests are made so the car remains in its current
+state. The dashboard never wakes the vehicle automatically.
 
 ## Tesla browser compatibility (dropdowns)
 
@@ -116,7 +113,7 @@ Additional toggles allow hiding the heater indicators and the list of nearby Sup
 You can also enable or disable the announcement text and adjust the API polling interval without restarting the server.
 Clients reload automatically when the polling interval changes so the new setting takes effect immediately.
 
-Whenever a door, window, the trunk or the frunk is open or the vehicle is unlocked the backend switches to the normal polling interval. The same happens when someone is detected inside, while charging, or the gear lever is in R, N or D. In all other situations the idle interval is used so the car can enter sleep mode. If the car is already `offline`/`asleep` and there are no activity indicators, the backend uses the deep-sleep interval (`api_interval_sleep`) for very infrequent state rechecks.
+Whenever a door, window, the trunk or the frunk is open or the vehicle is unlocked the backend switches to the normal polling interval. The same happens when someone is detected inside or the gear lever is in R, N or D. In all other situations the idle interval is used so the car can enter sleep mode.
 
 Data is streamed to the frontend via `/stream/<vehicle_id>` using Server-Sent Events so the dashboard updates instantly when new information arrives.
 The endpoint `/apiliste` exposes a text file listing all seen API variables and their latest values.
