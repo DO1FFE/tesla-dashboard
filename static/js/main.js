@@ -8,6 +8,7 @@ var announcementTimer = null;
 var lastConfigJSON = null;
 var lastApiInterval = null;
 var lastApiIntervalIdle = null;
+var lastApiIntervalSleep = null;
 var statusAbfrageTimer = null;
 var parkStartTime = null;
 var currentGear = null;
@@ -19,6 +20,8 @@ var DEFAULT_ZOOM = 18;
 var superchargerMarkers = [];
 var lastSuperchargerData = null;
 var letzteKartenPosition = null;
+var letzteCacheDaten = null;
+var letzterOfflineRecheck = 0;
 
 function normalizeShiftState(shift) {
     if (shift === null || shift === undefined) {
@@ -248,6 +251,26 @@ function planeNaechsteStatusabfrage() {
     statusAbfrageTimer = setTimeout(function() {
         startStreamIfOnline();
     }, intervall);
+}
+
+
+function ermittleOfflineRecheckIntervall() {
+    var konfigWert = Number(lastApiIntervalSleep);
+    if (isFinite(konfigWert) && konfigWert > 0) {
+        return konfigWert * 1000;
+    }
+    return 180000;
+}
+
+function istOfflineRecheckFaellig() {
+    var intervall = ermittleOfflineRecheckIntervall();
+    return !letzteCacheDaten || (Date.now() - letzterOfflineRecheck) >= intervall;
+}
+
+function verarbeiteLetzteCacheDaten() {
+    if (letzteCacheDaten && !letzteCacheDaten.error) {
+        handleData(letzteCacheDaten);
+    }
 }
 
 function startAnnouncementCycle() {
@@ -571,6 +594,9 @@ function fetchVehicles() {
 }
 
 function handleData(data) {
+    if (data && !data.error) {
+        letzteCacheDaten = data;
+    }
     hideLoading();
     updateHeader(data);
     updateUI(data);
@@ -1823,11 +1849,16 @@ function startStream() {
             updateSoftwareUpdate(resp.software_update);
             if (istOfflineOderSchlaeft(st)) {
                 planeNaechsteStatusabfrage();
-                $.getJSON('/api/data/' + currentVehicle, function(data) {
-                    if (data && !data.error) {
-                        handleData(data);
-                    }
-                });
+                if (istOfflineRecheckFaellig()) {
+                    letzterOfflineRecheck = Date.now();
+                    $.getJSON('/api/data/' + currentVehicle, function(data) {
+                        if (data && !data.error) {
+                            handleData(data);
+                        }
+                    });
+                } else {
+                    verarbeiteLetzteCacheDaten();
+                }
                 return;
             }
             $.getJSON('/api/data/' + currentVehicle, function(data) {
@@ -1868,11 +1899,16 @@ function startStreamIfOnline() {
         if (istOfflineOderSchlaeft(st)) {
             hideLoading();
             planeNaechsteStatusabfrage();
-            $.getJSON('/api/data/' + currentVehicle, function(data) {
-                if (data && !data.error) {
-                    handleData(data);
-                }
-            });
+            if (istOfflineRecheckFaellig()) {
+                letzterOfflineRecheck = Date.now();
+                $.getJSON('/api/data/' + currentVehicle, function(data) {
+                    if (data && !data.error) {
+                        handleData(data);
+                    }
+                });
+            } else {
+                verarbeiteLetzteCacheDaten();
+            }
             return;
         }
         startStream();
@@ -1890,6 +1926,7 @@ $.getJSON('/api/config', function(cfg) {
     if (cfg) {
         lastApiInterval = cfg.api_interval;
         lastApiIntervalIdle = cfg.api_interval_idle;
+        lastApiIntervalSleep = cfg.api_interval_sleep;
         if (cfg.vehicle_id) {
             currentVehicle = cfg.vehicle_id;
         }
@@ -1903,6 +1940,7 @@ function fetchConfig() {
         if (json !== lastConfigJSON) {
             if (cfg && (cfg.api_interval !== lastApiInterval ||
                         cfg.api_interval_idle !== lastApiIntervalIdle ||
+                        cfg.api_interval_sleep !== lastApiIntervalSleep ||
                         cfg.vehicle_id !== currentVehicle)) {
                 location.reload(true);
                 return;
@@ -1911,6 +1949,7 @@ function fetchConfig() {
             if (cfg) {
                 lastApiInterval = cfg.api_interval;
                 lastApiIntervalIdle = cfg.api_interval_idle;
+                lastApiIntervalSleep = cfg.api_interval_sleep;
             }
             applyConfig(cfg);
         }

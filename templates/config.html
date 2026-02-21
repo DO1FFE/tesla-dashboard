@@ -77,6 +77,10 @@
                 <input type="number" name="api_interval_idle" min="1" step="1" value="{{ config.get('api_interval_idle', 30) }}">
             </label>
             <label>
+                API Intervall im Tiefschlaf (Sekunden)
+                <input type="number" name="api_interval_sleep" min="60" step="1" value="{{ config.get('api_interval_sleep', 180) }}">
+            </label>
+            <label>
                 Tessie API-Token
                 <input type="password" name="tessie_api_token" value="{{ config.get('tessie_api_token','') }}" autocomplete="new-password" placeholder="Neuen API-Token eingeben">
             </label>
