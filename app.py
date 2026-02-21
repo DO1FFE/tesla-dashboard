@@ -5272,7 +5272,9 @@ def reverse_geocode(lat, lon, vehicle_id=None):
     return {}
 
 
-def _fetch_data_once(vehicle_id="default"):
+def _fetch_data_once(
+    vehicle_id="default", skip_state_refresh=False, sleep_window_seconds=None
+):
     """Return current data or cached values based on vehicle state."""
     if vehicle_id in (None, "default"):
         vid = _default_vehicle_id
@@ -5283,10 +5285,23 @@ def _fetch_data_once(vehicle_id="default"):
 
     cached = _load_cached(cache_id)
 
-    state = last_vehicle_state.get(vid or cache_id)
-    # Always refresh the vehicle state so transitions from offline/asleep
-    # are detected even when no occupant is present.
-    state_info = get_vehicle_state(vid)
+    state_key = vid or cache_id
+    state = last_vehicle_state.get(state_key)
+    refresh_ueberspringen = False
+    if skip_state_refresh and state in {"offline", "asleep"}:
+        letztes_refresh = _last_state_refresh_ts.get(state_key)
+        try:
+            sleep_window = int(sleep_window_seconds or 0)
+        except Exception:
+            sleep_window = 0
+        sleep_window = max(1, sleep_window)
+        if letztes_refresh and (time.time() - letztes_refresh) < sleep_window:
+            refresh_ueberspringen = True
+
+    if refresh_ueberspringen:
+        state_info = {"state": state}
+    else:
+        state_info = get_vehicle_state(vid)
     state = state_info.get("state") if isinstance(state_info, dict) else state
 
     data = None
@@ -5678,9 +5693,37 @@ def _sleep_idle(seconds, stop_event=None):
             break
 
 
+def _hat_praesenz_oder_aktivitaet(data):
+    """Prüfe auf Präsenz- oder Aktivitätsindikatoren im Fahrzeugzustand."""
+    if not isinstance(data, dict):
+        return bool(occupant_present)
+    v_state = data.get("vehicle_state", {})
+    d_state = data.get("drive_state", {})
+    c_state = data.get("charge_state", {})
+    tueren_offen = any(v_state.get(k) for k in ["df", "dr", "pf", "pr"])
+    fenster_offen = any(
+        v_state.get(k) for k in ["fd_window", "rd_window", "fp_window", "rp_window"]
+    )
+    klappen_offen = any(v_state.get(k) for k in ["ft", "rt"])
+    entriegelt = v_state.get("locked") is False
+    nutzer_anwesend = bool(occupant_present or v_state.get("is_user_present"))
+    gang_aktiv = _normalize_shift_state(d_state.get("shift_state")) in {"R", "N", "D"}
+    laedt = c_state.get("charging_state") == "Charging"
+    return (
+        nutzer_anwesend
+        or gang_aktiv
+        or tueren_offen
+        or fenster_offen
+        or klappen_offen
+        or entriegelt
+        or laedt
+    )
+
+
 def _fetch_loop(vehicle_id, interval=3):
     """Continuously fetch data for a vehicle and notify subscribers."""
     idle_interval = 30
+    sleep_interval = 180
     with thread_registry_lock:
         control = thread_controls.get(vehicle_id)
         if control is None:
@@ -5699,6 +5742,11 @@ def _fetch_loop(vehicle_id, interval=3):
                 idle_interval = int(cfg.get("api_interval_idle", idle_interval))
             except Exception:
                 pass
+            try:
+                sleep_interval = int(cfg.get("api_interval_sleep", sleep_interval))
+            except Exception:
+                pass
+            sleep_interval = max(60, sleep_interval)
             try:
                 inactivity_timeout = int(cfg.get("thread_inactivity_timeout", 180))
             except Exception:
@@ -5724,54 +5772,39 @@ def _fetch_loop(vehicle_id, interval=3):
                     stop_event.set()
                     break
 
+            letztes = latest_data.get(vehicle_id) or _load_cached(vehicle_id)
+            letzter_state = None
+            if isinstance(letztes, dict):
+                letzter_state = letztes.get("state")
+            if not letzter_state:
+                letzter_state = last_vehicle_state.get(vehicle_id)
+            deep_idle = (
+                letzter_state in {"offline", "asleep"}
+                and not _hat_praesenz_oder_aktivitaet(letztes)
+            )
+
             start = time.time()
-            data = _fetch_data_once(vehicle_id)
+            data = _fetch_data_once(
+                vehicle_id,
+                skip_state_refresh=deep_idle,
+                sleep_window_seconds=sleep_interval,
+            )
             if isinstance(data, dict) and data.get("_live"):
                 try:
                     send_aprs(data)
                 except Exception:
                     pass
-            # Use the normal interval whenever someone is in the vehicle, any
-            # opening is not fully closed or a drive gear is engaged.  Otherwise
-            # fall back to the idle interval so the car can go to sleep.
-            door_open = False
-            window_open = False
-            trunk_open = False
-            unlocked = False
-            gear_active = False
-            charging = False
-            present = occupant_present
-            if isinstance(data, dict):
-                v_state = data.get("vehicle_state", {})
-                d_state = data.get("drive_state", {})
-                c_state = data.get("charge_state", {})
-                door_open = any(v_state.get(k) for k in ["df", "dr", "pf", "pr"])
-                window_open = any(
-                    v_state.get(k) for k in [
-                        "fd_window",
-                        "rd_window",
-                        "fp_window",
-                        "rp_window",
-                    ]
-                )
-                trunk_open = any(v_state.get(k) for k in ["ft", "rt"])
-                unlocked = v_state.get("locked") is False
-                present = present or v_state.get("is_user_present")
-                gear_active = _normalize_shift_state(d_state.get("shift_state")) in {"R", "N", "D"}
-                charging = c_state.get("charging_state") == "Charging"
 
-            if (
-                present
-                or gear_active
-                or door_open
-                or window_open
-                or trunk_open
-                or unlocked
-                or charging
-            ):
+            aktiv = _hat_praesenz_oder_aktivitaet(data)
+            state = data.get("state") if isinstance(data, dict) else None
+
+            if aktiv:
                 remaining = interval - (time.time() - start)
                 if remaining > 0:
                     stop_event.wait(timeout=remaining)
+            elif state in {"offline", "asleep"}:
+                remaining = sleep_interval - (time.time() - start)
+                _sleep_idle(max(0, remaining), stop_event=stop_event)
             else:
                 remaining = idle_interval - (time.time() - start)
                 _sleep_idle(max(0, remaining), stop_event=stop_event)
@@ -6358,6 +6391,7 @@ def config_page():
         sms_drive_only = "sms_drive_only" in request.form
         api_interval = request.form.get("api_interval", "").strip()
         api_interval_idle = request.form.get("api_interval_idle", "").strip()
+        api_interval_sleep = request.form.get("api_interval_sleep", "").strip()
         tariff_base = request.form.get("tariff_base", "").replace(",", ".").strip()
         tariff_12 = request.form.get("tariff_12", "").replace(",", ".").strip()
         tariff_34 = request.form.get("tariff_34", "").replace(",", ".").strip()
@@ -6476,6 +6510,10 @@ def config_page():
             cfg["api_interval_idle"] = max(1, int(api_interval_idle))
         elif "api_interval_idle" in cfg:
             cfg.pop("api_interval_idle")
+        if api_interval_sleep.isdigit():
+            cfg["api_interval_sleep"] = max(60, int(api_interval_sleep))
+        elif "api_interval_sleep" in cfg:
+            cfg.pop("api_interval_sleep")
         save_config(cfg)
         save_config(aprs_cfg, vehicle_id=selected_vehicle_id)
     else:
