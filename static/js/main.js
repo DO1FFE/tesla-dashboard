@@ -1362,21 +1362,24 @@ function updateChargingInfo(charge, wurzelDaten) {
         }
     }
     if (letzteLadezuwachsQuelleTyp === 'letzte_session') {
-        var letzterStartSocQuelle = charge ? charge.last_charge_start_soc : null;
-        if (letzterStartSocQuelle == null && wurzelDaten) {
-            letzterStartSocQuelle = wurzelDaten.last_charge_start_soc;
-        }
-        lastChargeStartSoc = parseNumber(letzterStartSocQuelle);
         var letzterEndSocQuelle = charge ? charge.last_charge_end_soc : null;
         if (letzterEndSocQuelle == null && wurzelDaten) {
             letzterEndSocQuelle = wurzelDaten.last_charge_end_soc;
         }
         lastChargeEndSoc = parseNumber(letzterEndSocQuelle);
+        if (lastChargeEndSoc != null && letzterLadezuwachsProzent != null) {
+            lastChargeStartSoc = Number(lastChargeEndSoc) - Number(letzterLadezuwachsProzent);
+        }
     } else if (letzteLadezuwachsQuelleTyp === 'aktuelle_session') {
         lastChargeStartSoc = parseNumber(startSoc);
         lastChargeEndSoc = parseNumber(currentSoc);
     }
     var lastChargeSocText = null;
+    if (lastChargeEndSoc != null && letzterLadezuwachsProzent != null) {
+        if (letzteLadezuwachsQuelleTyp !== 'aktuelle_session') {
+            lastChargeStartSoc = Number(lastChargeEndSoc) - Number(letzterLadezuwachsProzent);
+        }
+    }
     if (lastChargeStartSoc != null && lastChargeEndSoc != null) {
         var startSocText = Math.round(lastChargeStartSoc).toFixed(0);
         var endSocText = Math.round(lastChargeEndSoc).toFixed(0);
