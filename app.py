@@ -5008,6 +5008,39 @@ def _fetch_nearby_superchargers(vehicle, drive_state, vid):
     return []
 
 
+
+def _formatierter_fahrzeugname(name, car_type, trim_badging):
+    """Formatiert den Fahrzeugnamen ohne doppelte Modellangaben."""
+    if not name or not car_type or not trim_badging:
+        return name
+
+    car_map = {
+        "models": "Model S",
+        "modelx": "Model X",
+        "model3": "Model 3",
+        "modely": "Model Y",
+        "roadster": "Roadster",
+        "cybertruck": "Cybertruck",
+    }
+    car_desc = car_map.get(str(car_type).lower(), car_type)
+    trim_text = str(trim_badging).upper()
+    geplanter_suffix = f"({car_desc} {trim_text})"
+    name_klein = str(name).lower()
+    suffix_klein = geplanter_suffix.lower()
+
+    if suffix_klein in name_klein:
+        return name
+
+    car_desc_klein = str(car_desc).lower()
+    trim_klein = trim_text.lower()
+
+    if car_desc_klein in name_klein:
+        if trim_klein in name_klein:
+            return name
+        return f"{name} ({trim_text})"
+
+    return f"{name} {geplanter_suffix}"
+
 def get_vehicle_data(vehicle_id=None, state=None):
     """Fetch vehicle data for a given vehicle id."""
     vid = vehicle_id if vehicle_id is not None else _default_vehicle_id
@@ -5109,16 +5142,9 @@ def get_vehicle_data(vehicle_id=None, state=None):
         car_type = v_config.get("car_type")
         trim = v_config.get("trim_badging")
         if name and car_type and trim:
-            car_map = {
-                "models": "Model S",
-                "modelx": "Model X",
-                "model3": "Model 3",
-                "modely": "Model Y",
-                "roadster": "Roadster",
-                "cybertruck": "Cybertruck",
-            }
-            car_desc = car_map.get(str(car_type).lower(), car_type)
-            v_state["vehicle_name"] = f"{name} ({car_desc} {trim.upper()})"
+            v_state["vehicle_name"] = _formatierter_fahrzeugname(
+                name, car_type, trim
+            )
     except Exception:
         pass
     try:
