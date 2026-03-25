@@ -244,10 +244,14 @@ function planeNaechsteStatusabfrage() {
     if (statusAbfrageTimer) {
         clearTimeout(statusAbfrageTimer);
     }
-    var intervall = lastApiIntervalIdle || 30000;
+    var idleSekunden = Number(lastApiIntervalIdle);
+    if (!isFinite(idleSekunden) || idleSekunden <= 0) {
+        idleSekunden = 30;
+    }
+    var intervallMs = Math.max(1, idleSekunden) * 1000;
     statusAbfrageTimer = setTimeout(function() {
         startStreamIfOnline();
-    }, intervall);
+    }, intervallMs);
 }
 
 function startAnnouncementCycle() {
@@ -1892,7 +1896,7 @@ $.getJSON('/api/config', function(cfg) {
     lastConfigJSON = JSON.stringify(cfg || {});
     if (cfg) {
         lastApiInterval = cfg.api_interval;
-        lastApiIntervalIdle = cfg.api_interval_idle;
+        lastApiIntervalIdle = Number(cfg.api_interval_idle);
         if (cfg.vehicle_id) {
             currentVehicle = cfg.vehicle_id;
         }
@@ -1902,10 +1906,11 @@ $.getJSON('/api/config', function(cfg) {
 
 function fetchConfig() {
     $.getJSON('/api/config', function(cfg) {
+        var naechstesApiIntervalIdle = cfg ? Number(cfg.api_interval_idle) : null;
         var json = JSON.stringify(cfg || {});
         if (json !== lastConfigJSON) {
             if (cfg && (cfg.api_interval !== lastApiInterval ||
-                        cfg.api_interval_idle !== lastApiIntervalIdle ||
+                        naechstesApiIntervalIdle !== lastApiIntervalIdle ||
                         cfg.vehicle_id !== currentVehicle)) {
                 location.reload(true);
                 return;
@@ -1913,7 +1918,7 @@ function fetchConfig() {
             lastConfigJSON = json;
             if (cfg) {
                 lastApiInterval = cfg.api_interval;
-                lastApiIntervalIdle = cfg.api_interval_idle;
+                lastApiIntervalIdle = naechstesApiIntervalIdle;
             }
             applyConfig(cfg);
         }
