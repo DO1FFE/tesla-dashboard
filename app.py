@@ -5662,16 +5662,17 @@ def _sleep_idle(seconds):
 
 def _fetch_loop(vehicle_id, interval=3):
     """Continuously fetch data for a vehicle and notify subscribers."""
+    interval = max(1, int(interval))
     idle_interval = 30
     while True:
         start = time.time()
         cfg = load_config()
         try:
-            interval = int(cfg.get("api_interval", interval))
+            interval = max(1, int(cfg.get("api_interval", interval)))
         except Exception:
             pass
         try:
-            idle_interval = int(cfg.get("api_interval_idle", idle_interval))
+            idle_interval = max(1, int(cfg.get("api_interval_idle", idle_interval)))
         except Exception:
             pass
         data = _fetch_data_once(vehicle_id)
@@ -5688,12 +5689,15 @@ def _fetch_loop(vehicle_id, interval=3):
         trunk_open = False
         unlocked = False
         gear_active = False
+        moving_active = False
+        online_active = False
         charging = False
         present = occupant_present
         if isinstance(data, dict):
             v_state = data.get("vehicle_state", {})
             d_state = data.get("drive_state", {})
             c_state = data.get("charge_state", {})
+            state = str(data.get("state") or "").lower()
             door_open = any(v_state.get(k) for k in ["df", "dr", "pf", "pr"])
             window_open = any(
                 v_state.get(k) for k in [
@@ -5707,15 +5711,23 @@ def _fetch_loop(vehicle_id, interval=3):
             unlocked = v_state.get("locked") is False
             present = present or v_state.get("is_user_present")
             gear_active = _normalize_shift_state(d_state.get("shift_state")) in {"R", "N", "D"}
+            speed = d_state.get("speed")
+            power = d_state.get("power")
+            moving_active = (speed is not None and speed > 0) or (
+                power is not None and abs(power) > 0
+            )
+            online_active = state == "online"
             charging = c_state.get("charging_state") == "Charging"
 
         if (
             present
             or gear_active
+            or moving_active
             or door_open
             or window_open
             or trunk_open
             or unlocked
+            or online_active
             or charging
         ):
             remaining = interval - (time.time() - start)
