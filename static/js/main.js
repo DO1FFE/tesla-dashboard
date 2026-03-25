@@ -532,6 +532,7 @@ function updateHeader(data) {
         if (!name && data.display_name) {
             name = data.display_name;
         }
+        name = bereinigeDoppeltenModellnamen(name);
         if (name) {
             info = 'für ' + name;
         }
@@ -543,6 +544,21 @@ function updateHeader(data) {
         }
     }
     $('#vehicle-info').text(info);
+}
+
+function bereinigeDoppeltenModellnamen(name) {
+    if (typeof name !== 'string') {
+        return name;
+    }
+    var bereinigt = name.replace(/\s+/g, ' ').trim();
+    if (!bereinigt) {
+        return bereinigt;
+    }
+    var doppelSuffixMuster = /\(([^()]+)\)\s*\(\1\)\s*$/i;
+    while (doppelSuffixMuster.test(bereinigt)) {
+        bereinigt = bereinigt.replace(doppelSuffixMuster, '($1)').trim();
+    }
+    return bereinigt;
 }
 
 function fetchVehicles() {
