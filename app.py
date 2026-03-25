@@ -5014,6 +5014,10 @@ def _formatierter_fahrzeugname(name, car_type, trim_badging):
     if not name or not car_type or not trim_badging:
         return name
 
+    normalisierter_name = " ".join(str(name).split())
+    if not normalisierter_name:
+        return name
+
     car_map = {
         "models": "Model S",
         "modelx": "Model X",
@@ -5025,21 +5029,25 @@ def _formatierter_fahrzeugname(name, car_type, trim_badging):
     car_desc = car_map.get(str(car_type).lower(), car_type)
     trim_text = str(trim_badging).upper()
     geplanter_suffix = f"({car_desc} {trim_text})"
-    name_klein = str(name).lower()
+    name_klein = normalisierter_name.lower()
     suffix_klein = geplanter_suffix.lower()
 
+    while name_klein.endswith(f" {suffix_klein} {suffix_klein}"):
+        normalisierter_name = normalisierter_name[: -(len(geplanter_suffix) + 1)]
+        name_klein = normalisierter_name.lower()
+
     if suffix_klein in name_klein:
-        return name
+        return normalisierter_name
 
     car_desc_klein = str(car_desc).lower()
     trim_klein = trim_text.lower()
 
     if car_desc_klein in name_klein:
         if trim_klein in name_klein:
-            return name
-        return f"{name} ({trim_text})"
+            return normalisierter_name
+        return f"{normalisierter_name} ({trim_text})"
 
-    return f"{name} {geplanter_suffix}"
+    return f"{normalisierter_name} {geplanter_suffix}"
 
 def get_vehicle_data(vehicle_id=None, state=None):
     """Fetch vehicle data for a given vehicle id."""
