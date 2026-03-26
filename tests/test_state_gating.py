@@ -1,6 +1,8 @@
 import pathlib
 import sys
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import app
@@ -96,3 +98,88 @@ def test_fetch_data_once_online_ruft_live_abruf_auf_und_nutzt_fallback(monkeypat
     assert daten["state"] == "online"
     assert daten["source"] == "cache"
     assert daten["_live"] is False
+
+
+def test_fetch_loop_locked_ohne_insassen_nutzt_idle_intervall(monkeypatch):
+    idle_aufrufe = []
+
+    monkeypatch.setattr(
+        app,
+        "load_config",
+        lambda: {"api_interval": 5, "api_interval_idle": 30},
+    )
+    monkeypatch.setattr(
+        app,
+        "_fetch_data_once",
+        lambda vehicle_id: {
+            "_live": False,
+            "state": "online",
+            "vehicle_state": {
+                "locked": True,
+                "is_user_present": False,
+                "df": 0,
+                "dr": 0,
+                "pf": 0,
+                "pr": 0,
+                "ft": 0,
+                "rt": 0,
+                "fd_window": 0,
+                "rd_window": 0,
+                "fp_window": 0,
+                "rp_window": 0,
+            },
+            "drive_state": {"shift_state": None, "speed": 0, "power": 0},
+            "charge_state": {"charging_state": "Disconnected"},
+        },
+    )
+    monkeypatch.setattr(app, "send_aprs", lambda data: None)
+    monkeypatch.setattr(app.time, "time", lambda: 100.0)
+
+    def _fake_sleep_idle(sekunden):
+        idle_aufrufe.append(sekunden)
+        raise RuntimeError("stop-loop")
+
+    monkeypatch.setattr(app, "_sleep_idle", _fake_sleep_idle)
+    monkeypatch.setattr(app.time, "sleep", lambda sekunden: None)
+    monkeypatch.setattr(app, "occupant_present", False)
+
+    with pytest.raises(RuntimeError, match="stop-loop"):
+        app._fetch_loop("veh")
+
+    assert idle_aufrufe == [30]
+
+
+def test_fetch_loop_unlocked_nutzt_normales_intervall(monkeypatch):
+    schlaf_aufrufe = []
+
+    monkeypatch.setattr(
+        app,
+        "load_config",
+        lambda: {"api_interval": 5, "api_interval_idle": 30},
+    )
+    monkeypatch.setattr(
+        app,
+        "_fetch_data_once",
+        lambda vehicle_id: {
+            "_live": False,
+            "state": "online",
+            "vehicle_state": {"locked": False, "is_user_present": False},
+            "drive_state": {"shift_state": None, "speed": 0, "power": 0},
+            "charge_state": {"charging_state": "Disconnected"},
+        },
+    )
+    monkeypatch.setattr(app, "send_aprs", lambda data: None)
+    monkeypatch.setattr(app.time, "time", lambda: 100.0)
+    monkeypatch.setattr(app, "occupant_present", False)
+    monkeypatch.setattr(app, "_sleep_idle", lambda sekunden: None)
+
+    def _fake_sleep(sekunden):
+        schlaf_aufrufe.append(sekunden)
+        raise RuntimeError("stop-loop")
+
+    monkeypatch.setattr(app.time, "sleep", _fake_sleep)
+
+    with pytest.raises(RuntimeError, match="stop-loop"):
+        app._fetch_loop("veh")
+
+    assert schlaf_aufrufe == [5]
