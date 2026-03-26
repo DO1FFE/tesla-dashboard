@@ -5698,14 +5698,12 @@ def _fetch_loop(vehicle_id, interval=3):
         unlocked = False
         gear_active = False
         moving_active = False
-        online_active = False
         charging = False
         present = occupant_present
         if isinstance(data, dict):
             v_state = data.get("vehicle_state", {})
             d_state = data.get("drive_state", {})
             c_state = data.get("charge_state", {})
-            state = str(data.get("state") or "").lower()
             door_open = any(v_state.get(k) for k in ["df", "dr", "pf", "pr"])
             window_open = any(
                 v_state.get(k) for k in [
@@ -5724,7 +5722,6 @@ def _fetch_loop(vehicle_id, interval=3):
             moving_active = (speed is not None and speed > 0) or (
                 power is not None and abs(power) > 0
             )
-            online_active = state == "online"
             charging = c_state.get("charging_state") == "Charging"
 
         if (
@@ -5735,7 +5732,6 @@ def _fetch_loop(vehicle_id, interval=3):
             or window_open
             or trunk_open
             or unlocked
-            or online_active
             or charging
         ):
             remaining = interval - (time.time() - start)
