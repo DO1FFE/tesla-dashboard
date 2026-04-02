@@ -4591,6 +4591,10 @@ def get_vehicle_state(vehicle_id=None):
     now = time.time()
     cfg = load_config(vehicle_id)
     try:
+        api_interval = int(cfg.get("api_interval", 3))
+    except Exception:
+        api_interval = 3
+    try:
         api_interval_idle = int(cfg.get("api_interval_idle", 30))
     except Exception:
         api_interval_idle = 30
@@ -4603,9 +4607,28 @@ def get_vehicle_state(vehicle_id=None):
         service_mode = vs.get("service_mode")
         service_mode_plus = vs.get("service_mode_plus")
 
+    def _hat_normale_aktivitaet(fahrzeugdaten):
+        """Prüfe, ob normale Update-Rate wegen Aktivität erzwungen werden muss."""
+        if not isinstance(fahrzeugdaten, dict):
+            return False
+        vehicle_state = fahrzeugdaten.get("vehicle_state", {})
+        drive_state = fahrzeugdaten.get("drive_state", {})
+
+        if vehicle_state.get("is_user_present"):
+            return True
+        if any(vehicle_state.get(key) for key in ("df", "dr", "pf", "pr")):
+            return True
+        return _normalize_shift_state(drive_state.get("shift_state")) in {"R", "N", "D"}
+
+    normale_aktivitaet = (
+        occupant_present
+        or _hat_normale_aktivitaet(cached)
+        or _hat_normale_aktivitaet(latest_data.get(vid))
+    )
+
     last_refresh = _last_state_refresh_ts.get(vid)
-    refresh_interval = 10
-    if state in {"offline", "asleep"} and not occupant_present:
+    refresh_interval = max(1, api_interval)
+    if state in {"offline", "asleep"} and not normale_aktivitaet:
         refresh_interval = api_interval_idle
     if state is not None and last_refresh and now - last_refresh < refresh_interval:
         return {
@@ -4618,7 +4641,7 @@ def get_vehicle_state(vehicle_id=None):
     if tesla is None:
         return {"error": "Missing Tesla credentials or teslapy not installed"}
 
-    allow_refresh = not (state in {"offline", "asleep"} and not occupant_present)
+    allow_refresh = not (state in {"offline", "asleep"} and not normale_aktivitaet)
     vehicles = _cached_vehicle_list(tesla, allow_refresh=allow_refresh)
     if not vehicles:
         return {"error": "No vehicles found"}
