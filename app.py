@@ -4747,11 +4747,14 @@ def _tessie_battery_temp(vin):
             verbleibend = TESLA_TESSIE_MIN_INTERVAL - (jetzt - letzte_anfrage)
             if verbleibend > 0:
                 logging.info(
-                    "Tessie-Abfrage für VIN %s wird um %.1f Sekunden verzögert.",
+                    (
+                        "Tessie-Abfrage für VIN %s zu früh angefordert "
+                        "(noch %.1f Sekunden); nutze Cachewert."
+                    ),
                     vin,
                     verbleibend,
                 )
-                time.sleep(verbleibend)
+                return letzte_batterie_temp_pro_vin.get(vin)
         try:
             resp = requests.get(url, headers=headers, timeout=TESLA_REQUEST_TIMEOUT)
         finally:
