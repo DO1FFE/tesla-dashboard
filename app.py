@@ -348,7 +348,6 @@ def _lookup_worker():
         finally:
             with _lookup_lock:
                 _queued_ips.discard(ip)
-            _lookup_queue.task_done()
 
 
 def _enqueue_lookup(ip):
