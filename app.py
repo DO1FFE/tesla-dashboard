@@ -44,6 +44,7 @@ import requests
 from functools import wraps
 from dotenv import load_dotenv
 from version import get_version
+from logo import LOGO_DATA_URI
 import qrcode
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -241,6 +242,12 @@ def socketio_client_script() -> str:
 def inject_ga_id():
     """Add Google Analytics tracking ID to all templates."""
     return {"ga_id": GA_TRACKING_ID}
+
+
+@app.context_processor
+def inject_splash_logo():
+    """Stellt das Splashscreen-Logo als Data-URI bereit."""
+    return {"splash_logo_data_uri": LOGO_DATA_URI}
 
 
 @app.before_request
