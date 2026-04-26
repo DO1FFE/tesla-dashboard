@@ -20,6 +20,9 @@
      crossorigin="anonymous"></script>
 </head>
 <body>
+    <div id="splashscreen" role="status" aria-live="polite" aria-label="Splashscreen wird angezeigt">
+        <img src="{{ splash_logo_data_uri }}" alt="Tesla Dashboard Splashscreen" loading="eager" decoding="async">
+    </div>
     <a href="#dashboard-content" class="skip-link">Zum Inhalt springen</a>
     <h2>Tesla-Dashboard V{{ version }}
         <span id="header-right">
@@ -273,6 +276,19 @@
 
     <script>
         window.APP_VERSION = "{{ version }}";
+
+        window.addEventListener("load", function () {
+            const splash = document.getElementById("splashscreen");
+            if (!splash) {
+                return;
+            }
+            window.setTimeout(function () {
+                splash.classList.add("is-hidden");
+                window.setTimeout(function () {
+                    splash.remove();
+                }, 400);
+            }, 5000);
+        });
     </script>
     <script src="/static/js/map-providers.js"></script>
     <script src="/static/js/main.js"></script>
