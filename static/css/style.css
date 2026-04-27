@@ -46,6 +46,17 @@ h2 {
   text-align: left;
   border-bottom: 1px solid #333;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0;
+}
+
+.header-logo {
+  height: 16px;
+  width: auto;
+  margin-right: 6px;
+  flex: 0 0 auto;
 }
 
 label {
@@ -399,7 +410,8 @@ select {
 }
 
 #header-right {
-  float: right;
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 #header-right span {
@@ -969,8 +981,9 @@ select {
 /* Responsive adjustments */
 @media (max-width: 600px) {
   #header-right {
-    float: none;
+    margin-left: 0;
     display: block;
+    width: 100%;
     text-align: right;
   }
   #header-right span {
