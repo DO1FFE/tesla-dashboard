@@ -1535,6 +1535,7 @@ select {
   background: #000;
   opacity: 1;
   transition: opacity 0.4s ease;
+  animation: splash-autohide 0.4s ease 5s forwards;
 }
 
 #splashscreen.is-hidden {
@@ -1548,4 +1549,12 @@ select {
   object-fit: contain;
   border-radius: 16px;
   box-shadow: 0 0 32px rgba(0, 0, 0, 0.7);
+}
+
+@keyframes splash-autohide {
+  to {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
 }
