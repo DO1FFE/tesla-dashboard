@@ -287,6 +287,11 @@
                 window.setTimeout(function () {
                     splash.remove();
                 }, 400);
+                window.setTimeout(function () {
+                    if (document.body.contains(splash)) {
+                        splash.style.display = "none";
+                    }
+                }, 400);
             }, 5000);
         });
     </script>
