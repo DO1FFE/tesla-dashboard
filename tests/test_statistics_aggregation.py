@@ -130,6 +130,67 @@ def test_api_statistics_triggers_tick_when_thread_missing(monkeypatch, tmp_path)
     assert today_row["speed"] == expected_speed
 
 
+def test_import_startet_statistik_nicht_synchron(monkeypatch, tmp_path):
+    db_path = tmp_path / "stats.db"
+    monkeypatch.setenv("STATISTICS_DB_PATH", str(db_path))
+    monkeypatch.delenv("FORCE_STATISTICS_REBUILD", raising=False)
+    monkeypatch.delenv("DISABLE_STATISTICS_AGGREGATION", raising=False)
+
+    import app
+
+    importlib.reload(app)
+
+    assert app.FORCE_STATISTICS_REBUILD is False
+    assert app._aggregation_thread is None
+
+
+def test_api_statistics_liest_db_ohne_synchronen_tick(monkeypatch, tmp_path):
+    db_path = tmp_path / "stats.db"
+    monkeypatch.setenv("STATISTICS_DB_PATH", str(db_path))
+    monkeypatch.delenv("DISABLE_STATISTICS_AGGREGATION", raising=False)
+
+    import app
+
+    importlib.reload(app)
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(app, "_default_vehicle_id", "1")
+    monkeypatch.setattr(app, "_start_statistics_aggregation", lambda *args, **kwargs: None)
+
+    day = datetime.now(app.LOCAL_TZ).date().replace(day=1).isoformat()
+    conn = app._statistics_conn()
+    app._ensure_statistics_tables(conn)
+    app._write_daily_row(
+        conn,
+        day,
+        {
+            "online_seconds": 3600.0,
+            "offline_seconds": 0.0,
+            "asleep_seconds": 0.0,
+            "km": 12.5,
+            "speed": 42.0,
+            "energy": 3.0,
+            "park_energy_pct": 1.0,
+            "park_km": 2.0,
+        },
+    )
+    app._set_meta(conn, "statistics_initialized", "1")
+    conn.close()
+
+    def _fail_tick():
+        raise AssertionError("Statistik darf im Request nicht synchron neu rechnen")
+
+    monkeypatch.setattr(app, "_statistics_aggregation_tick", _fail_tick)
+
+    client = app.app.test_client()
+    resp = client.get("/api/statistik")
+    payload = resp.get_json()
+
+    row = next((item for item in payload["rows"] if item["date"] == day), None)
+    assert row is not None
+    assert row["km"] == 12.5
+    assert row["speed"] == 42
+
+
 def test_state_backfill_und_increment_verteilen_offenen_zeitraum_nicht_doppelt(monkeypatch, tmp_path):
     db_path = tmp_path / "stats.db"
     monkeypatch.setenv("STATISTICS_DB_PATH", str(db_path))

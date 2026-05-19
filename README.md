@@ -67,6 +67,9 @@ from the aggregation table.
 The aggregation interval can be configured via the environment variable
 `AGGREGATION_INTERVAL_SECONDS` or the CLI flag `--aggregation-interval` when
 starting `app.py`. Values are given in seconds and default to five minutes.
+The first background run is delayed by ten seconds by default so the web server
+can become available quickly after a restart. Adjust it with
+`STATISTICS_STARTUP_DELAY_SECONDS` or `--statistics-startup-delay`.
 After switching to the database-backed aggregation you may optionally remove
 the legacy `statistics.json` file if no longer needed.
 

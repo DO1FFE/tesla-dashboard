@@ -940,6 +940,7 @@ PARKTIME_FILE = os.path.join(DATA_DIR, "parktime.json")
 TAXI_DB = os.path.join(DATA_DIR, "taximeter.db")
 STATISTICS_DB = os.getenv("STATISTICS_DB_PATH") or os.path.join(DATA_DIR, "statistics.db")
 AGGREGATION_INTERVAL = float(os.getenv("AGGREGATION_INTERVAL_SECONDS", "300"))
+STATISTICS_STARTUP_DELAY = float(os.getenv("STATISTICS_STARTUP_DELAY_SECONDS", "10"))
 DISABLE_STATISTICS_AGGREGATION = os.getenv("DISABLE_STATISTICS_AGGREGATION") == "1"
 FORCE_STATISTICS_REBUILD = os.getenv("FORCE_STATISTICS_REBUILD") == "1"
 
@@ -956,10 +957,18 @@ def _parse_cli_arguments():
         action="store_true",
         help="Force a full rebuild of statistics from logs and trip CSVs",
     )
+    parser.add_argument(
+        "--statistics-startup-delay",
+        type=float,
+        help="Seconds to wait before the first background statistics run",
+    )
     args, _unknown = parser.parse_known_args()
     if args.aggregation_interval:
         global AGGREGATION_INTERVAL
         AGGREGATION_INTERVAL = max(1.0, args.aggregation_interval)
+    if args.statistics_startup_delay is not None:
+        global STATISTICS_STARTUP_DELAY
+        STATISTICS_STARTUP_DELAY = max(0.0, args.statistics_startup_delay)
     if args.rebuild_statistics:
         global FORCE_STATISTICS_REBUILD
         FORCE_STATISTICS_REBUILD = True
@@ -1928,7 +1937,9 @@ def _statistics_aggregation_tick():
                 conn.close()
 
 
-def _statistics_aggregation_loop(interval):
+def _statistics_aggregation_loop(interval, startup_delay=0.0):
+    if startup_delay > 0:
+        time.sleep(startup_delay)
     while True:
         try:
             _statistics_aggregation_tick()
@@ -1937,14 +1948,18 @@ def _statistics_aggregation_loop(interval):
         time.sleep(max(1.0, interval))
 
 
-def _start_statistics_aggregation(interval=None):
+def _start_statistics_aggregation(interval=None, startup_delay=None):
     global _aggregation_thread, _aggregation_initialized
     if DISABLE_STATISTICS_AGGREGATION:
         return
     if _aggregation_thread and _aggregation_thread.is_alive():
         return
+    if startup_delay is None:
+        startup_delay = STATISTICS_STARTUP_DELAY
     _aggregation_thread = threading.Thread(
-        target=_statistics_aggregation_loop, args=(interval or AGGREGATION_INTERVAL,), daemon=True
+        target=_statistics_aggregation_loop,
+        args=(interval or AGGREGATION_INTERVAL, max(0.0, startup_delay)),
+        daemon=True,
     )
     _aggregation_thread.start()
     _aggregation_initialized = True
@@ -4370,26 +4385,29 @@ def _load_cached_statistics():
     """Return statistics stored in the aggregation database."""
 
     signature = _statistics_dependency_signature()
-    with _statistics_cache_lock:
-        cached_signature = _statistics_cache.get("signature")
 
     thread_alive = _aggregation_thread is not None and _aggregation_thread.is_alive()
-    if (not thread_alive) or cached_signature != signature:
+    if DISABLE_STATISTICS_AGGREGATION:
         _statistics_aggregation_tick()
+    elif not thread_alive:
+        _start_statistics_aggregation()
 
     try:
         conn = _statistics_conn()
         _ensure_statistics_tables(conn)
-        if _get_meta(conn, "statistics_initialized") != "1":
-            _statistics_aggregation_tick()
-        stats = _load_daily_from_db(conn)
+        initialized = _get_meta(conn, "statistics_initialized") == "1"
+        stats = _load_daily_from_db(conn) if initialized else {}
         conn.close()
+        if not stats:
+            stats = _load_existing_statistics()
         with _statistics_cache_lock:
             _statistics_cache["signature"] = signature
             _statistics_cache["data"] = stats
         return stats
     except Exception:
-        fallback = compute_statistics()
+        fallback = _load_existing_statistics()
+        if not fallback and DISABLE_STATISTICS_AGGREGATION:
+            fallback = compute_statistics()
         with _statistics_cache_lock:
             _statistics_cache["signature"] = signature
             _statistics_cache["data"] = fallback
@@ -7113,17 +7131,8 @@ def handle_disconnect():
             ptt_timer = None
 
 
-# When embedded in another process (e.g., WSGI), start aggregation immediately
-# and force a full rebuild so caches and offsets are refreshed on boot.
-if __name__ != "__main__":
-    _force_statistics_rebuild_on_start()
-    _start_statistics_aggregation(AGGREGATION_INTERVAL)
-
-
 if __name__ == "__main__":
     _parse_cli_arguments()
-    _force_statistics_rebuild_on_start()
-    _start_statistics_aggregation(AGGREGATION_INTERVAL)
     port = int(os.getenv("PORT", "8013"))
     debug = (os.getenv("FLASK_DEBUG") or "0").lower() in {"1", "true", "yes", "on"}
     socketio.run(app, host="0.0.0.0", port=port, debug=debug)
