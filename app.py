@@ -87,7 +87,7 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 app.config["SECRET_KEY"] = _secret_key()
 csrf = CSRFProtect(app)
 Compress(app)
-socketio = SocketIO(app, async_mode="eventlet")
+socketio = SocketIO(app, async_mode="eventlet", manage_session=False)
 
 
 @app.after_request
