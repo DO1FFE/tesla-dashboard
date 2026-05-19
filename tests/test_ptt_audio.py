@@ -18,7 +18,8 @@ def make_client():
 
 
 @pytest.fixture(autouse=True)
-def reset_ptt():
+def reset_ptt(monkeypatch):
+    monkeypatch.setattr(app_module, "is_ptt_enabled", lambda: True)
     app_module.current_speaker_id = None
     if app_module.ptt_timer:
         app_module.ptt_timer.cancel()

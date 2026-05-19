@@ -1,5 +1,6 @@
 __pycache__/
 .env
+.venv/
 *.pyc
 data/
 static/js/socket.io-*.min.js
