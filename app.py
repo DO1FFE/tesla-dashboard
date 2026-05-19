@@ -683,11 +683,12 @@ def _get_api_logger(vehicle_id=None):
             lib_logger = logging.getLogger(lib_name)
             if handler not in lib_logger.handlers:
                 lib_logger.addHandler(handler)
-            lib_logger.setLevel(logging.DEBUG)
+            lib_logger.setLevel(logging.WARNING)
         try:
             import http.client as http_client
 
-            http_client.HTTPConnection.debuglevel = 1
+            # HTTP-Debugausgaben enthalten Header und damit auch Zugriffstokens.
+            http_client.HTTPConnection.debuglevel = 0
         except Exception:
             pass
     base_logger = globals().get("api_logger")
@@ -7123,4 +7124,8 @@ if __name__ == "__main__":
     _parse_cli_arguments()
     _force_statistics_rebuild_on_start()
     _start_statistics_aggregation(AGGREGATION_INTERVAL)
-    socketio.run(app, host="0.0.0.0", port=8013, debug=True)
+    port = int(os.getenv("PORT", "8013"))
+    debug = (os.getenv("FLASK_DEBUG") or "0").lower() in {"1", "true", "yes", "on"}
+    socketio.run(app, host="0.0.0.0", port=port, debug=debug)
+
+# © 2026 Erik Schauer, do1ffe@darc.de
