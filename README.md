@@ -79,7 +79,11 @@ The backend continuously polls the Tesla API and pushes new data to clients usin
 The frontend first checks `/api/state` to make sure the car is online before
 opening the streaming connection. When the vehicle is reported as `offline` or
 `asleep` no further API requests are made so the car remains in its current
-state. The dashboard never wakes the vehicle automatically.
+state. When a parked vehicle is only passively reported as `online`, the
+backend keeps using cached dashboard data after one transition check and only
+continues full vehicle polling while cached activity such as charging,
+movement, an unlocked car, or open doors/windows is present. The dashboard
+never wakes the vehicle automatically.
 
 ## Tesla browser compatibility (dropdowns)
 

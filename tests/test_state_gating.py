@@ -30,6 +30,8 @@ def test_fetch_data_once_offline_nutzt_nur_cache(monkeypatch):
     }
 
     _setze_neutrale_ladehilfen(monkeypatch)
+    monkeypatch.setattr(app, "latest_data", {})
+    monkeypatch.setattr(app, "last_vehicle_state", {"veh-offline": "online"})
     monkeypatch.setattr(app, "get_vehicle_state", lambda vid: {"state": "offline"})
     monkeypatch.setattr(app, "_load_cached", lambda vehicle_id: dict(cache_daten))
 
@@ -50,6 +52,8 @@ def test_fetch_data_once_asleep_nutzt_nur_cache(monkeypatch):
     aufrufe_get_vehicle_data = []
 
     _setze_neutrale_ladehilfen(monkeypatch)
+    monkeypatch.setattr(app, "latest_data", {})
+    monkeypatch.setattr(app, "last_vehicle_state", {"veh-asleep": "offline"})
     monkeypatch.setattr(app, "get_vehicle_state", lambda vid: {"state": "asleep"})
     monkeypatch.setattr(
         app,
@@ -74,6 +78,8 @@ def test_fetch_data_once_online_ruft_live_abruf_auf_und_nutzt_fallback(monkeypat
     aufrufe_get_vehicle_data = []
 
     _setze_neutrale_ladehilfen(monkeypatch)
+    monkeypatch.setattr(app, "latest_data", {})
+    monkeypatch.setattr(app, "last_vehicle_state", {"veh-online": "asleep"})
     monkeypatch.setattr(app, "get_vehicle_state", lambda vid: {"state": "online"})
     monkeypatch.setattr(
         app,
@@ -98,6 +104,120 @@ def test_fetch_data_once_online_ruft_live_abruf_auf_und_nutzt_fallback(monkeypat
     assert daten["state"] == "online"
     assert daten["source"] == "cache"
     assert daten["_live"] is False
+
+
+def test_fetch_data_once_online_geparkt_nutzt_cache_ohne_live(monkeypatch):
+    aufrufe_get_vehicle_data = []
+
+    _setze_neutrale_ladehilfen(monkeypatch)
+    monkeypatch.setattr(app, "occupant_present", False)
+    monkeypatch.setattr(app, "latest_data", {})
+    monkeypatch.setattr(app, "last_vehicle_state", {"veh-parked": "online"})
+    monkeypatch.setattr(app, "get_vehicle_state", lambda vid: {"state": "online"})
+    monkeypatch.setattr(
+        app,
+        "_load_cached",
+        lambda vehicle_id: {
+            "state": "online",
+            "charge_state": {"charging_state": "Disconnected"},
+            "drive_state": {"shift_state": None, "speed": 0, "power": 0},
+            "vehicle_state": {
+                "locked": True,
+                "is_user_present": False,
+                "df": 0,
+                "dr": 0,
+                "pf": 0,
+                "pr": 0,
+                "ft": 0,
+                "rt": 0,
+                "fd_window": 0,
+                "rd_window": 0,
+                "fp_window": 0,
+                "rp_window": 0,
+            },
+            "source": "cache",
+        },
+    )
+
+    def _fake_get_vehicle_data(vid, state=None):
+        aufrufe_get_vehicle_data.append((vid, state))
+        return {"state": "online", "charge_state": {}, "drive_state": {}}
+
+    monkeypatch.setattr(app, "get_vehicle_data", _fake_get_vehicle_data)
+
+    daten = app._fetch_data_once("veh-parked")
+
+    assert aufrufe_get_vehicle_data == []
+    assert daten["state"] == "online"
+    assert daten["source"] == "cache"
+    assert daten["_live"] is False
+
+
+def test_fetch_data_once_default_nutzt_bekannten_einzelfahrzeug_state(monkeypatch):
+    aufrufe_get_vehicle_data = []
+
+    _setze_neutrale_ladehilfen(monkeypatch)
+    monkeypatch.setattr(app, "_default_vehicle_id", None)
+    monkeypatch.setattr(app, "occupant_present", False)
+    monkeypatch.setattr(app, "latest_data", {})
+    monkeypatch.setattr(app, "last_vehicle_state", {"veh-real": "online"})
+    monkeypatch.setattr(app, "get_vehicle_state", lambda vid: {"state": "online"})
+    monkeypatch.setattr(
+        app,
+        "_load_cached",
+        lambda vehicle_id: {
+            "state": "online",
+            "charge_state": {"charging_state": "Disconnected"},
+            "drive_state": {"shift_state": None, "speed": 0, "power": 0},
+            "vehicle_state": {"locked": True, "is_user_present": False},
+            "source": "cache",
+        },
+    )
+
+    def _fake_get_vehicle_data(vid, state=None):
+        aufrufe_get_vehicle_data.append((vid, state))
+        return {"state": "online", "charge_state": {}, "drive_state": {}}
+
+    monkeypatch.setattr(app, "get_vehicle_data", _fake_get_vehicle_data)
+
+    daten = app._fetch_data_once("default")
+
+    assert aufrufe_get_vehicle_data == []
+    assert daten["state"] == "online"
+    assert daten["source"] == "cache"
+    assert daten["_live"] is False
+
+
+def test_fetch_data_once_online_aktiv_ruft_live_abruf_auf(monkeypatch):
+    aufrufe_get_vehicle_data = []
+
+    _setze_neutrale_ladehilfen(monkeypatch)
+    monkeypatch.setattr(app, "occupant_present", False)
+    monkeypatch.setattr(app, "latest_data", {})
+    monkeypatch.setattr(app, "last_vehicle_state", {"veh-active": "online"})
+    monkeypatch.setattr(app, "get_vehicle_state", lambda vid: {"state": "online"})
+    monkeypatch.setattr(
+        app,
+        "_load_cached",
+        lambda vehicle_id: {
+            "state": "online",
+            "charge_state": {"charging_state": "Disconnected"},
+            "drive_state": {"shift_state": "D", "speed": 0, "power": 0},
+            "vehicle_state": {"locked": False, "is_user_present": False},
+        },
+    )
+
+    def _fake_get_vehicle_data(vid, state=None):
+        aufrufe_get_vehicle_data.append((vid, state))
+        return {"state": "online", "charge_state": {}, "drive_state": {}}
+
+    monkeypatch.setattr(app, "get_vehicle_data", _fake_get_vehicle_data)
+
+    daten = app._fetch_data_once("veh-active")
+
+    assert aufrufe_get_vehicle_data == [("veh-active", "online")]
+    assert daten["state"] == "online"
+    assert daten["_live"] is True
 
 
 def test_fetch_loop_locked_ohne_insassen_nutzt_idle_intervall(monkeypatch):

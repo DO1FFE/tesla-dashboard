@@ -2449,6 +2449,49 @@ def _normalize_shift_state(shift):
     return upper
 
 
+def _hat_normale_fahrzeugaktivitaet(fahrzeugdaten):
+    """Prüfe, ob volle Fahrzeugdatenabfragen sinnvoll sind."""
+
+    if not isinstance(fahrzeugdaten, dict):
+        return False
+
+    vehicle_state = fahrzeugdaten.get("vehicle_state", {})
+    drive_state = fahrzeugdaten.get("drive_state", {})
+    charge_state = fahrzeugdaten.get("charge_state", {})
+
+    if not isinstance(vehicle_state, dict):
+        vehicle_state = {}
+    if not isinstance(drive_state, dict):
+        drive_state = {}
+    if not isinstance(charge_state, dict):
+        charge_state = {}
+
+    if vehicle_state.get("is_user_present"):
+        return True
+    if any(vehicle_state.get(key) for key in ("df", "dr", "pf", "pr")):
+        return True
+    if any(vehicle_state.get(key) for key in ("ft", "rt")):
+        return True
+    if any(
+        vehicle_state.get(key)
+        for key in ("fd_window", "rd_window", "fp_window", "rp_window")
+    ):
+        return True
+    if vehicle_state.get("locked") is False:
+        return True
+    if _normalize_shift_state(drive_state.get("shift_state")) in {"R", "N", "D"}:
+        return True
+
+    speed = _as_float(drive_state.get("speed"))
+    power = _as_float(drive_state.get("power"))
+    if speed is not None and abs(speed) > 0.05:
+        return True
+    if power is not None and abs(power) > 1:
+        return True
+
+    return charge_state.get("charging_state") in {"Charging", "Starting"}
+
+
 def _parking_log_path(filename=None):
     """Return the path to the dashboard parking log file."""
 
@@ -4632,23 +4675,10 @@ def get_vehicle_state(vehicle_id=None):
         service_mode = vs.get("service_mode")
         service_mode_plus = vs.get("service_mode_plus")
 
-    def _hat_normale_aktivitaet(fahrzeugdaten):
-        """Prüfe, ob normale Update-Rate wegen Aktivität erzwungen werden muss."""
-        if not isinstance(fahrzeugdaten, dict):
-            return False
-        vehicle_state = fahrzeugdaten.get("vehicle_state", {})
-        drive_state = fahrzeugdaten.get("drive_state", {})
-
-        if vehicle_state.get("is_user_present"):
-            return True
-        if any(vehicle_state.get(key) for key in ("df", "dr", "pf", "pr")):
-            return True
-        return _normalize_shift_state(drive_state.get("shift_state")) in {"R", "N", "D"}
-
     normale_aktivitaet = (
         occupant_present
-        or _hat_normale_aktivitaet(cached)
-        or _hat_normale_aktivitaet(latest_data.get(vid))
+        or _hat_normale_fahrzeugaktivitaet(cached)
+        or _hat_normale_fahrzeugaktivitaet(latest_data.get(vid))
     )
 
     last_refresh = _last_state_refresh_ts.get(vid)
@@ -5330,7 +5360,15 @@ def _fetch_data_once(vehicle_id="default"):
 
     cached = _load_cached(cache_id)
 
-    state = last_vehicle_state.get(vid or cache_id)
+    vehicle_key = str(vid or cache_id)
+    vorheriger_state = last_vehicle_state.get(vehicle_key)
+    if (
+        vorheriger_state is None
+        and vehicle_key == "default"
+        and len(last_vehicle_state) == 1
+    ):
+        vorheriger_state = next(iter(last_vehicle_state.values()))
+    state = vorheriger_state
     # Always refresh the vehicle state so transitions from offline/asleep
     # are detected even when no occupant is present.
     state_info = get_vehicle_state(vid)
@@ -5339,13 +5377,33 @@ def _fetch_data_once(vehicle_id="default"):
     data = None
     live = False
     if state == "online":
-        data = get_vehicle_data(vid, state=state)
-        if (
-            isinstance(data, dict)
-            and not data.get("error")
-            and data.get("state") == "online"
-        ):
-            live = True
+        latest = latest_data.get(cache_id)
+        passive_online_pruefung = (
+            vorheriger_state in (None, "offline", "asleep")
+            or (cached is None and latest is None)
+        )
+        darf_live_abrufen = (
+            occupant_present
+            or _hat_normale_fahrzeugaktivitaet(cached)
+            or _hat_normale_fahrzeugaktivitaet(latest)
+            or passive_online_pruefung
+        )
+        if darf_live_abrufen:
+            data = get_vehicle_data(vid, state=state)
+            if (
+                isinstance(data, dict)
+                and not data.get("error")
+                and data.get("state") == "online"
+            ):
+                live = True
+            else:
+                cached = _load_cached(cache_id)
+                if cached is not None:
+                    data = cached
+                    if isinstance(data, dict):
+                        data["state"] = state
+                else:
+                    data = {"state": state}
         else:
             cached = _load_cached(cache_id)
             if cached is not None:
