@@ -139,6 +139,8 @@ map.on('zoomend', function() {
 var polyline = null;
 var pendingPath = null;
 var lastDataTimestamp = null;
+var lastStateTimestamp = null;
+var lastVehicleState = null;
 var installedVersion = null;
 var CONFIG = {};
 var HIGHLIGHT_BLUE = false;
@@ -167,6 +169,8 @@ var TOGGLE_DEFAULTS = {
     'blue-openings': false,
     'heater-indicator': true,
     'charging-info': true,
+    'ladeplanung-info': true,
+    'reifendruck-details': true,
     'v2l-infos': true,
     'announcement-box': true,
     'page-menu': true,
@@ -296,6 +300,7 @@ function applyConfig(cfg) {
 function showConfigured() {
     Object.keys(TOGGLE_DEFAULTS).forEach(function(id) {
         if (id === 'blue-openings') return;
+        if (id === 'ladeplanung-info' || id === 'reifendruck-details') return;
         $('#' + id).toggle(configEnabled(id));
     });
     var visibleThermometers = THERMOMETER_IDS.some(function(id) {
@@ -311,6 +316,12 @@ function showConfigured() {
         clearSuperchargerMarkers();
     } else {
         updateSuperchargerList();
+    }
+    if (!configEnabled('ladeplanung-info')) {
+        $('#ladeplanung-info').empty().hide();
+    }
+    if (!configEnabled('reifendruck-details')) {
+        $('#reifendruck-details').empty().hide();
     }
 }
 
@@ -594,7 +605,7 @@ function handleData(data) {
     hideLoading();
     updateHeader(data);
     updateUI(data);
-    updateVehicleState(data.state);
+    updateVehicleState(data.state, data.state_checked_at);
     var vehicle = data.vehicle_state || {};
     updateOfflineInfo(data.state, vehicle.service_mode, vehicle.service_mode_plus);
     updateSoftwareUpdate(vehicle.software_update);
@@ -615,6 +626,7 @@ function handleData(data) {
     updateBatteryIndicator(charge.battery_level, rangeMiles, charge.charging_state, charge.battery_heater_on);
     updateV2LInfos(charge, drive);
     updateChargingInfo(charge, data);
+    updateLadeplanungInfo(charge);
     var climate = data.climate_state || {};
     updateThermometers(climate.inside_temp, climate.outside_temp, charge.battery_temp);
     updateClimateStatus(climate.is_climate_on);
@@ -635,10 +647,8 @@ function handleData(data) {
         climate.seat_heater_rear_center,
         climate.seat_heater_rear_right
     );
-    updateTPMS(vehicle.tpms_pressure_fl,
-               vehicle.tpms_pressure_fr,
-               vehicle.tpms_pressure_rl,
-               vehicle.tpms_pressure_rr);
+    updateTPMS(vehicle);
+    updateReifendruckDetails(vehicle);
     updateOpenings(vehicle, charge);
     updateMediaPlayer(vehicle.media_info);
     var alarm = data.alarm_state;
@@ -958,31 +968,271 @@ function updateHeaterIndicator(front, rear, steering, wiper,
     setLevel('seat-rear-right', seatRR, 'Sitzheizung hinten rechts');
 }
 
-function updateTPMS(fl, fr, rl, rr) {
-    function set(id, val) {
-        var $group = $('#tpms-' + id);
+function leseZeitstempelMillis(wert) {
+    var num = parseNumber(wert);
+    if (num == null) {
+        if (typeof wert === 'string') {
+            var parsed = Date.parse(wert);
+            if (!isNaN(parsed)) {
+                return parsed;
+            }
+        }
+        return null;
+    }
+    if (num < 1e12) {
+        return num * 1000;
+    }
+    return num;
+}
+
+function formatiereUhrzeit(datum) {
+    if (!(datum instanceof Date) || isNaN(datum.getTime())) {
+        return null;
+    }
+    return datum.toLocaleTimeString('de-DE', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Europe/Berlin'
+    });
+}
+
+function formatiereZeitpunkt(wert) {
+    var millis = leseZeitstempelMillis(wert);
+    if (millis == null) {
+        return null;
+    }
+    var datum = new Date(millis);
+    if (isNaN(datum.getTime())) {
+        return null;
+    }
+    return datum.toLocaleString('de-DE', {
+        weekday: 'short',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Europe/Berlin'
+    });
+}
+
+function formatiereZeitAusMinuten(minuten) {
+    var zahl = parseNumber(minuten);
+    if (zahl == null) {
+        return null;
+    }
+    var gesamt = Math.max(0, Math.round(zahl)) % (24 * 60);
+    var stunden = Math.floor(gesamt / 60);
+    var restMinuten = gesamt % 60;
+    return String(stunden).padStart(2, '0') + ':' +
+           String(restMinuten).padStart(2, '0') + ' Uhr';
+}
+
+function formatiereDauerMinuten(minuten) {
+    var zahl = parseNumber(minuten);
+    if (zahl == null) {
+        return null;
+    }
+    var gerundet = Math.max(0, Math.round(zahl));
+    var stunden = Math.floor(gerundet / 60);
+    var restMinuten = gerundet % 60;
+    var teile = [];
+    if (stunden > 0) {
+        teile.push(stunden + ' h');
+    }
+    teile.push(restMinuten + ' min');
+    return teile.join(' ');
+}
+
+function formatiereAlter(wert) {
+    var millis = leseZeitstempelMillis(wert);
+    if (millis == null) {
+        return '';
+    }
+    var diffSekunden = Math.max(0, Math.round((Date.now() - millis) / 1000));
+    if (diffSekunden < 60) {
+        return 'gerade eben';
+    }
+    if (diffSekunden < 3600) {
+        var minuten = Math.floor(diffSekunden / 60);
+        return 'vor ' + minuten + ' min';
+    }
+    if (diffSekunden < 86400) {
+        var stunden = Math.floor(diffSekunden / 3600);
+        return 'vor ' + stunden + ' h';
+    }
+    var tage = Math.floor(diffSekunden / 86400);
+    return 'vor ' + tage + ' ' + (tage === 1 ? 'Tag' : 'Tagen');
+}
+
+function formatiereBar(wert) {
+    var zahl = parseNumber(wert);
+    if (zahl == null) {
+        return '--';
+    }
+    return zahl.toFixed(2) + ' bar';
+}
+
+function reifendruckStatus(ist, soll, weichWarnung, hartWarnung) {
+    var istZahl = parseNumber(ist);
+    var sollZahl = parseNumber(soll);
+    if (istAktiv(hartWarnung)) {
+        return {klasse: 'kritisch', text: 'Kritisch'};
+    }
+    if (istAktiv(weichWarnung)) {
+        return {klasse: 'warnung', text: 'Warnung'};
+    }
+    if (istZahl == null) {
+        return {klasse: 'unbekannt', text: 'Unbekannt'};
+    }
+    if (istZahl < 2.1 || istZahl > 3.7) {
+        return {klasse: 'kritisch', text: 'Kritisch'};
+    }
+    if (sollZahl != null) {
+        var abweichung = Math.abs(istZahl - sollZahl);
+        if (abweichung >= 0.4) {
+            return {klasse: 'kritisch', text: 'Abweichung'};
+        }
+        if (abweichung >= 0.2) {
+            return {klasse: 'warnung', text: 'Prüfen'};
+        }
+    } else if (istZahl < 2.7 || istZahl > 3.3) {
+        return {klasse: 'warnung', text: 'Prüfen'};
+    }
+    return {klasse: 'ok', text: 'OK'};
+}
+
+function reifendruckReifen(vehicle) {
+    vehicle = vehicle || {};
+    var vorneSoll = vehicle.tpms_rcp_front_value;
+    var hintenSoll = vehicle.tpms_rcp_rear_value;
+    return [
+        {
+            id: 'VL',
+            name: 'Vorne links',
+            wert: vehicle.tpms_pressure_fl,
+            soll: vorneSoll,
+            weich: vehicle.tpms_soft_warning_fl,
+            hart: vehicle.tpms_hard_warning_fl,
+            zeit: vehicle.tpms_last_seen_pressure_time_fl
+        },
+        {
+            id: 'VR',
+            name: 'Vorne rechts',
+            wert: vehicle.tpms_pressure_fr,
+            soll: vorneSoll,
+            weich: vehicle.tpms_soft_warning_fr,
+            hart: vehicle.tpms_hard_warning_fr,
+            zeit: vehicle.tpms_last_seen_pressure_time_fr
+        },
+        {
+            id: 'HL',
+            name: 'Hinten links',
+            wert: vehicle.tpms_pressure_rl,
+            soll: hintenSoll,
+            weich: vehicle.tpms_soft_warning_rl,
+            hart: vehicle.tpms_hard_warning_rl,
+            zeit: vehicle.tpms_last_seen_pressure_time_rl
+        },
+        {
+            id: 'HR',
+            name: 'Hinten rechts',
+            wert: vehicle.tpms_pressure_rr,
+            soll: hintenSoll,
+            weich: vehicle.tpms_soft_warning_rr,
+            hart: vehicle.tpms_hard_warning_rr,
+            zeit: vehicle.tpms_last_seen_pressure_time_rr
+        }
+    ];
+}
+
+function updateTPMS(vehicle) {
+    function set(reifen) {
+        var $group = $('#tpms-' + reifen.id);
         var $text = $group.find('text');
         var $circle = $group.find('circle');
+        var val = reifen.wert;
         if (val == null || isNaN(val)) {
             $text.text('--');
             $circle.css('stroke', '#555');
+            $group.attr('aria-label', reifen.name + ': kein Reifendruckwert');
             return;
         }
         var num = Number(val);
         $text.text(num.toFixed(1));
+        var status = reifendruckStatus(num, reifen.soll, reifen.weich, reifen.hart);
         var color = '#4caf50';
-        if (num < 2.7 || num > 3.3) {
+        if (status.klasse === 'warnung') {
             color = '#ff9800';
         }
-        if (num < 2.1 || num > 3.7) {
+        if (status.klasse === 'kritisch') {
             color = '#d00';
         }
         $circle.css('stroke', color);
+        var ziel = parseNumber(reifen.soll);
+        var text = reifen.name + ': ' + num.toFixed(2) + ' bar';
+        if (ziel != null) {
+            text += ', Soll ' + ziel.toFixed(2) + ' bar';
+        }
+        text += ', Status ' + status.text;
+        $group.attr('aria-label', text);
     }
-    set('VL', fl);
-    set('VR', fr);
-    set('HL', rl);
-    set('HR', rr);
+    reifendruckReifen(vehicle).forEach(set);
+}
+
+function updateReifendruckDetails(vehicle) {
+    var $details = $('#reifendruck-details');
+    if (!$details.length || !configEnabled('reifendruck-details')) {
+        $details.empty().hide();
+        return;
+    }
+    var reifen = reifendruckReifen(vehicle);
+    var hatDaten = reifen.some(function(eintrag) {
+        return parseNumber(eintrag.wert) != null;
+    });
+    if (!hatDaten) {
+        $details.empty().hide();
+        return;
+    }
+    var kritische = 0;
+    var warnungen = 0;
+    var rows = reifen.map(function(eintrag) {
+        var ist = parseNumber(eintrag.wert);
+        var soll = parseNumber(eintrag.soll);
+        var status = reifendruckStatus(ist, soll, eintrag.weich, eintrag.hart);
+        if (status.klasse === 'kritisch') {
+            kritische += 1;
+        } else if (status.klasse === 'warnung') {
+            warnungen += 1;
+        }
+        var abweichung = '--';
+        if (ist != null && soll != null) {
+            var diff = ist - soll;
+            abweichung = (diff >= 0 ? '+' : '') + diff.toFixed(2) + ' bar';
+        }
+        var alter = formatiereAlter(eintrag.zeit) || '--';
+        return '<tr class="reifendruck-' + status.klasse + '">' +
+               '<th>' + escapeHtml(eintrag.name) + '</th>' +
+               '<td>' + formatiereBar(ist) + '</td>' +
+               '<td>' + formatiereBar(soll) + '</td>' +
+               '<td>' + escapeHtml(abweichung) + '</td>' +
+               '<td>' + escapeHtml(alter) + '</td>' +
+               '<td>' + escapeHtml(status.text) + '</td>' +
+               '</tr>';
+    });
+    var zusammenfassung = 'Reifendruck im Zielbereich';
+    if (kritische > 0) {
+        zusammenfassung = kritische + ' kritische ' +
+            (kritische === 1 ? 'Abweichung' : 'Abweichungen');
+    } else if (warnungen > 0) {
+        zusammenfassung = warnungen === 1 ? '1 Reifen prüfen' : warnungen + ' Reifen prüfen';
+    }
+    var html = '<h3>Reifendruckdetails</h3>' +
+               '<p class="panel-summary">' + escapeHtml(zusammenfassung) + '</p>' +
+               '<table><thead><tr>' +
+               '<th>Reifen</th><th>Ist</th><th>Soll</th><th>Abweichung</th><th>Messung</th><th>Status</th>' +
+               '</tr></thead><tbody>' + rows.join('') + '</tbody></table>';
+    $details.html(html).show();
 }
 
 function updateOpenings(vehicle, charge) {
@@ -1242,6 +1492,177 @@ function updateV2LInfos(charge, drive) {
     } else {
         $info.empty().hide();
     }
+}
+
+function istAktiv(wert) {
+    if (typeof wert === 'string') {
+        var norm = wert.toLowerCase();
+        return norm === 'true' || norm === '1' || norm === 'on' || norm === 'yes';
+    }
+    return !!wert;
+}
+
+function beschreibeZeitraum(wert) {
+    if (!wert) {
+        return '';
+    }
+    var text = String(wert);
+    var norm = text.toLowerCase();
+    if (norm === 'all_week') {
+        return 'täglich';
+    }
+    if (norm === 'weekdays') {
+        return 'werktags';
+    }
+    if (norm === 'weekends') {
+        return 'am Wochenende';
+    }
+    return text.replace(/_/g, ' ');
+}
+
+function geplanteAbfahrtszeit(charge) {
+    var absoluterZeitpunkt = charge.scheduled_departure_time;
+    if (absoluterZeitpunkt != null && absoluterZeitpunkt !== '') {
+        var millis = leseZeitstempelMillis(absoluterZeitpunkt);
+        if (millis != null) {
+            if (millis <= Date.now()) {
+                return null;
+            }
+            return formatiereZeitpunkt(absoluterZeitpunkt);
+        }
+    }
+    var zeit = formatiereZeitAusMinuten(charge.scheduled_departure_time_minutes);
+    if (zeit) {
+        return zeit;
+    }
+    return null;
+}
+
+function formatiereZukünftigenZeitpunkt(wert) {
+    var millis = leseZeitstempelMillis(wert);
+    if (millis == null || millis <= Date.now()) {
+        return null;
+    }
+    return formatiereZeitpunkt(wert);
+}
+
+function ladeRestzeitMinuten(charge) {
+    var minuten = parseNumber(charge.minutes_to_full_charge);
+    if (minuten != null) {
+        return minuten;
+    }
+    var stunden = parseNumber(charge.time_to_full_charge);
+    if (stunden != null) {
+        return stunden * 60;
+    }
+    return null;
+}
+
+function ladeendeText(minuten) {
+    var dauer = formatiereDauerMinuten(minuten);
+    if (!dauer) {
+        return null;
+    }
+    var ende = new Date(Date.now() + Math.max(0, Math.round(minuten)) * 60000);
+    var uhrzeit = formatiereUhrzeit(ende);
+    if (uhrzeit) {
+        return dauer + ' (ca. ' + uhrzeit + ' Uhr)';
+    }
+    return dauer;
+}
+
+function updateLadeplanungInfo(charge) {
+    var $info = $('#ladeplanung-info');
+    if (!$info.length || !configEnabled('ladeplanung-info')) {
+        $info.empty().hide();
+        return;
+    }
+    if (!charge) {
+        $info.empty().hide();
+        return;
+    }
+
+    var abfahrt = geplanteAbfahrtszeit(charge);
+    var ladezustand = charge.charging_state || '';
+    var laedt = ladezustand === 'Charging' || ladezustand === 'Starting';
+    var ladezeitMinuten = ladeRestzeitMinuten(charge);
+    var hatRestzeit = ladezeitMinuten != null && ladezeitMinuten > 0;
+    var vorklimatisierung = istAktiv(charge.preconditioning_enabled);
+    var nebenzeit = istAktiv(charge.off_peak_charging_enabled);
+    var geplantesLaden = charge.scheduled_charging_mode && charge.scheduled_charging_mode !== 'Off';
+    var geplantAusstehend = istAktiv(charge.scheduled_charging_pending);
+    var batterieHeizt = istAktiv(charge.battery_heater_on);
+    var heizleistungFehlt = istAktiv(charge.not_enough_power_to_heat);
+    var relevant = abfahrt || laedt || hatRestzeit || vorklimatisierung ||
+                   nebenzeit || geplantesLaden || geplantAusstehend ||
+                   batterieHeizt || heizleistungFehlt;
+    if (!relevant) {
+        $info.empty().hide();
+        return;
+    }
+
+    var rows = [];
+    if (abfahrt) {
+        rows.push('<tr><th>Geplante Abfahrt:</th><td>' + escapeHtml(abfahrt) + '</td></tr>');
+    }
+    if (charge.charge_limit_soc != null) {
+        rows.push('<tr><th>Ladegrenze:</th><td>' + escapeHtml(String(charge.charge_limit_soc)) + ' %</td></tr>');
+    }
+    if (hatRestzeit) {
+        rows.push('<tr><th>Bis Ladegrenze:</th><td>' + escapeHtml(ladeendeText(ladezeitMinuten)) + '</td></tr>');
+    } else if (laedt) {
+        rows.push('<tr><th>Bis Ladegrenze:</th><td>keine Restzeit gemeldet</td></tr>');
+    }
+    if (geplantesLaden || geplantAusstehend) {
+        var ladeModus = charge.scheduled_charging_mode || 'aktiv';
+        if (geplantAusstehend) {
+            ladeModus += ' (wartet auf Start)';
+        }
+        rows.push('<tr><th>Geplantes Laden:</th><td>' + escapeHtml(ladeModus) + '</td></tr>');
+    }
+    var startZeit = formatiereZukünftigenZeitpunkt(charge.scheduled_charging_start_time);
+    if (startZeit) {
+        rows.push('<tr><th>Geplanter Ladestart:</th><td>' + escapeHtml(startZeit) + '</td></tr>');
+    }
+    if (abfahrt || vorklimatisierung) {
+        var vorklimaText = vorklimatisierung ? 'aktiv' : 'aus';
+        var vorklimaZeitraum = beschreibeZeitraum(charge.preconditioning_times);
+        if (vorklimaZeitraum) {
+            vorklimaText += ' (' + vorklimaZeitraum + ')';
+        }
+        rows.push('<tr><th>Vorklimatisierung:</th><td>' + escapeHtml(vorklimaText) + '</td></tr>');
+    }
+    if (abfahrt || nebenzeit) {
+        var nebenzeitText = nebenzeit ? 'aktiv' : 'aus';
+        var nebenzeitZeitraum = beschreibeZeitraum(charge.off_peak_charging_times);
+        if (nebenzeitZeitraum) {
+            nebenzeitText += ' (' + nebenzeitZeitraum + ')';
+        }
+        rows.push('<tr><th>Nebenzeit-Laden:</th><td>' + escapeHtml(nebenzeitText) + '</td></tr>');
+    }
+    if (batterieHeizt || heizleistungFehlt) {
+        var heizungText = batterieHeizt ? 'Batterieheizung aktiv' : 'Batterieheizung aus';
+        if (heizleistungFehlt) {
+            heizungText += ', Heizleistung begrenzt';
+        }
+        rows.push('<tr><th>Batterieheizung:</th><td>' + escapeHtml(heizungText) + '</td></tr>');
+    }
+
+    var zusammenfassung = 'Ladeplanung aktiv';
+    if (hatRestzeit) {
+        var ende = new Date(Date.now() + Math.max(0, Math.round(ladezeitMinuten)) * 60000);
+        var endeUhrzeit = formatiereUhrzeit(ende);
+        if (endeUhrzeit) {
+            zusammenfassung = 'Ladeziel gegen ' + endeUhrzeit + ' Uhr';
+        }
+    } else if (abfahrt) {
+        zusammenfassung = 'Abfahrt um ' + abfahrt;
+    }
+    $info.html(
+        '<h3>Ladeplanung</h3>' +
+        '<p class="panel-summary">' + escapeHtml(zusammenfassung) + '</p>' +
+        '<table>' + rows.join('') + '</table>'
+    ).show();
 }
 
 function updateChargingInfo(charge, wurzelDaten) {
@@ -1639,6 +2060,39 @@ function updateDataAge(ts) {
     $el.text('Letztes Update vor ' + text + ' (' + timeStr + ')');
 }
 
+function formatiereKurzesAlter(millis) {
+    if (!millis) {
+        return null;
+    }
+    var diff = Math.round((Date.now() - millis) / 1000);
+    if (diff < 0) diff = 0;
+    if (diff < 60) {
+        return diff + ' s';
+    }
+    if (diff < 3600) {
+        var minuten = Math.floor(diff / 60);
+        var sekunden = diff % 60;
+        return minuten + ' min ' + sekunden + ' s';
+    }
+    var stunden = Math.floor(diff / 3600);
+    var restMinuten = Math.floor((diff % 3600) / 60);
+    return stunden + ' h ' + restMinuten + ' min';
+}
+
+function zeichneVehicleState() {
+    var $state = $('#vehicle-state');
+    if (typeof lastVehicleState !== 'string' || lastVehicleState.length === 0) {
+        $state.text('');
+        return;
+    }
+    var text = 'State: ' + lastVehicleState;
+    var alter = formatiereKurzesAlter(lastStateTimestamp);
+    if (alter) {
+        text += ' (Abruf vor ' + alter + ')';
+    }
+    $state.text(text);
+}
+
 function updateParkTime(ts) {
     if (typeof ts !== 'undefined') {
         if (ts && ts < 1e12) {
@@ -1684,42 +2138,145 @@ function displayParkTime() {
     updateSmsForm();
 }
 
-function updateVehicleState(state) {
+function updateVehicleState(state, stateCheckedAt) {
     if (typeof state === 'string' && state.length > 0) {
-        $('#vehicle-state').text('State: ' + state);
-    } else {
-        $('#vehicle-state').text('');
+        lastVehicleState = state;
+    } else if (arguments.length > 0) {
+        lastVehicleState = null;
     }
+    if (typeof stateCheckedAt !== 'undefined' && stateCheckedAt !== null) {
+        var millis = leseZeitstempelMillis(stateCheckedAt);
+        if (millis && (!lastStateTimestamp || millis >= lastStateTimestamp)) {
+            lastStateTimestamp = millis;
+        }
+    }
+    zeichneVehicleState();
+}
+
+function softwareUpdateAusblenden($msg) {
+    $msg.prop('hidden', true).hide().empty();
+}
+
+function softwareStatusText(status) {
+    if (!status) {
+        return '';
+    }
+    var text = String(status).trim();
+    var norm = text.toLowerCase();
+    var texte = {
+        available: 'Update verfügbar',
+        downloading: 'Download läuft',
+        downloaded: 'Download abgeschlossen',
+        installing: 'Installation läuft',
+        install: 'Installation läuft',
+        scheduled: 'Installation geplant',
+        pending: 'Wartet',
+        ready: 'Bereit zur Installation',
+        failed: 'Fehler',
+        error: 'Fehler',
+        none: ''
+    };
+    if (texte.hasOwnProperty(norm)) {
+        return texte[norm];
+    }
+    return text.replace(/_/g, ' ');
+}
+
+function softwareStatusAktiv(status) {
+    var text = String(status || '').trim().toLowerCase();
+    return !!text && text !== 'none' && text !== 'null';
+}
+
+function softwareProzent(wert) {
+    var zahl = parseNumber(wert);
+    if (zahl == null) {
+        return null;
+    }
+    return Math.max(0, Math.min(100, Math.round(zahl)));
+}
+
+function softwareDauer(sekunden) {
+    var wert = parseNumber(sekunden);
+    if (wert == null || wert <= 0) {
+        return null;
+    }
+    if (wert < 60) {
+        return Math.round(wert) + ' s';
+    }
+    return formatiereDauerMinuten(wert / 60);
+}
+
+function softwareFortschritt(label, prozent) {
+    if (prozent == null) {
+        return '';
+    }
+    return '<div class="software-progress-row">' +
+           '<span>' + escapeHtml(label) + '</span>' +
+           '<span>' + prozent + '%</span>' +
+           '<div class="software-progress" aria-label="' + escapeHtml(label) + ' ' + prozent + '%">' +
+           '<div class="software-progress-bar" style="width:' + prozent + '%"></div>' +
+           '</div></div>';
 }
 
 function updateSoftwareUpdate(info) {
     var $msg = $('#software-update');
     if (!configEnabled('software-update')) {
-        $msg.hide().text('');
+        softwareUpdateAusblenden($msg);
         return;
     }
     var version = info && typeof info.version === 'string' ? info.version.trim() : '';
-    if (!version) {
-        $msg.hide().text('');
+    var available = version ? parseVersion(version) : '';
+    var status = info && info.status ? String(info.status).trim() : '';
+    var statusAktiv = softwareStatusAktiv(status);
+    var downloadProzent = softwareProzent(info && info.download_perc);
+    var installationProzent = softwareProzent(info && info.install_perc);
+    var fortschrittAktiv = version && (
+        (downloadProzent != null && downloadProzent > 0 && downloadProzent < 100) ||
+        (installationProzent != null && installationProzent > 0 && installationProzent < 100)
+    );
+    var neuereVersion = version && installedVersion && isNewerVersion(installedVersion, available);
+    var relevanteVersion = version && (!installedVersion || neuereVersion || fortschrittAktiv || statusAktiv);
+    if (!relevanteVersion && !statusAktiv) {
+        softwareUpdateAusblenden($msg);
         return;
     }
-    var available = parseVersion(version);
-    if (!installedVersion || !isNewerVersion(installedVersion, available)) {
-        $msg.hide().text('');
-        return;
+
+    var statusText = softwareStatusText(status);
+    var summary = statusText || 'Software-Update verfügbar';
+    if (available) {
+        summary += ': Version ' + available;
     }
-    var parts = ['Version: ' + available];
-    if (info.status) parts.push('Status: ' + info.status);
-    if (typeof info.download_perc === 'number') {
-        parts.push('Download: ' + info.download_perc + '%');
+    var rows = [];
+    if (available) {
+        rows.push('<tr><th>Version:</th><td>' + escapeHtml(available) + '</td></tr>');
     }
-    if (typeof info.install_perc === 'number') {
-        parts.push('Installation: ' + info.install_perc + '%');
+    if (statusText) {
+        rows.push('<tr><th>Status:</th><td>' + escapeHtml(statusText) + '</td></tr>');
     }
-    if (typeof info.expected_duration_sec === 'number') {
-        parts.push('Dauer: ' + info.expected_duration_sec + 's');
+    var geplanteZeit = formatiereZeitpunkt(info && info.scheduled_time_ms);
+    if (geplanteZeit) {
+        rows.push('<tr><th>Geplant:</th><td>' + escapeHtml(geplanteZeit) + '</td></tr>');
     }
-    $msg.text('Software-Update – ' + parts.join(', ')).show();
+    var dauer = softwareDauer(info && info.expected_duration_sec);
+    if (dauer) {
+        rows.push('<tr><th>Erwartete Dauer:</th><td>' + escapeHtml(dauer) + '</td></tr>');
+    }
+    var warnungSekunden = parseNumber(info && info.warning_time_remaining_ms);
+    if (warnungSekunden != null) {
+        warnungSekunden = warnungSekunden / 1000;
+        var warnung = softwareDauer(warnungSekunden);
+        if (warnung) {
+            rows.push('<tr><th>Warnzeit:</th><td>' + escapeHtml(warnung) + '</td></tr>');
+        }
+    }
+    var progress = softwareFortschritt('Download', downloadProzent) +
+                   softwareFortschritt('Installation', installationProzent);
+    $msg.html(
+        '<h3>Software-Update</h3>' +
+        '<p class="panel-summary">' + escapeHtml(summary) + '</p>' +
+        progress +
+        '<table>' + rows.join('') + '</table>'
+    ).prop('hidden', false).show();
 }
 
 function updateOfflineInfo(state, serviceMode, serviceModePlus) {
@@ -1841,7 +2398,7 @@ function startStream() {
         if (!currentVehicle) return;
         $.getJSON('/api/state/' + currentVehicle, function(resp) {
             var st = resp.state;
-            updateVehicleState(st);
+            updateVehicleState(st, resp.state_checked_at);
             updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
             updateSoftwareUpdate(resp.software_update);
             if (istOfflineOderSchlaeft(st)) {
@@ -1885,7 +2442,7 @@ function startStreamIfOnline() {
     }
     $.getJSON('/api/state/' + currentVehicle, function(resp) {
         var st = resp.state;
-        updateVehicleState(st);
+        updateVehicleState(st, resp.state_checked_at);
         updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
         updateSoftwareUpdate(resp.software_update);
         if (istOfflineOderSchlaeft(st)) {
@@ -1950,7 +2507,10 @@ function checkAppVersion() {
 }
 
 setInterval(checkAppVersion, 60000);
-setInterval(function() { updateDataAge(); }, 1000);
+setInterval(function() {
+    updateDataAge();
+    zeichneVehicleState();
+}, 1000);
 setInterval(updateClientCount, 5000);
 setInterval(fetchAnnouncement, 15000);
 setInterval(fetchConfig, 15000);

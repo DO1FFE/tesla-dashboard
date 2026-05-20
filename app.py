@@ -661,6 +661,7 @@ LOCAL_TZ = ZoneInfo("Europe/Berlin")
 MILES_TO_KM = 1.60934
 PARK_UI_LOG = "park-ui.log"
 PARKING_CHARGING_STATES = {"Charging", "Starting", "Stopped", "NoPower"}
+OFFLINE_STATE_INTERVALL_SEKUNDEN = 10
 _active_parking_sessions = {}
 _last_parking_samples = {}
 
@@ -1016,6 +1017,8 @@ CONFIG_ITEMS = [
     {"id": "blue-openings", "desc": "Türen/Fenster blau einfärben", "default": False},
     {"id": "heater-indicator", "desc": "Heizungsstatus"},
     {"id": "charging-info", "desc": "Ladeinformationen"},
+    {"id": "ladeplanung-info", "desc": "Ladeplanung"},
+    {"id": "reifendruck-details", "desc": "Reifendruckdetails"},
     {"id": "v2l-infos", "desc": "V2L-Hinweis"},
     {"id": "announcement-box", "desc": "Hinweistext"},
     {"id": "page-menu", "desc": "Seitenmenü"},
@@ -2494,14 +2497,7 @@ def _hat_normale_fahrzeugaktivitaet(fahrzeugdaten):
 
     if vehicle_state.get("is_user_present"):
         return True
-    if any(vehicle_state.get(key) for key in ("df", "dr", "pf", "pr")):
-        return True
-    if any(vehicle_state.get(key) for key in ("ft", "rt")):
-        return True
-    if any(
-        vehicle_state.get(key)
-        for key in ("fd_window", "rd_window", "fp_window", "rp_window")
-    ):
+    if _hat_offene_fahrzeugöffnung(vehicle_state):
         return True
     if vehicle_state.get("locked") is False:
         return True
@@ -2516,6 +2512,127 @@ def _hat_normale_fahrzeugaktivitaet(fahrzeugdaten):
         return True
 
     return charge_state.get("charging_state") in {"Charging", "Starting"}
+
+
+def _wert_ist_offen(value):
+    """Erkenne offene Fahrzeugteile aus API-Werten."""
+
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return abs(value) > 0.001
+    if isinstance(value, str):
+        norm = value.strip().lower()
+        if not norm:
+            return False
+        if norm in {"0", "false", "no", "none", "null", "n/a", "unknown"}:
+            return False
+        if norm in {"closed", "close", "closing", "locked"}:
+            return False
+        try:
+            return abs(float(norm)) > 0.001
+        except ValueError:
+            return True
+    return bool(value)
+
+
+def _hat_offene_fahrzeugöffnung(vehicle_state):
+    """Prüfe Türen, Kofferraum, Fenster und Schiebedach auf offen."""
+
+    if not isinstance(vehicle_state, dict):
+        return False
+    oeffnungsfelder = (
+        "df",
+        "dr",
+        "pf",
+        "pr",
+        "ft",
+        "rt",
+        "fd_window",
+        "rd_window",
+        "fp_window",
+        "rp_window",
+    )
+    if any(_wert_ist_offen(vehicle_state.get(key)) for key in oeffnungsfelder):
+        return True
+    if _wert_ist_offen(vehicle_state.get("sun_roof_percent_open")):
+        return True
+    return _wert_ist_offen(vehicle_state.get("sun_roof_state"))
+
+
+def _hat_öffnungsstatusfelder(fahrzeugdaten):
+    """Prüfe, ob Fahrzeugdaten Tür-, Fenster- oder Schiebedachwerte enthalten."""
+
+    if not isinstance(fahrzeugdaten, dict):
+        return False
+    vehicle_state = fahrzeugdaten.get("vehicle_state", {})
+    if not isinstance(vehicle_state, dict):
+        return False
+    oeffnungsfelder = (
+        "df",
+        "dr",
+        "pf",
+        "pr",
+        "ft",
+        "rt",
+        "fd_window",
+        "rd_window",
+        "fp_window",
+        "rp_window",
+        "sun_roof_percent_open",
+        "sun_roof_state",
+    )
+    return any(key in vehicle_state for key in oeffnungsfelder)
+
+
+def _öffnungsstatus_zeitstempel_ms(fahrzeugdaten):
+    """Liefere den Zeitstempel des Öffnungsstatus in Millisekunden."""
+
+    if not isinstance(fahrzeugdaten, dict):
+        return None
+    kandidaten = []
+    vehicle_state = fahrzeugdaten.get("vehicle_state", {})
+    if isinstance(vehicle_state, dict):
+        kandidaten.append(vehicle_state.get("timestamp"))
+    kandidaten.append(fahrzeugdaten.get("timestamp"))
+
+    for wert in kandidaten:
+        zeitstempel = _as_float(wert)
+        if zeitstempel is None or zeitstempel <= 0:
+            continue
+        if zeitstempel < 1_000_000_000_000:
+            zeitstempel *= 1000
+        return zeitstempel
+    return None
+
+
+def _soll_öffnungsstatus_live_prüfen(cached, latest, max_alter_sekunden):
+    """Prüfe alte Öffnungsdaten regelmäßig live nach."""
+
+    try:
+        # Der Fetch-Loop schläft von Start zu Start. Tesla-Zeitstempel entstehen
+        # aber erst während des Abrufs, deshalb verhindert eine kleine Toleranz
+        # das Überspringen jeder zweiten Leerlauf-Runde.
+        max_alter = max(1, float(max_alter_sekunden) - 2)
+    except Exception:
+        max_alter = 28
+
+    neuester_zeitstempel = None
+    for fahrzeugdaten in (cached, latest):
+        if not _hat_öffnungsstatusfelder(fahrzeugdaten):
+            continue
+        zeitstempel = _öffnungsstatus_zeitstempel_ms(fahrzeugdaten)
+        if zeitstempel is None:
+            continue
+        if neuester_zeitstempel is None or zeitstempel > neuester_zeitstempel:
+            neuester_zeitstempel = zeitstempel
+
+    if neuester_zeitstempel is None:
+        return False
+    alter_ms = (time.time() * 1000) - neuester_zeitstempel
+    return alter_ms >= max_alter * 1000
 
 
 def _parking_log_path(filename=None):
@@ -4688,10 +4805,6 @@ def get_vehicle_state(vehicle_id=None):
         api_interval = int(cfg.get("api_interval", 3))
     except Exception:
         api_interval = 3
-    try:
-        api_interval_idle = int(cfg.get("api_interval_idle", 30))
-    except Exception:
-        api_interval_idle = 30
 
     cached = _load_cached(vid)
     service_mode = None
@@ -4701,19 +4814,14 @@ def get_vehicle_state(vehicle_id=None):
         service_mode = vs.get("service_mode")
         service_mode_plus = vs.get("service_mode_plus")
 
-    normale_aktivitaet = (
-        occupant_present
-        or _hat_normale_fahrzeugaktivitaet(cached)
-        or _hat_normale_fahrzeugaktivitaet(latest_data.get(vid))
-    )
-
     last_refresh = _last_state_refresh_ts.get(vid)
     refresh_interval = max(1, api_interval)
-    if state in {"offline", "asleep"} and not normale_aktivitaet:
-        refresh_interval = api_interval_idle
+    if state in {"offline", "asleep"}:
+        refresh_interval = OFFLINE_STATE_INTERVALL_SEKUNDEN
     if state is not None and last_refresh and now - last_refresh < refresh_interval:
         return {
             "state": state,
+            "state_checked_at": int(last_refresh * 1000),
             "service_mode": service_mode,
             "service_mode_plus": service_mode_plus,
         }
@@ -4722,7 +4830,7 @@ def get_vehicle_state(vehicle_id=None):
     if tesla is None:
         return {"error": "Missing Tesla credentials or teslapy not installed"}
 
-    allow_refresh = not (state in {"offline", "asleep"} and not normale_aktivitaet)
+    allow_refresh = state not in {"offline", "asleep"}
     vehicles = _cached_vehicle_list(tesla, allow_refresh=allow_refresh)
     if not vehicles:
         return {"error": "No vehicles found"}
@@ -4739,10 +4847,15 @@ def get_vehicle_state(vehicle_id=None):
     except Exception as exc:
         _log_api_error(exc)
         log_vehicle_state(vehicle["id_s"], "offline")
-        return {"error": "Vehicle unavailable", "state": "offline"}
+        return {
+            "error": "Vehicle unavailable",
+            "state": "offline",
+            "state_checked_at": int(now * 1000),
+        }
 
     return {
         "state": state,
+        "state_checked_at": int(now * 1000),
         "service_mode": service_mode,
         "service_mode_plus": service_mode_plus,
     }
@@ -5399,20 +5512,34 @@ def _fetch_data_once(vehicle_id="default"):
     # are detected even when no occupant is present.
     state_info = get_vehicle_state(vid)
     state = state_info.get("state") if isinstance(state_info, dict) else state
+    state_checked_at = (
+        state_info.get("state_checked_at") if isinstance(state_info, dict) else None
+    )
 
     data = None
     live = False
     if state == "online":
         latest = latest_data.get(cache_id)
+        try:
+            cfg = load_config(vid or cache_id)
+            api_interval_idle = max(1, int(cfg.get("api_interval_idle", 30)))
+        except Exception:
+            api_interval_idle = 30
         passive_online_pruefung = (
             vorheriger_state in (None, "offline", "asleep")
             or (cached is None and latest is None)
+        )
+        öffnungsstatus_pruefung = _soll_öffnungsstatus_live_prüfen(
+            cached,
+            latest,
+            api_interval_idle,
         )
         darf_live_abrufen = (
             occupant_present
             or _hat_normale_fahrzeugaktivitaet(cached)
             or _hat_normale_fahrzeugaktivitaet(latest)
             or passive_online_pruefung
+            or öffnungsstatus_pruefung
         )
         if darf_live_abrufen:
             data = get_vehicle_data(vid, state=state)
@@ -5779,12 +5906,15 @@ def _fetch_data_once(vehicle_id="default"):
             pass
 
     if isinstance(data, dict):
+        if state_checked_at is not None:
+            data["state_checked_at"] = state_checked_at
         data["_live"] = live
     latest_data[cache_id] = data
     if isinstance(data, dict):
         try:
             cached_copy = dict(data)
             cached_copy.pop("_live", None)
+            cached_copy.pop("state_checked_at", None)
             _save_cached(cache_id, cached_copy)
         except Exception:
             pass
@@ -5824,12 +5954,11 @@ def _fetch_loop(vehicle_id, interval=3):
                 send_aprs(data)
             except Exception:
                 pass
-        # Use the normal interval whenever someone is in the vehicle, any
-        # opening is not fully closed or a drive gear is engaged.  Otherwise
-        # fall back to the idle interval so the car can go to sleep.
-        door_open = False
-        window_open = False
-        trunk_open = False
+        state_wert = data.get("state") if isinstance(data, dict) else None
+        # Nutze das normale Intervall, solange jemand im Fahrzeug ist, eine
+        # Öffnung offen ist oder ein Fahrgang eingelegt wurde. Sonst darf das
+        # Auto mit dem Leerlaufintervall schlafen.
+        öffnung_offen = False
         unlocked = False
         gear_active = False
         moving_active = False
@@ -5839,16 +5968,7 @@ def _fetch_loop(vehicle_id, interval=3):
             v_state = data.get("vehicle_state", {})
             d_state = data.get("drive_state", {})
             c_state = data.get("charge_state", {})
-            door_open = any(v_state.get(k) for k in ["df", "dr", "pf", "pr"])
-            window_open = any(
-                v_state.get(k) for k in [
-                    "fd_window",
-                    "rd_window",
-                    "fp_window",
-                    "rp_window",
-                ]
-            )
-            trunk_open = any(v_state.get(k) for k in ["ft", "rt"])
+            öffnung_offen = _hat_offene_fahrzeugöffnung(v_state)
             unlocked = v_state.get("locked") is False
             present = present or v_state.get("is_user_present")
             gear_active = _normalize_shift_state(d_state.get("shift_state")) in {"R", "N", "D"}
@@ -5859,13 +5979,15 @@ def _fetch_loop(vehicle_id, interval=3):
             )
             charging = c_state.get("charging_state") == "Charging"
 
-        if (
+        if state_wert in {"offline", "asleep"}:
+            remaining = OFFLINE_STATE_INTERVALL_SEKUNDEN - (time.time() - start)
+            if remaining > 0:
+                time.sleep(remaining)
+        elif (
             present
             or gear_active
             or moving_active
-            or door_open
-            or window_open
-            or trunk_open
+            or öffnung_offen
             or unlocked
             or charging
         ):

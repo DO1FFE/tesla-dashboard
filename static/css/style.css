@@ -148,10 +148,61 @@ select {
 
 #software-update {
   display: none;
-  text-align: center;
-  font-size: 1.1em;
   margin: 10px 0;
-  color: var(--accent-color);
+  padding: 10px;
+  color: var(--text-color);
+  background: rgba(156, 39, 176, 0.2);
+  border: 1px solid #9c27b0;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+#software-update h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+
+#software-update table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#software-update th,
+#software-update td {
+  border: 1px solid #444;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+#software-update th {
+  white-space: nowrap;
+  font-weight: normal;
+}
+
+.software-progress-row {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 4px 10px;
+  align-items: center;
+  margin: 8px 0;
+}
+
+.software-progress-row span:nth-child(2) {
+  text-align: right;
+}
+
+.software-progress {
+  grid-column: 1 / -1;
+  height: 8px;
+  background: #444;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.software-progress-bar {
+  height: 100%;
+  background: var(--accent-color);
+  width: 0;
 }
 
 #offline-msg {
@@ -306,69 +357,69 @@ select {
   width: 100%;
   margin: 10px 0;
   padding: 10px;
-  background: var(--surface-color);
-  border: 1px solid #444;
+  background: rgba(255, 152, 0, 0.2);
+  border: 1px solid #ff9800;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
   box-sizing: border-box;
 }
 
 #supercharger-list h3 {
-  margin-top: 0;
-  margin-bottom: 8px;
-  font-size: 1.05em;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  margin: 0 0 6px;
+  font-size: 1rem;
 }
 
 #supercharger-list h3::before {
-  content: "⚡";
-  color: var(--accent-color);
+  content: none;
 }
 
 #supercharger-list ul {
   list-style: none;
   padding: 0;
   margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
   width: 100%;
 }
 
 #supercharger-list li {
-  background: var(--surface-color);
-  border: 1px solid #d32f2f;
-  border-radius: 6px;
-  padding: 8px;
-  width: 100%;
-  box-sizing: border-box;
+  display: contents;
+  background: transparent;
 }
 
 #supercharger-list li .row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+  display: contents;
 }
 
 #supercharger-list li .name {
   font-weight: 600;
-  flex: 1 1 auto;
   min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #444;
+  border-bottom: 0;
+  overflow-wrap: anywhere;
 }
 
 #supercharger-list li .meta {
-  font-size: 0.9em;
   color: #ccc;
-  flex: 0 0 auto;
+  border: 1px solid #444;
+  border-left: 1px solid #444;
+  border-bottom: 0;
+  padding: 6px 8px;
   text-align: right;
   white-space: nowrap;
 }
 
+#supercharger-list li:last-child .name,
+#supercharger-list li:last-child .meta {
+  border-bottom: 1px solid #444;
+}
+
 #supercharger-list li.empty {
-  border-style: dashed;
+  display: block;
+  grid-column: 1 / -1;
+  border: 1px solid #444;
+  padding: 6px 8px;
   text-align: center;
   color: #bbb;
 }
@@ -566,6 +617,8 @@ select {
 
 #v2l-infos,
 #charging-info,
+#ladeplanung-info,
+#reifendruck-details,
 /* Navigation bar below the status bar */
 #nav-bar {
   margin: 10px 0;
@@ -583,6 +636,18 @@ select {
 #charging-info {
   background: rgba(30, 136, 229, 0.2);
   border: 1px solid #1e88e5;
+}
+
+#ladeplanung-info {
+  display: none;
+  background: rgba(0, 150, 136, 0.2);
+  border: 1px solid #009688;
+}
+
+#reifendruck-details {
+  display: none;
+  background: rgba(121, 85, 72, 0.2);
+  border: 1px solid #795548;
 }
 
 #nav-bar {
@@ -644,6 +709,8 @@ select {
 
 #v2l-infos table,
 #charging-info table,
+#ladeplanung-info table,
+#reifendruck-details table,
 #nav-bar table {
   width: 100%;
   border-collapse: collapse;
@@ -653,6 +720,10 @@ select {
 #v2l-infos td,
 #charging-info th,
 #charging-info td,
+#ladeplanung-info th,
+#ladeplanung-info td,
+#reifendruck-details th,
+#reifendruck-details td,
 #nav-bar th,
 #nav-bar td {
   border: 1px solid #444;
@@ -662,6 +733,8 @@ select {
 
 #v2l-infos th,
 #charging-info th,
+#ladeplanung-info th,
+#reifendruck-details th,
 #nav-bar th {
   white-space: nowrap;
   font-weight: normal;
@@ -669,8 +742,41 @@ select {
 
 #v2l-infos span.icon,
 #charging-info span.icon,
+#ladeplanung-info span.icon,
+#reifendruck-details span.icon,
 #nav-bar span.icon {
   margin-right: 4px;
+}
+
+#ladeplanung-info h3,
+#reifendruck-details h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+
+.panel-summary {
+  margin: 0 0 8px;
+  font-weight: bold;
+}
+
+#reifendruck-details tr.reifendruck-ok td,
+#reifendruck-details tr.reifendruck-ok th {
+  background: rgba(76, 175, 80, 0.08);
+}
+
+#reifendruck-details tr.reifendruck-warnung td,
+#reifendruck-details tr.reifendruck-warnung th {
+  background: rgba(255, 152, 0, 0.16);
+}
+
+#reifendruck-details tr.reifendruck-kritisch td,
+#reifendruck-details tr.reifendruck-kritisch th {
+  background: rgba(211, 47, 47, 0.18);
+}
+
+#reifendruck-details tr.reifendruck-unbekannt td,
+#reifendruck-details tr.reifendruck-unbekannt th {
+  color: #aaa;
 }
 
 /* Media player below the navigation bar */
@@ -1254,7 +1360,7 @@ select {
 
 .app-version #client-count {
   position: absolute;
-  left: 120px;
+  left: 270px;
   bottom: 0;
   color: var(--accent-color);
 }
