@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Gespeicherte Push-to-Talk-Übertragungen des Tesla-Dashboards">
+    <meta name="keywords" content="Tesla, Dashboard, Push-to-Talk, PTT, Audio, Übertragungen">
+    <title>PTT-Übertragungen</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+    {% include 'analytics.html' %}
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9376188585752918"
+     crossorigin="anonymous"></script>
+</head>
+<body>
+    <main class="ptt-archiv">
+        <h1>PTT-Übertragungen</h1>
+        <p class="ptt-hinweis">
+            Gespeichert werden maximal {{ limit }} Übertragungen für {{ retention_hours }} Stunden.
+        </p>
+        {% if recordings %}
+        <ol class="ptt-recording-list">
+            {% for recording in recordings %}
+            <li class="ptt-recording">
+                <div class="ptt-recording-header">
+                    <strong>{{ recording.zeit }}</strong>
+                    <span>{{ recording.dauer_text }} · {{ recording.größe_text }}</span>
+                </div>
+                <audio controls preload="none" src="{{ url_for('ptt_audio_file', recording_id=recording.id) }}"></audio>
+                <dl class="ptt-recording-meta">
+                    <dt>Quelle</dt>
+                    <dd>{{ recording.ip or 'unbekannt' }}</dd>
+                    <dt>Browser</dt>
+                    <dd>{{ recording.browser_text or recording.user_agent or 'unbekannt' }}</dd>
+                    <dt>Codec</dt>
+                    <dd>{{ recording.codec or recording.mime_type or 'unbekannt' }}</dd>
+                    <dt>Client</dt>
+                    <dd>{{ recording.client_id or 'unbekannt' }}</dd>
+                </dl>
+            </li>
+            {% endfor %}
+        </ol>
+        {% else %}
+        <p class="ptt-leer">Noch keine PTT-Übertragungen gespeichert.</p>
+        {% endif %}
+    </main>
+
+    <footer class="app-version">
+        <span>Tesla-Dashboard V{{ version }} - © 2025{% if year > 2025 %}-{{ year }}{% endif %} Erik Schauer, do1ffe@darc.de</span>
+    </footer>
+</body>
+</html>

@@ -47,7 +47,7 @@ from dotenv import load_dotenv
 from version import get_version
 from logo import LOGO_DATA_URI
 import qrcode
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from importlib import metadata
 from flask_socketio import SocketIO, emit
@@ -317,6 +317,66 @@ active_clients = {}
 current_speaker_id = None
 ptt_timer = None
 audio_buffer = bytearray()
+ptt_speaker_info = {}
+ptt_started_at = None
+ptt_diagnostics = {}
+PTT_DIAGNOSTICS_TTL = 24 * 60 * 60
+PTT_RECORDINGS_DIR = None
+PTT_RECORDING_LIMIT = max(1, int(os.getenv("PTT_RECORDING_LIMIT", "20")))
+PTT_RECORDING_RETENTION_HOURS = max(
+    1, int(os.getenv("PTT_RECORDING_RETENTION_HOURS", "24"))
+)
+PTT_RECORDING_MIN_SECONDS = max(
+    0.0, float(os.getenv("PTT_RECORDING_MIN_SECONDS", "1.0"))
+)
+ptt_recording_lock = threading.Lock()
+
+
+def _ptt_diagnose_wert_säubern(wert, tiefe=0):
+    """Begrenze gemeldete PTT-Diagnosedaten auf kleine JSON-Werte."""
+
+    if tiefe >= 3:
+        return str(wert)[:200]
+    if wert is None or isinstance(wert, bool):
+        return wert
+    if isinstance(wert, (int, float)):
+        return wert
+    if isinstance(wert, str):
+        return wert[:1000]
+    if isinstance(wert, dict):
+        bereinigt = {}
+        for index, (schlüssel, inhalt) in enumerate(wert.items()):
+            if index >= 50:
+                break
+            name = str(schlüssel)[:120]
+            bereinigt[name] = _ptt_diagnose_wert_säubern(inhalt, tiefe + 1)
+        return bereinigt
+    if isinstance(wert, (list, tuple)):
+        return [_ptt_diagnose_wert_säubern(eintrag, tiefe + 1)
+                for eintrag in wert[:50]]
+    return str(wert)[:500]
+
+
+def _ptt_diagnosen_auflisten():
+    """Gib die aktuellen PTT-Diagnosen mit Alter in Sekunden zurück."""
+
+    jetzt = time.time()
+    einträge = []
+    abgelaufen = []
+    for client_id, diagnose in list(ptt_diagnostics.items()):
+        empfangen = diagnose.get("received_ts", jetzt)
+        alter = max(0, int(jetzt - empfangen))
+        if alter > PTT_DIAGNOSTICS_TTL:
+            abgelaufen.append(client_id)
+            continue
+        eintrag = dict(diagnose)
+        eintrag.pop("received_ts", None)
+        eintrag["age_seconds"] = alter
+        einträge.append(eintrag)
+    for client_id in abgelaufen:
+        ptt_diagnostics.pop(client_id, None)
+    einträge.sort(key=lambda eintrag: eintrag.get("received_at", ""), reverse=True)
+    return einträge
 
 
 def _client_ip():
@@ -1029,6 +1089,7 @@ CONFIG_ITEMS = [
     {"id": "nav-bar", "desc": "Navigationsleiste"},
     {"id": "media-player", "desc": "Medienwiedergabe"},
     {"id": "ptt-controls", "desc": "Push-to-Talk"},
+    {"id": "ptt-recordings", "desc": "PTT-Übertragungen speichern"},
     {"id": "software-update", "desc": "Software-Update-Hinweis"},
     {"id": "offline-msg", "desc": "Offline-Meldung"},
     {"id": "loading-msg", "desc": "Ladehinweis"},
@@ -1106,6 +1167,13 @@ def is_ptt_enabled():
 
     cfg = load_config()
     return bool(cfg.get("ptt-controls", True))
+
+
+def is_ptt_recording_enabled():
+    """Gib zurück, ob PTT-Übertragungen gespeichert werden sollen."""
+
+    cfg = load_config()
+    return bool(cfg.get("ptt-recordings", True))
 
 
 def get_taximeter_tariff():
@@ -6361,6 +6429,13 @@ def api_client_details():
     return jsonify({"clients": items})
 
 
+@app.route("/api/ptt/diagnostics")
+def api_ptt_diagnostics():
+    """Gib die zuletzt gemeldeten Push-to-Talk-Diagnosen zurück."""
+
+    return jsonify({"diagnostics": _ptt_diagnosen_auflisten()})
+
+
 @app.route("/api/reverse_geocode")
 def api_reverse_geocode():
     """Return address for given coordinates."""
@@ -7210,6 +7285,266 @@ def debug_info():
     )
 
 
+def _ptt_aufnahme_ordner():
+    """Gib den Speicherordner für PTT-Übertragungen zurück."""
+
+    return PTT_RECORDINGS_DIR or os.path.join(DATA_DIR, "ptt")
+
+
+def _ptt_index_pfad():
+    return os.path.join(_ptt_aufnahme_ordner(), "index.json")
+
+
+def _ptt_audio_dateityp(mime_type):
+    """Ermittle Dateiendung und MIME-Type für eine PTT-Aufnahme."""
+
+    mime = (mime_type or "").lower()
+    if "ogg" in mime:
+        return ".ogg", "audio/ogg"
+    if "mp4" in mime:
+        return ".m4a", "audio/mp4"
+    if "aac" in mime:
+        return ".aac", "audio/aac"
+    if "wav" in mime or "wave" in mime:
+        return ".wav", "audio/wav"
+    return ".webm", "audio/webm"
+
+
+def _ptt_mime_aus_diagnose(client_id):
+    diagnose = ptt_diagnostics.get(client_id, {}).get("diagnostics", {})
+    if not isinstance(diagnose, dict):
+        return "", ""
+    return (
+        diagnose.get("gewählter_mime_type") or "",
+        diagnose.get("gewählter_codec") or "",
+    )
+
+
+def _ptt_start_info(client_id, data=None):
+    """Sammle Metadaten für die aktuelle PTT-Übertragung."""
+
+    payload = data if isinstance(data, dict) else {}
+    mime_type = payload.get("mime_type") or payload.get("mimeType") or ""
+    codec = payload.get("codec") or ""
+    if not mime_type:
+        diagnose_mime, diagnose_codec = _ptt_mime_aus_diagnose(client_id)
+        mime_type = diagnose_mime
+        codec = codec or diagnose_codec
+    extension, normalisiertes_mime = _ptt_audio_dateityp(mime_type)
+    ua = request.headers.get("User-Agent", "")
+    browser, os_name = parse_user_agent(ua)
+    return {
+        "client_id": client_id,
+        "ip": _client_ip(),
+        "user_agent": ua,
+        "browser": browser,
+        "os": os_name,
+        "mime_type": mime_type or normalisiertes_mime,
+        "codec": codec,
+        "extension": extension,
+        "normalisiertes_mime": normalisiertes_mime,
+    }
+
+
+def _ptt_index_lesen_ungesperrt():
+    try:
+        with open(_ptt_index_pfad(), "r", encoding="utf-8") as f:
+            daten = json.load(f)
+        if isinstance(daten, list):
+            return [eintrag for eintrag in daten if isinstance(eintrag, dict)]
+    except Exception:
+        pass
+    return []
+
+
+def _ptt_index_schreiben_ungesperrt(einträge):
+    os.makedirs(_ptt_aufnahme_ordner(), exist_ok=True)
+    ziel = _ptt_index_pfad()
+    tmp = ziel + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(einträge, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, ziel)
+
+
+def _ptt_aufnahme_löschen_ungesperrt(eintrag):
+    filename = eintrag.get("filename")
+    if not filename:
+        return
+    try:
+        os.remove(os.path.join(_ptt_aufnahme_ordner(), filename))
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        app.logger.warning("PTT-Aufnahme konnte nicht gelöscht werden: %s", exc)
+
+
+def _ptt_timestamp(eintrag):
+    try:
+        return float(eintrag.get("timestamp", 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _ptt_dauer(eintrag):
+    try:
+        return float(eintrag.get("duration_seconds", 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _ptt_aufnahmen_bereinigen_ungesperrt(einträge):
+    jetzt = time.time()
+    grenze = jetzt - PTT_RECORDING_RETENTION_HOURS * 3600
+    sortiert = sorted(
+        einträge,
+        key=_ptt_timestamp,
+        reverse=True,
+    )
+    behalten = []
+    for eintrag in sortiert:
+        filename = eintrag.get("filename")
+        timestamp = _ptt_timestamp(eintrag)
+        dauer = _ptt_dauer(eintrag)
+        pfad = os.path.join(_ptt_aufnahme_ordner(), filename or "")
+        if not filename or not os.path.exists(pfad):
+            continue
+        if (
+            dauer < PTT_RECORDING_MIN_SECONDS
+            or timestamp < grenze
+            or len(behalten) >= PTT_RECORDING_LIMIT
+        ):
+            _ptt_aufnahme_löschen_ungesperrt(eintrag)
+            continue
+        behalten.append(eintrag)
+    return behalten
+
+
+def _ptt_aufnahme_speichern(audio_daten, sprecher_info, gestartet_am):
+    """Speichere eine fertige PTT-Übertragung im begrenzten Archiv."""
+
+    if not is_ptt_recording_enabled() or not audio_daten:
+        return
+    start_ts = gestartet_am or time.time()
+    ende_ts = time.time()
+    dauer = max(0.0, ende_ts - start_ts)
+    if dauer < PTT_RECORDING_MIN_SECONDS:
+        return
+    info = dict(sprecher_info or {})
+    extension, normalisiertes_mime = _ptt_audio_dateityp(info.get("mime_type"))
+    aufnahme_id = (
+        datetime.fromtimestamp(ende_ts, timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        + "-"
+        + secrets.token_hex(4)
+    )
+    filename = aufnahme_id + extension
+    os.makedirs(_ptt_aufnahme_ordner(), exist_ok=True)
+    with open(os.path.join(_ptt_aufnahme_ordner(), filename), "wb") as f:
+        f.write(audio_daten)
+
+    eintrag = {
+        "id": aufnahme_id,
+        "filename": filename,
+        "timestamp": ende_ts,
+        "started_at": start_ts,
+        "duration_seconds": dauer,
+        "size_bytes": len(audio_daten),
+        "mime_type": info.get("mime_type") or normalisiertes_mime,
+        "content_type": normalisiertes_mime,
+        "codec": info.get("codec") or "",
+        "client_id": info.get("client_id") or "",
+        "ip": info.get("ip") or "",
+        "browser": info.get("browser") or "",
+        "os": info.get("os") or "",
+        "user_agent": info.get("user_agent") or "",
+    }
+    with ptt_recording_lock:
+        einträge = _ptt_index_lesen_ungesperrt()
+        einträge.insert(0, eintrag)
+        einträge = _ptt_aufnahmen_bereinigen_ungesperrt(einträge)
+        _ptt_index_schreiben_ungesperrt(einträge)
+
+
+def _ptt_aufnahmen_laden():
+    with ptt_recording_lock:
+        einträge = _ptt_aufnahmen_bereinigen_ungesperrt(
+            _ptt_index_lesen_ungesperrt()
+        )
+        _ptt_index_schreiben_ungesperrt(einträge)
+    return einträge
+
+
+def _ptt_aufnahme_finden(aufnahme_id):
+    for eintrag in _ptt_aufnahmen_laden():
+        if eintrag.get("id") == aufnahme_id:
+            return eintrag
+    return None
+
+
+def _ptt_dauer_text(sekunden):
+    sekunden = max(0, int(round(sekunden or 0)))
+    minuten, rest = divmod(sekunden, 60)
+    if minuten:
+        return f"{minuten} min {rest} s"
+    return f"{rest} s"
+
+
+def _ptt_bytes_text(anzahl):
+    anzahl = int(anzahl or 0)
+    if anzahl >= 1024 * 1024:
+        return f"{anzahl / 1024 / 1024:.1f} MB"
+    if anzahl >= 1024:
+        return f"{anzahl / 1024:.1f} KB"
+    return f"{anzahl} B"
+
+
+def _ptt_aufnahmen_für_template():
+    einträge = []
+    for eintrag in _ptt_aufnahmen_laden():
+        timestamp = _ptt_timestamp(eintrag)
+        zeit = datetime.fromtimestamp(timestamp, LOCAL_TZ)
+        kopie = dict(eintrag)
+        kopie["zeit"] = zeit.strftime("%d.%m.%Y %H:%M:%S")
+        kopie["dauer_text"] = _ptt_dauer_text(eintrag.get("duration_seconds"))
+        kopie["größe_text"] = _ptt_bytes_text(eintrag.get("size_bytes"))
+        kopie["browser_text"] = " / ".join(
+            teil for teil in (eintrag.get("browser"), eintrag.get("os")) if teil
+        )
+        einträge.append(kopie)
+    return einträge
+
+
+@app.route("/ptt")
+@requires_auth
+def ptt_recordings_page():
+    """Zeige die gespeicherten Push-to-Talk-Übertragungen."""
+
+    return render_template(
+        "ptt.html",
+        recordings=_ptt_aufnahmen_für_template(),
+        version=__version__,
+        year=CURRENT_YEAR,
+        limit=PTT_RECORDING_LIMIT,
+        retention_hours=PTT_RECORDING_RETENTION_HOURS,
+    )
+
+
+@app.route("/ptt/audio/<recording_id>")
+@requires_auth
+def ptt_audio_file(recording_id):
+    """Liefere eine gespeicherte PTT-Audiodatei aus."""
+
+    eintrag = _ptt_aufnahme_finden(recording_id)
+    if not eintrag:
+        abort(404)
+    return send_from_directory(
+        _ptt_aufnahme_ordner(),
+        eintrag["filename"],
+        mimetype=eintrag.get("content_type") or eintrag.get("mime_type") or None,
+        as_attachment=False,
+        max_age=0,
+    )
+
+
 # Socket.IO handlers for push-to-talk audio
 
 
@@ -7227,6 +7562,14 @@ def _client_id():
     return request.sid
 
 
+def _ptt_session_zurücksetzen():
+    """Setze die Metadaten der aktuellen PTT-Übertragung zurück."""
+
+    global ptt_speaker_info, ptt_started_at
+    ptt_speaker_info = {}
+    ptt_started_at = None
+
+
 def _flush_audio_buffer():
     """Send and clear buffered audio if available."""
     global audio_buffer
@@ -7234,7 +7577,9 @@ def _flush_audio_buffer():
         audio_buffer.clear()
         return
     if audio_buffer:
-        socketio.emit("play_audio", bytes(audio_buffer), include_self=False)
+        audio_daten = bytes(audio_buffer)
+        socketio.emit("play_audio", audio_daten, include_self=False)
+        _ptt_aufnahme_speichern(audio_daten, ptt_speaker_info, ptt_started_at)
         audio_buffer.clear()
 
 
@@ -7244,6 +7589,7 @@ def _release_ptt(expected_id):
     if current_speaker_id == expected_id:
         _flush_audio_buffer()
         current_speaker_id = None
+        _ptt_session_zurücksetzen()
         socketio.emit("unlock_ptt", broadcast=True)
     ptt_timer = None
 
@@ -7252,12 +7598,45 @@ def _release_ptt(expected_id):
 def handle_connect():
     cid = _client_id()
     emit("your_id", {"id": cid})
+    if (
+        is_ptt_enabled()
+        and current_speaker_id is not None
+        and current_speaker_id != cid
+    ):
+        emit("lock_ptt", {"speaker": current_speaker_id})
+
+
+@socketio.on("ptt_diagnostics")
+def handle_ptt_diagnostics(data):
+    """Speichere die Browser-Diagnose eines PTT-Clients."""
+
+    if not isinstance(data, dict):
+        return
+    cid = _client_id()
+    ip = _client_ip()
+    jetzt = time.time()
+    diagnose = _ptt_diagnose_wert_säubern(data)
+    eintrag = {
+        "client_id": cid,
+        "ip": ip,
+        "received_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "received_ts": jetzt,
+        "diagnostics": diagnose,
+    }
+    ptt_diagnostics[cid] = eintrag
+    if ip:
+        info = active_clients.setdefault(ip, {"ip": ip})
+        info["ptt_diagnostics"] = {
+            "received_at": eintrag["received_at"],
+            "diagnostics": diagnose,
+        }
 
 
 @socketio.on("start_speaking")
-def start_speaking():
+def start_speaking(data=None):
     """Allow a client to speak if no other client is active."""
-    global current_speaker_id, ptt_timer, audio_buffer
+    global current_speaker_id, ptt_timer, audio_buffer, ptt_speaker_info
+    global ptt_started_at
     cid = _client_id()
     sid = request.sid
     if not is_ptt_enabled():
@@ -7265,6 +7644,8 @@ def start_speaking():
         return
     if current_speaker_id is None:
         current_speaker_id = cid
+        ptt_started_at = time.time()
+        ptt_speaker_info = _ptt_start_info(cid, data)
         audio_buffer.clear()
         emit("start_accepted", room=sid)
         emit("lock_ptt", {"speaker": cid}, broadcast=True, include_self=False)
@@ -7286,6 +7667,7 @@ def stop_speaking():
         if current_speaker_id is not None:
             _flush_audio_buffer()
             current_speaker_id = None
+            _ptt_session_zurücksetzen()
             if ptt_timer:
                 ptt_timer.cancel()
                 ptt_timer = None
@@ -7293,6 +7675,7 @@ def stop_speaking():
     if _client_id() == current_speaker_id:
         _flush_audio_buffer()
         current_speaker_id = None
+        _ptt_session_zurücksetzen()
         emit("unlock_ptt", broadcast=True)
         if ptt_timer:
             ptt_timer.cancel()
@@ -7325,6 +7708,7 @@ def handle_disconnect():
         if current_speaker_id is not None:
             _flush_audio_buffer()
             current_speaker_id = None
+            _ptt_session_zurücksetzen()
             if ptt_timer:
                 ptt_timer.cancel()
                 ptt_timer = None
@@ -7332,6 +7716,7 @@ def handle_disconnect():
     if _client_id() == current_speaker_id:
         _flush_audio_buffer()
         current_speaker_id = None
+        _ptt_session_zurücksetzen()
         emit("unlock_ptt", broadcast=True)
         if ptt_timer:
             ptt_timer.cancel()
