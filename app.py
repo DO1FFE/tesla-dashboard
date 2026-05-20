@@ -37,6 +37,7 @@ from flask import (
     redirect,
     g,
     make_response,
+    session,
 )
 from flask_wtf import CSRFProtect
 from taximeter import Taximeter
@@ -106,6 +107,31 @@ def _set_robots_header(resp):
     if request.path in {"/", "/statistik", "/robots.txt"}:
         return
     resp.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
+
+
+def _kommt_von_interner_seite():
+    """Prüfe, ob der Aufruf von einer anderen Dashboard-Seite kommt."""
+
+    referrer = request.referrer
+    if not referrer:
+        return False
+    try:
+        referrer_url = urlparse(referrer)
+    except Exception:
+        return False
+    if referrer_url.netloc and referrer_url.netloc != request.host:
+        return False
+    referrer_pfad = referrer_url.path or "/"
+    return referrer_pfad != request.path
+
+
+def _soll_splashscreen_anzeigen():
+    """Zeige den Splashscreen nur beim ersten direkten Aufruf der Hauptseite."""
+
+    hauptseite_besucht = bool(session.get("hauptseite_besucht"))
+    kommt_intern = _kommt_von_interner_seite()
+    session["hauptseite_besucht"] = True
+    return not hauptseite_besucht and not kommt_intern
 
 
 __version__ = get_version()
@@ -5873,6 +5899,7 @@ def index():
         year=CURRENT_YEAR,
         config=cfg,
         socketio_client_script=socketio_client_script(),
+        splashscreen_anzeigen=_soll_splashscreen_anzeigen(),
     )
 
 

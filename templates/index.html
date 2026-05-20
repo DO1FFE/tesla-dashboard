@@ -20,9 +20,11 @@
      crossorigin="anonymous"></script>
 </head>
 <body>
+    {% if splashscreen_anzeigen %}
     <div id="splashscreen" role="status" aria-live="polite" aria-label="Splashscreen wird angezeigt">
         <img src="{{ splash_logo_data_uri }}" alt="Tesla Dashboard Splashscreen" loading="eager" decoding="async">
     </div>
+    {% endif %}
     <a href="#dashboard-content" class="skip-link">Zum Inhalt springen</a>
     <h2><img class="header-logo" src="{{ splash_logo_data_uri }}" alt="" aria-hidden="true">Tesla-Dashboard V{{ version }}
         <span id="header-right">
@@ -277,6 +279,7 @@
     <script>
         window.APP_VERSION = "{{ version }}";
 
+        {% if splashscreen_anzeigen %}
         window.addEventListener("load", function () {
             const splash = document.getElementById("splashscreen");
             if (!splash) {
@@ -294,6 +297,7 @@
                 }, 400);
             }, 5000);
         });
+        {% endif %}
     </script>
     <script src="/static/js/map-providers.js"></script>
     <script src="/static/js/main.js"></script>
