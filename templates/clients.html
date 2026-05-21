@@ -42,7 +42,7 @@
                 <td>{{ c.os }}</td>
                 <td>{{ c.user_agent }}</td>
                 <td>{{ c.pages | join(', ') }}</td>
-                <td>seit {{ c.duration }}</td>
+                <td class="client-duration" data-first-seen="{{ c.first_seen_ms }}">{{ c.duration }}</td>
             </tr>
             {% endfor %}
         </tbody>

@@ -321,6 +321,7 @@ var TOGGLE_DEFAULTS = {
     'heater-indicator': true,
     'charging-info': true,
     'ladeplanung-info': true,
+    'preconditioning-info': true,
     'reifendruck-details': true,
     'v2l-infos': true,
     'announcement-box': true,
@@ -451,7 +452,11 @@ function applyConfig(cfg) {
 function showConfigured() {
     Object.keys(TOGGLE_DEFAULTS).forEach(function(id) {
         if (id === 'blue-openings') return;
-        if (id === 'ladeplanung-info' || id === 'reifendruck-details') return;
+        if (
+            id === 'ladeplanung-info' ||
+            id === 'preconditioning-info' ||
+            id === 'reifendruck-details'
+        ) return;
         $('#' + id).toggle(configEnabled(id));
     });
     var visibleThermometers = THERMOMETER_IDS.some(function(id) {
@@ -470,6 +475,9 @@ function showConfigured() {
     }
     if (!configEnabled('ladeplanung-info')) {
         $('#ladeplanung-info').empty().hide();
+    }
+    if (!configEnabled('preconditioning-info')) {
+        $('#preconditioning-info').empty().hide();
     }
     if (!configEnabled('reifendruck-details')) {
         $('#reifendruck-details').empty().hide();
@@ -785,6 +793,7 @@ function handleData(data) {
     updateCabinProtection(climate.cabin_overheat_protection);
     updateFanStatus(climate.fan_status);
     updateDesiredTemp(climate.driver_temp_setting);
+    updatePreconditioningInfo(climate, charge);
     updateHeaterIndicator(
         climate.is_front_defroster_on,
         climate.is_rear_defroster_on,
@@ -1677,6 +1686,113 @@ function istAktiv(wert) {
     return !!wert;
 }
 
+function formatiereTemperatur(wert) {
+    var zahl = parseNumber(wert);
+    if (zahl == null) {
+        return '';
+    }
+    return zahl.toFixed(1) + ' °C';
+}
+
+function vorklimatisierungZieltemperatur(climate) {
+    var fahrer = formatiereTemperatur(climate && climate.driver_temp_setting);
+    var beifahrer = formatiereTemperatur(climate && climate.passenger_temp_setting);
+    if (fahrer && beifahrer && fahrer !== beifahrer) {
+        return fahrer + ' / ' + beifahrer;
+    }
+    return fahrer || beifahrer;
+}
+
+function updatePreconditioningInfo(climate, charge) {
+    var $info = $('#preconditioning-info');
+    if (!$info.length || !configEnabled('preconditioning-info')) {
+        $info.empty().hide();
+        return;
+    }
+
+    climate = climate || {};
+    charge = charge || {};
+    var vorklimatisiert = istAktiv(climate.is_preconditioning);
+    var automatischeKlima = istAktiv(climate.is_auto_conditioning_on);
+    var planAktiv = istAktiv(charge.preconditioning_enabled);
+    var klimaAn = istAktiv(climate.is_climate_on);
+    var batterieHeizt = istAktiv(charge.battery_heater_on) ||
+                        istAktiv(climate.battery_heater);
+    var heizleistungFehlt = istAktiv(charge.not_enough_power_to_heat) ||
+                            istAktiv(climate.battery_heater_no_power);
+    var relevant = vorklimatisiert || automatischeKlima || planAktiv ||
+                   (batterieHeizt && (vorklimatisiert || automatischeKlima || klimaAn)) ||
+                   heizleistungFehlt;
+    if (!relevant) {
+        $info.empty().hide();
+        return;
+    }
+
+    var titel = 'Vorklimatisierung';
+    var zusammenfassung = 'Vorklimatisierung aktiv';
+    if (vorklimatisiert) {
+        zusammenfassung = 'Vorklimatisierung läuft';
+    } else if (automatischeKlima) {
+        zusammenfassung = 'Automatische Klimatisierung läuft';
+    } else if (planAktiv) {
+        zusammenfassung = 'Vorklimatisierung für geplante Abfahrt aktiv';
+    } else if (heizleistungFehlt) {
+        zusammenfassung = 'Heizleistung begrenzt';
+    }
+
+    var rows = [];
+    if (vorklimatisiert || automatischeKlima || klimaAn) {
+        var status = klimaAn ? 'Klima läuft' : 'Klima bereit';
+        if (vorklimatisiert) {
+            status = 'Vorklimatisierung läuft';
+        } else if (automatischeKlima) {
+            status = 'Automatische Klimatisierung läuft';
+        }
+        rows.push('<tr><th>Status:</th><td>' + escapeHtml(status) + '</td></tr>');
+    }
+
+    var innen = formatiereTemperatur(climate.inside_temp);
+    if (innen) {
+        rows.push('<tr><th>Innenraum:</th><td>' + escapeHtml(innen) + '</td></tr>');
+    }
+    var ziel = vorklimatisierungZieltemperatur(climate);
+    if (ziel) {
+        rows.push('<tr><th>Zieltemperatur:</th><td>' + escapeHtml(ziel) + '</td></tr>');
+    }
+    var luefter = parseNumber(climate.fan_status);
+    if (luefter != null && luefter > 0) {
+        rows.push('<tr><th>Lüfter:</th><td>Stufe ' + escapeHtml(String(luefter)) + '</td></tr>');
+    }
+
+    var abfahrt = planAktiv ? geplanteAbfahrtszeit(charge) : null;
+    if (abfahrt) {
+        rows.push('<tr><th>Geplante Abfahrt:</th><td>' + escapeHtml(abfahrt) + '</td></tr>');
+    }
+    if (planAktiv) {
+        var planText = 'aktiv';
+        var zeitraum = beschreibeVorklimatisierungsZeitraum(
+            charge.preconditioning_times
+        );
+        if (zeitraum) {
+            planText += ' (' + zeitraum + ')';
+        }
+        rows.push('<tr><th>Planung:</th><td>' + escapeHtml(planText) + '</td></tr>');
+    }
+    if (batterieHeizt || heizleistungFehlt) {
+        var batterieText = batterieHeizt ? 'Batterieheizung aktiv' : 'Batterieheizung aus';
+        if (heizleistungFehlt) {
+            batterieText += ', Heizleistung begrenzt';
+        }
+        rows.push('<tr><th>Batterie:</th><td>' + escapeHtml(batterieText) + '</td></tr>');
+    }
+
+    $info.html(
+        '<h3>' + escapeHtml(titel) + '</h3>' +
+        '<p class="panel-summary">' + escapeHtml(zusammenfassung) + '</p>' +
+        '<table>' + rows.join('') + '</table>'
+    ).show();
+}
+
 function beschreibeZeitraum(wert) {
     if (!wert) {
         return '';
@@ -1693,6 +1809,16 @@ function beschreibeZeitraum(wert) {
         return 'am Wochenende';
     }
     return text.replace(/_/g, ' ');
+}
+
+function beschreibeVorklimatisierungsZeitraum(wert) {
+    if (!wert) {
+        return '';
+    }
+    if (String(wert).toLowerCase() === 'all_week') {
+        return '';
+    }
+    return beschreibeZeitraum(wert);
 }
 
 function geplanteAbfahrtszeit(charge) {
@@ -1801,7 +1927,9 @@ function updateLadeplanungInfo(charge) {
     }
     if (abfahrt || vorklimatisierung) {
         var vorklimaText = vorklimatisierung ? 'aktiv' : 'aus';
-        var vorklimaZeitraum = beschreibeZeitraum(charge.preconditioning_times);
+        var vorklimaZeitraum = beschreibeVorklimatisierungsZeitraum(
+            charge.preconditioning_times
+        );
         if (vorklimaZeitraum) {
             vorklimaText += ' (' + vorklimaZeitraum + ')';
         }

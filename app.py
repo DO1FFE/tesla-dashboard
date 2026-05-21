@@ -329,6 +329,27 @@ PTT_RECORDING_LIMIT = max(1, int(os.getenv("PTT_RECORDING_LIMIT", "20")))
 PTT_RECORDING_RETENTION_HOURS = max(
     1, int(os.getenv("PTT_RECORDING_RETENTION_HOURS", "24"))
 )
+
+
+def _client_metadaten_ergänzen(info, ip=None, ua=None, now=None):
+    """Ergänze fehlende Basisdaten eines bereits bekannten Clients."""
+
+    if not isinstance(info, dict):
+        return {}
+    if now is None:
+        now = time.time()
+    if ip is not None:
+        info.setdefault("ip", ip)
+    start = info.get("first_seen")
+    if start is None:
+        start = info.get("last_seen", now)
+        info["first_seen"] = start
+    info.setdefault("last_seen", start)
+    info.setdefault("connections", 0)
+    info.setdefault("pages", [])
+    if ua is not None:
+        info.setdefault("user_agent", ua)
+    return info
 PTT_RECORDING_MIN_SECONDS = max(
     0.0, float(os.getenv("PTT_RECORDING_MIN_SECONDS", "1.0"))
 )
@@ -559,6 +580,7 @@ def _track_client():
         }
         active_clients[ip] = info
     else:
+        _client_metadaten_ergänzen(info, ip=ip, ua=ua, now=now)
         info["last_seen"] = now
         info["user_agent"] = ua
         info["hostname"] = hostname
@@ -594,6 +616,19 @@ def _track_client():
 
     if request.path.startswith("/stream"):
         info["connections"] = info.get("connections", 0) + 1
+
+
+def _client_stream_getrennt(ip):
+    """Merke eine getrennte Stream-Verbindung ohne den Client sofort zu löschen."""
+
+    info = active_clients.get(ip)
+    if not info:
+        return
+    _client_metadaten_ergänzen(info, ip=ip)
+    info["connections"] = max(0, info.get("connections", 1) - 1)
+    info["last_seen"] = time.time()
+    if info["connections"] <= 0 and not info.get("pages"):
+        active_clients.pop(ip, None)
 
 
 # Block clients based on configured IP addresses
@@ -1097,6 +1132,7 @@ CONFIG_ITEMS = [
     {"id": "software-update", "desc": "Software-Update-Hinweis"},
     {"id": "loading-msg", "desc": "Ladehinweis"},
     {"id": "offline-msg", "desc": "Offline-Meldung"},
+    {"id": "preconditioning-info", "desc": "Vorklimatisierung"},
     {"id": "sms-form", "desc": "SMS-Formular"},
     {"id": "ptt-controls", "desc": "Push-to-Talk"},
     {"id": "ptt-recordings", "desc": "PTT-Übertragungen speichern"},
@@ -6503,11 +6539,7 @@ def stream_vehicle(vehicle_id="default"):
                 subscribers.get(vehicle_id, []).remove(q)
             except ValueError:
                 pass
-            info = active_clients.get(ip)
-            if info:
-                info["connections"] = info.get("connections", 1) - 1
-                if info["connections"] <= 0:
-                    active_clients.pop(ip, None)
+            _client_stream_getrennt(ip)
 
     resp = Response(gen(), mimetype="text/event-stream")
     resp.headers["Cache-Control"] = "no-cache"
@@ -6535,6 +6567,52 @@ def api_version():
     return jsonify({"version": __version__})
 
 
+def _client_dauer_text(delta):
+    """Formatiere die Verbindungsdauer eines Clients."""
+
+    delta = max(0, float(delta or 0))
+    days = int(delta // 86400)
+    hms = time.strftime("%H:%M:%S", time.gmtime(delta % 86400))
+    return f"{days:02d} Tage, {hms}"
+
+
+def _client_detail_liste(now=None):
+    """Gib die aktuell verbundenen Clients mit Metadaten zurück."""
+
+    if now is None:
+        now = time.time()
+    items = []
+    expired = []
+    for ip, data in list(active_clients.items()):
+        _client_metadaten_ergänzen(data, ip=ip, now=now)
+        last_seen = data.get("last_seen", now)
+        pages = data.get("pages", [])
+        if now - last_seen > CLIENT_TIMEOUT or not pages:
+            expired.append(ip)
+            continue
+        first_seen = data.get("first_seen", now)
+        delta = now - first_seen
+        items.append(
+            {
+                "ip": data.get("ip"),
+                "hostname": data.get("hostname"),
+                "location": data.get("location"),
+                "provider": data.get("provider"),
+                "browser": data.get("browser"),
+                "os": data.get("os"),
+                "user_agent": data.get("user_agent"),
+                # Return list of visited pages so clients can format them
+                "pages": pages,
+                "duration": _client_dauer_text(delta),
+                "first_seen_ms": int(first_seen * 1000),
+            }
+        )
+    for ip in expired:
+        active_clients.pop(ip, None)
+    items.sort(key=lambda d: d["ip"] or "")
+    return items
+
+
 @app.route("/api/clients")
 def api_clients():
     """Return the current number of connected streaming clients."""
@@ -6542,6 +6620,7 @@ def api_clients():
     count = 0
     expired = []
     for ip, data in list(active_clients.items()):
+        _client_metadaten_ergänzen(data, ip=ip, now=now)
         last_seen = data.get("last_seen", now)
         pages = data.get("pages", [])
         if now - last_seen > CLIENT_TIMEOUT or not pages:
@@ -6556,36 +6635,7 @@ def api_clients():
 @app.route("/api/clients/details")
 def api_client_details():
     """Return detailed information about connected clients."""
-    now = time.time()
-    items = []
-    expired = []
-    for ip, data in list(active_clients.items()):
-        last_seen = data.get("last_seen", now)
-        pages = data.get("pages", [])
-        if now - last_seen > CLIENT_TIMEOUT or not pages:
-            expired.append(ip)
-            continue
-        delta = now - data.get("first_seen", now)
-        days = int(delta // 86400)
-        hms = time.strftime("%H:%M:%S", time.gmtime(delta % 86400))
-        items.append(
-            {
-                "ip": data.get("ip"),
-                "hostname": data.get("hostname"),
-                "location": data.get("location"),
-                "provider": data.get("provider"),
-                "browser": data.get("browser"),
-                "os": data.get("os"),
-                "user_agent": data.get("user_agent"),
-                # Return list of visited pages so clients can format them
-                "pages": pages,
-                "duration": f"{days:02d} Tage, {hms}",
-            }
-        )
-    for ip in expired:
-        active_clients.pop(ip, None)
-    items.sort(key=lambda d: d["ip"] or "")
-    return jsonify({"clients": items})
+    return jsonify({"clients": _client_detail_liste()})
 
 
 @app.route("/api/ptt/diagnostics")
@@ -7393,35 +7443,7 @@ def receipts_file(filename):
 @app.route("/clients")
 def clients_view():
     """Show currently connected clients."""
-    now = time.time()
-    items = []
-    expired = []
-    for ip, data in list(active_clients.items()):
-        last_seen = data.get("last_seen", now)
-        pages = data.get("pages", [])
-        if now - last_seen > CLIENT_TIMEOUT or not pages:
-            expired.append(ip)
-            continue
-        delta = now - data.get("first_seen", now)
-        days = int(delta // 86400)
-        hms = time.strftime("%H:%M:%S", time.gmtime(delta % 86400))
-        items.append(
-            {
-                "ip": data.get("ip"),
-                "hostname": data.get("hostname"),
-                "location": data.get("location"),
-                "provider": data.get("provider"),
-                "browser": data.get("browser"),
-                "os": data.get("os"),
-                "user_agent": data.get("user_agent"),
-                "pages": pages,
-                "duration": f"{days:02d} Tage, {hms}",
-            }
-        )
-    for ip in expired:
-        active_clients.pop(ip, None)
-    items.sort(key=lambda d: d["ip"] or "")
-    return render_template("clients.html", clients=items)
+    return render_template("clients.html", clients=_client_detail_liste())
 
 
 @app.route("/debug")
@@ -8026,7 +8048,8 @@ def _timeline_events(limit=100):
 def _aktive_clients_zählen():
     now = time.time()
     count = 0
-    for data in active_clients.values():
+    for ip, data in list(active_clients.items()):
+        _client_metadaten_ergänzen(data, ip=ip, now=now)
         pages = data.get("pages", [])
         last_seen = data.get("last_seen", now)
         if pages and now - last_seen <= CLIENT_TIMEOUT:
@@ -8473,6 +8496,12 @@ def handle_ptt_diagnostics(data):
     ptt_diagnostics[cid] = eintrag
     if ip:
         info = active_clients.setdefault(ip, {"ip": ip})
+        _client_metadaten_ergänzen(
+            info,
+            ip=ip,
+            ua=request.headers.get("User-Agent", ""),
+            now=jetzt,
+        )
         info["ptt_diagnostics"] = {
             "received_at": eintrag["received_at"],
             "diagnostics": diagnose,

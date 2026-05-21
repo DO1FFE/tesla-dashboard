@@ -642,6 +642,7 @@ select {
 #v2l-infos,
 #charging-info,
 #ladeplanung-info,
+#preconditioning-info,
 #reifendruck-details,
 /* Navigation bar below the status bar */
 #nav-bar {
@@ -666,6 +667,12 @@ select {
   display: none;
   background: rgba(0, 150, 136, 0.2);
   border: 1px solid #009688;
+}
+
+#preconditioning-info {
+  display: none;
+  background: rgba(0, 188, 212, 0.2);
+  border: 1px solid #00bcd4;
 }
 
 #reifendruck-details {
@@ -734,6 +741,7 @@ select {
 #v2l-infos table,
 #charging-info table,
 #ladeplanung-info table,
+#preconditioning-info table,
 #reifendruck-details table,
 #nav-bar table {
   width: 100%;
@@ -746,6 +754,8 @@ select {
 #charging-info td,
 #ladeplanung-info th,
 #ladeplanung-info td,
+#preconditioning-info th,
+#preconditioning-info td,
 #reifendruck-details th,
 #reifendruck-details td,
 #nav-bar th,
@@ -758,6 +768,7 @@ select {
 #v2l-infos th,
 #charging-info th,
 #ladeplanung-info th,
+#preconditioning-info th,
 #reifendruck-details th,
 #nav-bar th {
   white-space: nowrap;
@@ -767,12 +778,14 @@ select {
 #v2l-infos span.icon,
 #charging-info span.icon,
 #ladeplanung-info span.icon,
+#preconditioning-info span.icon,
 #reifendruck-details span.icon,
 #nav-bar span.icon {
   margin-right: 4px;
 }
 
 #ladeplanung-info h3,
+#preconditioning-info h3,
 #reifendruck-details h3 {
   margin: 0 0 6px;
   font-size: 1rem;
