@@ -106,6 +106,7 @@
       grund: grund,
       client_id: clientId || '',
       browser: navigator.userAgent || '',
+      tesla_browser: istTeslaBrowser(),
       platform: navigator.platform || '',
       sprache: navigator.language || '',
       secure_context: window.isSecureContext === true,
@@ -152,6 +153,7 @@
     }
     const rows = [
       ['Browser', diagnose.browser || 'unbekannt'],
+      ['Tesla-Browser', jaNein(diagnose.tesla_browser)],
       ['AudioContext', jaNein(diagnose.audio_context.vorhanden) + ', ' +
         diagnose.audio_context.zustand],
       ['Mikrofon-API', 'modern: ' + jaNein(diagnose.get_user_media.modern) +
@@ -571,26 +573,66 @@
   }
 
   function normalisiereAudioDaten(data) {
-    if (data instanceof ArrayBuffer) {
-      return Promise.resolve(new Uint8Array(data));
+    let audioDaten = data;
+    let mimeType = '';
+    const istBlob = typeof Blob !== 'undefined' && data instanceof Blob;
+    const istRohdaten = data instanceof ArrayBuffer ||
+      data instanceof Uint8Array ||
+      istBlob ||
+      (data && data.buffer instanceof ArrayBuffer);
+
+    if (data && typeof data === 'object' && !istRohdaten) {
+      mimeType = data.mime_type || data.mimeType || data.content_type || '';
+      if (typeof data.audio !== 'undefined') {
+        audioDaten = data.audio;
+      } else if (typeof data.payload !== 'undefined') {
+        audioDaten = data.payload;
+      } else if (typeof data.bytes !== 'undefined') {
+        audioDaten = data.bytes;
+      } else if (Array.isArray(data.data)) {
+        audioDaten = data.data;
+      }
     }
-    if (data instanceof Uint8Array) {
-      return Promise.resolve(data);
+
+    function zuBytes(wert) {
+      if (wert instanceof ArrayBuffer) {
+        return Promise.resolve(new Uint8Array(wert));
+      }
+      if (wert instanceof Uint8Array) {
+        return Promise.resolve(wert);
+      }
+      if (wert && wert.buffer instanceof ArrayBuffer) {
+        return Promise.resolve(new Uint8Array(wert.buffer));
+      }
+      if (wert && Array.isArray(wert.data)) {
+        return Promise.resolve(new Uint8Array(wert.data));
+      }
+      if (typeof Blob !== 'undefined' && wert instanceof Blob) {
+        if (!mimeType && wert.type) {
+          mimeType = wert.type;
+        }
+        return blobToArrayBuffer(wert).then((buf) => new Uint8Array(buf));
+      }
+      try {
+        return Promise.resolve(new Uint8Array(wert));
+      } catch (err) {
+        return Promise.reject(err);
+      }
     }
-    if (data && data.buffer instanceof ArrayBuffer) {
-      return Promise.resolve(new Uint8Array(data.buffer));
+
+    return zuBytes(audioDaten).then((chunk) => ({
+      chunk: chunk,
+      mimeType: mimeType || 'audio/webm'
+    }));
+  }
+
+  function istTeslaBrowser() {
+    const ua = navigator.userAgent || '';
+    if (/tesla|qtcarbrowser/i.test(ua)) {
+      return true;
     }
-    if (data && Array.isArray(data.data)) {
-      return Promise.resolve(new Uint8Array(data.data));
-    }
-    if (typeof Blob !== 'undefined' && data instanceof Blob) {
-      return blobToArrayBuffer(data).then((buf) => new Uint8Array(buf));
-    }
-    try {
-      return Promise.resolve(new Uint8Array(data));
-    } catch (err) {
-      return Promise.reject(err);
-    }
+    return /Linux x86_64/i.test(navigator.platform || '') &&
+      /Chrome\/140\.0\.7339\.207/i.test(ua);
   }
 
   if (pttBtn) {
@@ -675,55 +717,102 @@
   let playbackTime = audioCtx.currentTime;
   let playbackChain = Promise.resolve();
 
+  function starteAudioContextWiedergabe(chunk) {
+    const ab = chunk.buffer.slice(
+      chunk.byteOffset,
+      chunk.byteOffset + chunk.byteLength
+    );
+    return decodeAudioDataCompat(ab)
+      .then((buffer) => {
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        analyser.connect(audioCtx.destination);
+        const dataArr = new Uint8Array(analyser.fftSize);
+        let req = null;
+        const updateLevel = () => {
+          analyser.getByteTimeDomainData(dataArr);
+          let sum = 0;
+          for (let i = 0; i < dataArr.length; i++) {
+            const v = (dataArr[i] - 128) / 128;
+            sum += v * v;
+          }
+          const rms = Math.sqrt(sum / dataArr.length);
+          if (levelMeter) levelMeter.value = rms;
+          req = requestAnimationFrame(updateLevel);
+        };
+        req = requestAnimationFrame(updateLevel);
+        source.onended = () => {
+          cancelAnimationFrame(req);
+          if (levelMeter) levelMeter.value = 0;
+        };
+        if (playbackTime < audioCtx.currentTime + 0.05) {
+          playbackTime = audioCtx.currentTime + 0.05;
+        }
+        if (typeof source.start === 'function') {
+          source.start(playbackTime);
+        } else {
+          source.noteOn(playbackTime);
+        }
+        playbackTime += buffer.duration;
+      });
+  }
+
+  function starteHtmlAudioWiedergabe(chunk, mimeType) {
+    return new Promise((resolve, reject) => {
+      if (typeof Audio === 'undefined' || typeof Blob === 'undefined') {
+        reject(new Error('HTML-Audio ist nicht verfügbar'));
+        return;
+      }
+      const typ = mimeType || 'audio/webm';
+      const blob = new Blob([chunk], { type: typ });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio();
+      let fertig = false;
+      const beenden = (err) => {
+        if (fertig) {
+          return;
+        }
+        fertig = true;
+        URL.revokeObjectURL(url);
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      };
+      audio.preload = 'auto';
+      audio.playsInline = true;
+      audio.onended = () => beenden();
+      audio.onerror = () => beenden(audio.error || new Error('HTML-Audio fehlgeschlagen'));
+      audio.src = url;
+      const start = audio.play();
+      if (start && typeof start.then === 'function') {
+        start.catch(beenden);
+      }
+    });
+  }
+
   socket.on('play_audio', (data) => {
     unlockPlayback();
     normalisiereAudioDaten(data)
-      .then((chunk) => {
+      .then((payload) => {
+        const chunk = payload.chunk;
         if (!chunk.length) {
           console.error('Received empty audio data');
           return;
         }
-        const ab = chunk.buffer.slice(
-          chunk.byteOffset,
-          chunk.byteOffset + chunk.byteLength
-        );
-
         playbackChain = playbackChain
           .catch(() => {})
-          .then(() => decodeAudioDataCompat(ab))
-          .then((buffer) => {
-            const source = audioCtx.createBufferSource();
-            source.buffer = buffer;
-            const analyser = audioCtx.createAnalyser();
-            analyser.fftSize = 256;
-            source.connect(analyser);
-            analyser.connect(audioCtx.destination);
-            const dataArr = new Uint8Array(analyser.fftSize);
-            const updateLevel = () => {
-              analyser.getByteTimeDomainData(dataArr);
-              let sum = 0;
-              for (let i = 0; i < dataArr.length; i++) {
-                const v = (dataArr[i] - 128) / 128;
-                sum += v * v;
-              }
-              const rms = Math.sqrt(sum / dataArr.length);
-              if (levelMeter) levelMeter.value = rms;
-              req = requestAnimationFrame(updateLevel);
-            };
-            let req = requestAnimationFrame(updateLevel);
-            source.onended = () => {
-              cancelAnimationFrame(req);
-              if (levelMeter) levelMeter.value = 0;
-            };
-            if (playbackTime < audioCtx.currentTime + 0.05) {
-              playbackTime = audioCtx.currentTime + 0.05;
+          .then(() => {
+            if (payload.mimeType || istTeslaBrowser()) {
+              return starteHtmlAudioWiedergabe(chunk, payload.mimeType)
+                .catch(() => starteAudioContextWiedergabe(chunk));
             }
-            if (typeof source.start === 'function') {
-              source.start(playbackTime);
-            } else {
-              source.noteOn(playbackTime);
-            }
-            playbackTime += buffer.duration;
+            return starteAudioContextWiedergabe(chunk)
+              .catch(() => starteHtmlAudioWiedergabe(chunk, payload.mimeType));
           })
           .catch((err) => console.error('Audio decode failed', err));
       })

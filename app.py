@@ -2715,6 +2715,42 @@ def _hat_normale_fahrzeugaktivitaet(fahrzeugdaten):
     return charge_state.get("charging_state") in {"Charging", "Starting"}
 
 
+def _vorklimatisierung_im_stand_erlaubt(fahrzeugdaten):
+    """Erlaube Vorklimatisierungsanzeigen nur bei stehendem Fahrzeug."""
+
+    if not isinstance(fahrzeugdaten, dict):
+        return False
+
+    drive_state = fahrzeugdaten.get("drive_state", {})
+    if not isinstance(drive_state, dict):
+        drive_state = {}
+
+    vehicle_state = fahrzeugdaten.get("vehicle_state", {})
+    if isinstance(vehicle_state, dict):
+        if vehicle_state.get("locked") is False:
+            return False
+        if _hat_offene_fahrzeugöffnung(vehicle_state):
+            return False
+
+    shift = _normalize_shift_state(drive_state.get("shift_state"))
+    if shift in {"R", "N", "D"}:
+        return False
+
+    speed = _as_float(drive_state.get("speed"))
+    if speed is not None and abs(speed) > 0.05:
+        return False
+
+    if shift == "P":
+        return True
+    if speed is not None:
+        return True
+
+    state = fahrzeugdaten.get("state")
+    if isinstance(state, str):
+        return state.strip().lower() in {"asleep", "offline", "parked"}
+    return False
+
+
 def _wert_ist_offen(value):
     """Erkenne offene Fahrzeugteile aus API-Werten."""
 
@@ -6171,6 +6207,9 @@ def _fetch_data_once(vehicle_id="default"):
     if isinstance(data, dict):
         if state_checked_at is not None:
             data["state_checked_at"] = state_checked_at
+        data["preconditioning_display_allowed"] = (
+            _vorklimatisierung_im_stand_erlaubt(data)
+        )
         data["_live"] = live
     latest_data[cache_id] = data
     if isinstance(data, dict):
@@ -8448,9 +8487,26 @@ def _flush_audio_buffer():
         return
     if audio_buffer:
         audio_daten = bytes(audio_buffer)
-        socketio.emit("play_audio", audio_daten, include_self=False)
+        socketio.emit(
+            "play_audio", _ptt_wiedergabe_payload(audio_daten), include_self=False
+        )
         _ptt_aufnahme_speichern(audio_daten, ptt_speaker_info, ptt_started_at)
         audio_buffer.clear()
+
+
+def _ptt_wiedergabe_payload(audio_daten):
+    """Erzeuge Wiedergabedaten mit Formatinfos für kompatible Browser."""
+
+    info = ptt_speaker_info if isinstance(ptt_speaker_info, dict) else {}
+    mime_type = info.get("mime_type") or info.get("normalisiertes_mime") or ""
+    _extension, normalisiertes_mime = _ptt_audio_dateityp(mime_type)
+    return {
+        "audio": audio_daten,
+        "mime_type": mime_type or normalisiertes_mime,
+        "content_type": normalisiertes_mime,
+        "codec": info.get("codec") or "",
+        "size_bytes": len(audio_daten),
+    }
 
 
 def _release_ptt(expected_id):

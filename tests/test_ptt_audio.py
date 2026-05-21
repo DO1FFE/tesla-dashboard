@@ -69,7 +69,10 @@ def test_audio_chunk_broadcast():
     # Listener should get the buffered audio chunk
     received = listener.get_received()
     msgs = [m for m in received if m['name'] == 'play_audio']
-    assert msgs and msgs[0]['args'][0] == payload
+    assert msgs
+    wiedergabe = msgs[0]['args'][0]
+    assert wiedergabe['audio'] == payload
+    assert wiedergabe['content_type'] == 'audio/webm'
 
 
 def test_audio_chunk_multiple_listeners():
@@ -93,8 +96,8 @@ def test_audio_chunk_multiple_listeners():
     msgs1 = [m for m in listener1.get_received() if m['name'] == 'play_audio']
     msgs2 = [m for m in listener2.get_received() if m['name'] == 'play_audio']
 
-    assert msgs1 and msgs1[0]['args'][0] == payload
-    assert msgs2 and msgs2[0]['args'][0] == payload
+    assert msgs1 and msgs1[0]['args'][0]['audio'] == payload
+    assert msgs2 and msgs2[0]['args'][0]['audio'] == payload
 
 
 def test_ptt_diagnostics_are_reported():

@@ -49,6 +49,40 @@ def test_fetch_data_once_offline_nutzt_nur_cache(monkeypatch):
     assert daten["_live"] is False
 
 
+def test_vorklimatisierung_wird_nur_im_stand_angezeigt():
+    assert app._vorklimatisierung_im_stand_erlaubt({
+        "state": "online",
+        "drive_state": {"shift_state": "P", "speed": 0, "power": 0},
+    }) is True
+    assert app._vorklimatisierung_im_stand_erlaubt({
+        "state": "online",
+        "drive_state": {"shift_state": None, "speed": 0, "power": 0},
+    }) is True
+    assert app._vorklimatisierung_im_stand_erlaubt({
+        "state": "online",
+        "drive_state": {"shift_state": "D", "speed": 0, "power": 0},
+    }) is False
+    assert app._vorklimatisierung_im_stand_erlaubt({
+        "state": "online",
+        "drive_state": {"shift_state": None, "speed": 12, "power": 8},
+    }) is False
+    assert app._vorklimatisierung_im_stand_erlaubt({
+        "state": "online",
+        "drive_state": {"shift_state": "P", "speed": 0, "power": 0},
+        "vehicle_state": {"locked": False},
+    }) is False
+    assert app._vorklimatisierung_im_stand_erlaubt({
+        "state": "online",
+        "drive_state": {"shift_state": "P", "speed": 0, "power": 0},
+        "vehicle_state": {"fd_window": 1},
+    }) is False
+    assert app._vorklimatisierung_im_stand_erlaubt({
+        "state": "online",
+        "drive_state": {"shift_state": "P", "speed": 0, "power": 0},
+        "vehicle_state": {"sun_roof_state": "open", "sun_roof_percent_open": 12},
+    }) is False
+
+
 def test_fetch_data_once_asleep_nutzt_nur_cache(monkeypatch):
     aufrufe_get_vehicle_data = []
 

@@ -785,7 +785,7 @@ function handleData(data) {
     updateBatteryIndicator(charge.battery_level, rangeMiles, charge.charging_state, charge.battery_heater_on);
     updateV2LInfos(charge, drive);
     updateChargingInfo(charge, data);
-    updateLadeplanungInfo(charge);
+    updateLadeplanungInfo(charge, drive);
     var climate = data.climate_state || {};
     updateThermometers(climate.inside_temp, climate.outside_temp, charge.battery_temp);
     updateClimateStatus(climate.is_climate_on);
@@ -793,7 +793,12 @@ function handleData(data) {
     updateCabinProtection(climate.cabin_overheat_protection);
     updateFanStatus(climate.fan_status);
     updateDesiredTemp(climate.driver_temp_setting);
-    updatePreconditioningInfo(climate, charge);
+    updatePreconditioningInfo(
+        climate,
+        charge,
+        drive,
+        darfVorklimatisierungAnzeigen(data, drive)
+    );
     updateHeaterIndicator(
         climate.is_front_defroster_on,
         climate.is_rear_defroster_on,
@@ -1606,6 +1611,91 @@ function parseNumber(value) {
     return num;
 }
 
+function wertIstOffen(value) {
+    if (value == null) {
+        return false;
+    }
+    if (typeof value === 'boolean') {
+        return value;
+    }
+    if (typeof value === 'number') {
+        return Math.abs(value) > 0.001;
+    }
+    if (typeof value === 'string') {
+        var norm = value.trim().toLowerCase();
+        if (!norm) {
+            return false;
+        }
+        if (['0', 'false', 'no', 'none', 'null', 'n/a', 'unknown'].indexOf(norm) !== -1) {
+            return false;
+        }
+        if (['closed', 'close', 'closing', 'locked'].indexOf(norm) !== -1) {
+            return false;
+        }
+        var zahl = parseNumber(norm);
+        if (zahl != null) {
+            return Math.abs(zahl) > 0.001;
+        }
+        return true;
+    }
+    return !!value;
+}
+
+function fahrzeugIstOffen(vehicle) {
+    if (!vehicle) {
+        return false;
+    }
+    if (vehicle.locked === false) {
+        return true;
+    }
+    var oeffnungsfelder = [
+        'df',
+        'dr',
+        'pf',
+        'pr',
+        'ft',
+        'rt',
+        'fd_window',
+        'rd_window',
+        'fp_window',
+        'rp_window'
+    ];
+    for (var i = 0; i < oeffnungsfelder.length; i++) {
+        if (wertIstOffen(vehicle[oeffnungsfelder[i]])) {
+            return true;
+        }
+    }
+    if (wertIstOffen(vehicle.sun_roof_percent_open)) {
+        return true;
+    }
+    return wertIstOffen(vehicle.sun_roof_state);
+}
+
+function fahrzeugStehtFuerVorklimatisierung(drive) {
+    drive = drive || {};
+    var gang = normalizeShiftState(drive.shift_state);
+    if (gang && gang !== 'P') {
+        return false;
+    }
+
+    var geschwindigkeit = parseNumber(drive.speed);
+    if (geschwindigkeit != null && Math.abs(geschwindigkeit) > 0.05) {
+        return false;
+    }
+
+    return gang === 'P' || geschwindigkeit != null;
+}
+
+function darfVorklimatisierungAnzeigen(data, drive) {
+    if (data && typeof data.preconditioning_display_allowed !== 'undefined') {
+        return istAktiv(data.preconditioning_display_allowed);
+    }
+    if (data && fahrzeugIstOffen(data.vehicle_state)) {
+        return false;
+    }
+    return fahrzeugStehtFuerVorklimatisierung(drive);
+}
+
 function parseChargeSessionStart(value) {
     var num = parseNumber(value);
     if (num != null) {
@@ -1703,7 +1793,7 @@ function vorklimatisierungZieltemperatur(climate) {
     return fahrer || beifahrer;
 }
 
-function updatePreconditioningInfo(climate, charge) {
+function updatePreconditioningInfo(climate, charge, drive, anzeigenErlaubt) {
     var $info = $('#preconditioning-info');
     if (!$info.length || !configEnabled('preconditioning-info')) {
         $info.empty().hide();
@@ -1712,6 +1802,14 @@ function updatePreconditioningInfo(climate, charge) {
 
     climate = climate || {};
     charge = charge || {};
+    if (typeof anzeigenErlaubt === 'undefined') {
+        anzeigenErlaubt = fahrzeugStehtFuerVorklimatisierung(drive);
+    }
+    if (!anzeigenErlaubt) {
+        $info.empty().hide();
+        return;
+    }
+
     var vorklimatisiert = istAktiv(climate.is_preconditioning);
     var automatischeKlima = istAktiv(climate.is_auto_conditioning_on);
     var planAktiv = istAktiv(charge.preconditioning_enabled);
@@ -1872,7 +1970,7 @@ function ladeendeText(minuten) {
     return dauer;
 }
 
-function updateLadeplanungInfo(charge) {
+function updateLadeplanungInfo(charge, drive) {
     var $info = $('#ladeplanung-info');
     if (!$info.length || !configEnabled('ladeplanung-info')) {
         $info.empty().hide();
@@ -1888,7 +1986,9 @@ function updateLadeplanungInfo(charge) {
     var laedt = ladezustand === 'Charging' || ladezustand === 'Starting';
     var ladezeitMinuten = ladeRestzeitMinuten(charge);
     var hatRestzeit = ladezeitMinuten != null && ladezeitMinuten > 0;
-    var vorklimatisierung = istAktiv(charge.preconditioning_enabled);
+    var vorklimatisierungErlaubt = fahrzeugStehtFuerVorklimatisierung(drive);
+    var vorklimatisierung = vorklimatisierungErlaubt &&
+                            istAktiv(charge.preconditioning_enabled);
     var nebenzeit = istAktiv(charge.off_peak_charging_enabled);
     var geplantesLaden = charge.scheduled_charging_mode && charge.scheduled_charging_mode !== 'Off';
     var geplantAusstehend = istAktiv(charge.scheduled_charging_pending);
@@ -1925,7 +2025,7 @@ function updateLadeplanungInfo(charge) {
     if (startZeit) {
         rows.push('<tr><th>Geplanter Ladestart:</th><td>' + escapeHtml(startZeit) + '</td></tr>');
     }
-    if (abfahrt || vorklimatisierung) {
+    if (vorklimatisierungErlaubt && (abfahrt || vorklimatisierung)) {
         var vorklimaText = vorklimatisierung ? 'aktiv' : 'aus';
         var vorklimaZeitraum = beschreibeVorklimatisierungsZeitraum(
             charge.preconditioning_times
