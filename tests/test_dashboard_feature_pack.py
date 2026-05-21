@@ -15,6 +15,15 @@ def auth_headers(user="test@example.org", password="geheim"):
     return {"Authorization": f"Basic {token}"}
 
 
+def _http_error(status=429, headers=None):
+    response = app_module.requests.Response()
+    response.status_code = status
+    response.headers.update(headers or {})
+    error = app_module.requests.exceptions.HTTPError(f"{status} Client Error")
+    error.response = response
+    return error
+
+
 def test_api_daten_bleiben_trotz_privatmodus_real(monkeypatch):
     monkeypatch.setattr(
         app_module,
@@ -217,3 +226,101 @@ def test_health_api(monkeypatch):
 
     assert response.status_code == 200
     assert "polling" in data
+
+
+def test_supercharger_rate_limit_nutzt_retry_after(monkeypatch):
+    app_module._supercharger_cache.clear()
+    app_module._supercharger_backoff_until.clear()
+    fehler = []
+    now = [1000.0]
+    backoff_until = None
+
+    class Vehicle:
+        def __init__(self):
+            self.calls = 0
+
+        def api(self, endpoint):
+            self.calls += 1
+            assert endpoint == "NEARBY_CHARGING_SITES"
+            raise _http_error(429, {"Retry-After": "120"})
+
+    vehicle = Vehicle()
+    monkeypatch.setattr(app_module.time, "time", lambda: now[0])
+    monkeypatch.setattr(app_module, "_log_api_error", lambda exc: fehler.append(exc))
+
+    try:
+        result = app_module._fetch_nearby_superchargers(
+            vehicle,
+            {"latitude": 51.0, "longitude": 7.0},
+            "fahrzeug",
+        )
+        result_backoff = app_module._fetch_nearby_superchargers(
+            vehicle,
+            {"latitude": 51.0, "longitude": 7.0},
+            "fahrzeug",
+        )
+        backoff_until = app_module._supercharger_backoff_until.get("fahrzeug")
+    finally:
+        app_module._supercharger_cache.clear()
+        app_module._supercharger_backoff_until.clear()
+
+    assert result == []
+    assert result_backoff == []
+    assert vehicle.calls == 1
+    assert fehler == []
+    assert backoff_until == 1120.0
+
+
+def test_supercharger_rate_limit_nutzt_alten_cache(monkeypatch):
+    app_module._supercharger_cache.clear()
+    app_module._supercharger_backoff_until.clear()
+    now = [2000.0]
+    payload = {
+        "response": {
+            "superchargers": [
+                {
+                    "name": "Essen, Germany",
+                    "available_stalls": 2,
+                    "total_stalls": 8,
+                    "location": {"lat": 51.05, "long": 7.05},
+                }
+            ]
+        }
+    }
+    cache_key = ("fahrzeug", app_module._coarse_location(51.0, 7.0))
+    app_module._supercharger_cache[cache_key] = {
+        "payload": payload,
+        "ts": 1.0,
+        "location": (51.0, 7.0),
+    }
+
+    class Vehicle:
+        def __init__(self):
+            self.calls = 0
+
+        def api(self, endpoint):
+            self.calls += 1
+            assert endpoint == "NEARBY_CHARGING_SITES"
+            raise _http_error(429, {"RateLimit-Device-Realtime-Reset": "60"})
+
+    vehicle = Vehicle()
+    monkeypatch.setattr(app_module.time, "time", lambda: now[0])
+
+    try:
+        result = app_module._fetch_nearby_superchargers(
+            vehicle,
+            {"latitude": 51.0, "longitude": 7.0},
+            "fahrzeug",
+        )
+        result_backoff = app_module._fetch_nearby_superchargers(
+            vehicle,
+            {"latitude": 51.0, "longitude": 7.0},
+            "fahrzeug",
+        )
+    finally:
+        app_module._supercharger_cache.clear()
+        app_module._supercharger_backoff_until.clear()
+
+    assert result[0]["name"] == "Essen, Germany"
+    assert result_backoff[0]["name"] == "Essen, Germany"
+    assert vehicle.calls == 1

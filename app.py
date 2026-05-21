@@ -24,6 +24,7 @@ import sqlite3
 import argparse
 from urllib.parse import urlparse
 from pathlib import Path
+from email.utils import parsedate_to_datetime
 from logging.handlers import RotatingFileHandler
 from io import BytesIO, StringIO, UnsupportedOperation
 from flask import (
@@ -400,9 +401,17 @@ _lookup_queue = queue.Queue()
 _queued_ips = set()
 _lookup_lock = threading.Lock()
 
-SUPERCHARGER_CACHE_TTL = 300
+SUPERCHARGER_CACHE_TTL = int(os.getenv("SUPERCHARGER_CACHE_TTL", "900"))
 SUPERCHARGER_CACHE_DISTANCE_KM = 1.0
+SUPERCHARGER_RATE_LIMIT_BACKOFF = int(
+    os.getenv("SUPERCHARGER_RATE_LIMIT_BACKOFF", "1800")
+)
+SUPERCHARGER_ERROR_BACKOFF = int(os.getenv("SUPERCHARGER_ERROR_BACKOFF", "300"))
+SUPERCHARGER_MAX_BACKOFF = int(
+    os.getenv("SUPERCHARGER_MAX_BACKOFF", str(6 * 60 * 60))
+)
 _supercharger_cache = {}
+_supercharger_backoff_until = {}
 
 
 def _perform_hostname_lookup(ip):
@@ -1251,6 +1260,91 @@ def _is_http_error_with_status(exc, status_codes):
         if response is not None and response.status_code in status_codes:
             return True
     return False
+
+
+def _wartezeit_aus_http_header(value, now=None):
+    """Lies Wartezeit aus Sekunden, Unix-Zeitpunkt oder HTTP-Datum."""
+
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if now is None:
+        now = time.time()
+
+    try:
+        numeric = float(text)
+    except (TypeError, ValueError):
+        numeric = None
+
+    if numeric is not None:
+        if numeric <= 0:
+            return None
+        if numeric > 9999999999:
+            numeric = numeric / 1000
+        if numeric > 86400:
+            numeric = numeric - now
+        if numeric <= 0:
+            return None
+        return max(1, int(numeric))
+
+    try:
+        zielzeit = parsedate_to_datetime(text)
+    except (TypeError, ValueError):
+        return None
+    if zielzeit.tzinfo is None:
+        zielzeit = zielzeit.replace(tzinfo=timezone.utc)
+    sekunden = (
+        zielzeit - datetime.fromtimestamp(now, tz=timezone.utc)
+    ).total_seconds()
+    if sekunden <= 0:
+        return None
+    return max(1, int(sekunden))
+
+
+def _begrenzte_supercharger_wartezeit(seconds, fallback_seconds):
+    """Begrenze die Supercharger-Pause auf einen vernünftigen Bereich."""
+
+    try:
+        seconds = int(seconds)
+    except (TypeError, ValueError):
+        seconds = int(fallback_seconds)
+    try:
+        fallback_seconds = int(fallback_seconds)
+    except (TypeError, ValueError):
+        fallback_seconds = SUPERCHARGER_RATE_LIMIT_BACKOFF
+    if seconds <= 0:
+        seconds = fallback_seconds
+    return max(1, min(seconds, SUPERCHARGER_MAX_BACKOFF))
+
+
+def _supercharger_wartezeit_nach_rate_limit(exc, fallback_seconds, now=None):
+    """Ermittle die Pause aus Retry-After oder RateLimit-Reset-Headern."""
+
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", {}) or {}
+    reset_kandidaten = []
+
+    for name, value in getattr(headers, "items", lambda: [])():
+        name_normalisiert = str(name).lower()
+        wartezeit = _wartezeit_aus_http_header(value, now=now)
+        if wartezeit is None:
+            continue
+        if name_normalisiert == "retry-after":
+            return _begrenzte_supercharger_wartezeit(wartezeit, fallback_seconds)
+        if (
+            name_normalisiert.startswith("ratelimit")
+            and name_normalisiert.endswith("reset")
+        ):
+            reset_kandidaten.append(wartezeit)
+
+    if reset_kandidaten:
+        return _begrenzte_supercharger_wartezeit(
+            max(reset_kandidaten),
+            fallback_seconds,
+        )
+    return _begrenzte_supercharger_wartezeit(fallback_seconds, fallback_seconds)
 
 
 def get_news_events_info():
@@ -5261,6 +5355,38 @@ def _cache_entry_valid(entry, lat, lon, now):
     return True
 
 
+def _supercharger_payload_aus_cache(vehicle_key, car_lat, car_lon):
+    """Gib den passendsten vorhandenen Supercharger-Cache zurück."""
+
+    bester_eintrag = None
+    beste_distanz = None
+    for key, entry in list(_supercharger_cache.items()):
+        if not isinstance(key, tuple) or not key or key[0] != vehicle_key:
+            continue
+        if not isinstance(entry, dict) or entry.get("payload") is None:
+            continue
+        distanz = float("inf")
+        cached_loc = entry.get("location")
+        if (
+            car_lat is not None
+            and car_lon is not None
+            and isinstance(cached_loc, tuple)
+            and len(cached_loc) == 2
+            and cached_loc[0] is not None
+            and cached_loc[1] is not None
+        ):
+            try:
+                distanz = _haversine(car_lat, car_lon, cached_loc[0], cached_loc[1])
+            except Exception:
+                distanz = float("inf")
+        if bester_eintrag is None or distanz < beste_distanz:
+            bester_eintrag = entry
+            beste_distanz = distanz
+    if bester_eintrag is None:
+        return None
+    return bester_eintrag.get("payload")
+
+
 def _fetch_nearby_superchargers(vehicle, drive_state, vid):
     """Fetch nearby Superchargers and return a normalized list."""
 
@@ -5276,28 +5402,50 @@ def _fetch_nearby_superchargers(vehicle, drive_state, vid):
 
     if _cache_entry_valid(cached_entry, car_lat, car_lon, now):
         payload = cached_entry.get("payload")
-    else:
-        _supercharger_cache.pop(cache_key, None)
 
     if payload is None:
-        try:
-            payload = api_call("NEARBY_CHARGING_SITES")
-            log_api_data("nearby_charging_sites", sanitize(payload), vehicle_id=vid)
-            _supercharger_cache[cache_key] = {
-                "payload": payload,
-                "ts": now,
-                "location": (car_lat, car_lon),
-            }
-        except Exception as exc:
-            _log_api_error(exc)
-            return []
+        backoff_until = _supercharger_backoff_until.get(vehicle_key, 0)
+        if now < backoff_until:
+            payload = _supercharger_payload_aus_cache(vehicle_key, car_lat, car_lon)
+            if payload is None:
+                return []
+        else:
+            try:
+                payload = api_call("NEARBY_CHARGING_SITES")
+                log_api_data("nearby_charging_sites", sanitize(payload), vehicle_id=vid)
+                _supercharger_backoff_until.pop(vehicle_key, None)
+                _supercharger_cache[cache_key] = {
+                    "payload": payload,
+                    "ts": now,
+                    "location": (car_lat, car_lon),
+                }
+            except Exception as exc:
+                if _is_http_error_with_status(exc, {429}):
+                    wartezeit = _supercharger_wartezeit_nach_rate_limit(
+                        exc,
+                        SUPERCHARGER_RATE_LIMIT_BACKOFF,
+                        now=now,
+                    )
+                    _supercharger_backoff_until[vehicle_key] = now + wartezeit
+                    logging.warning(
+                        "Supercharger-Abfrage rate-limited; pausiert für %s Sekunden.",
+                        wartezeit,
+                    )
+                else:
+                    _supercharger_backoff_until[vehicle_key] = now + SUPERCHARGER_ERROR_BACKOFF
+                    _log_api_error(exc)
+                payload = _supercharger_payload_aus_cache(vehicle_key, car_lat, car_lon)
+                if payload is None:
+                    return []
+
+    if payload is None:
+        return []
 
     try:
         return _normalize_supercharger_sites(payload, drive_state)
     except Exception as exc:
         _log_api_error(exc)
     return []
-
 
 
 def _formatierter_fahrzeugname(name, car_type, trim_badging):
@@ -5448,7 +5596,15 @@ def get_vehicle_data(vehicle_id=None, state=None):
         pass
     try:
         drive_state = sanitized.get("drive_state", {})
-        sanitized["nearby_superchargers"] = _fetch_nearby_superchargers(vehicle, drive_state, vid)
+        cfg = load_config(vid)
+        if cfg.get("supercharger-list", True):
+            sanitized["nearby_superchargers"] = _fetch_nearby_superchargers(
+                vehicle,
+                drive_state,
+                vid,
+            )
+        else:
+            sanitized["nearby_superchargers"] = []
     except Exception as exc:
         _log_api_error(exc)
         sanitized["nearby_superchargers"] = []
