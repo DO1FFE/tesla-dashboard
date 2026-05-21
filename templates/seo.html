@@ -1,0 +1,15 @@
+{% if request.path == '/' %}
+    <meta name="robots" content="index, follow">
+{% else %}
+    <meta name="robots" content="noindex, nofollow">
+{% endif %}
+    <link rel="canonical" href="{{ url_for('index', _external=True) }}">
+{% if request.path == '/' %}
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Tesla-Dashboard - Live-Fahrzeugdaten">
+    <meta property="og:description" content="Live-Dashboard für Tesla-Fahrzeugdaten mit Karte, Ladezustand, Reichweite, Geschwindigkeit, Klima, Ladeverlauf und Statistik.">
+    <meta property="og:url" content="{{ url_for('index', _external=True) }}">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Tesla-Dashboard - Live-Fahrzeugdaten">
+    <meta name="twitter:description" content="Live-Dashboard für Tesla-Fahrzeugdaten mit Karte, Ladezustand, Reichweite, Geschwindigkeit, Klima, Ladeverlauf und Statistik.">
+{% endif %}

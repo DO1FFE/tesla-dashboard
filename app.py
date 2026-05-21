@@ -106,7 +106,7 @@ def disable_response_caching(resp):
 
 def _set_robots_header(resp):
     """Setze Standardregeln für Suchmaschinen."""
-    if request.path in {"/", "/statistik", "/robots.txt"}:
+    if request.path in {"/", "/robots.txt"}:
         return
     resp.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
 
