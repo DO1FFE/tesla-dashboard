@@ -440,6 +440,30 @@ select {
   white-space: nowrap;
 }
 
+#privacy-map-notice {
+  position: absolute;
+  top: 10px;
+  left: 52px;
+  right: 170px;
+  z-index: 900;
+  display: inline-block;
+  max-width: 360px;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 152, 0, 0.95);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 1em;
+  font-weight: 700;
+  line-height: 1.25;
+  pointer-events: none;
+  white-space: normal;
+}
+
+#privacy-map-notice[hidden] {
+  display: none;
+}
+
 /* Overlay showing the current map zoom level */
 #zoom-level {
   position: absolute;
@@ -1112,6 +1136,13 @@ select {
   #map {
     height: 50vh !important;
   }
+  #privacy-map-notice {
+    top: 82px;
+    left: 10px;
+    right: 10px;
+    max-width: none;
+    font-size: 0.95em;
+  }
   #status-bar #thermometers,
   #status-bar #openings-indicator {
     flex-basis: 100%;
@@ -1517,14 +1548,170 @@ select {
   padding: 1rem;
 }
 
+.tool-page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1rem 1rem 4rem;
+}
+
+.tool-page h1,
 .ptt-archiv h1 {
   margin: 0 0 0.5rem;
   font-weight: 300;
 }
 
+.tool-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0.5rem 0 1rem;
+}
+
+.tool-nav a {
+  color: var(--text-color);
+  background: var(--surface-color);
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 6px 10px;
+  text-decoration: none;
+}
+
+.tool-summary,
+.tool-grid section,
+.timeline-event,
+.ptt-recording {
+  background: var(--surface-color);
+  border: 1px solid #444;
+  border-radius: 8px;
+}
+
+.tool-summary {
+  padding: 10px;
+  margin: 10px 0;
+}
+
+.tool-summary h2 {
+  margin: 0 0 6px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.tool-summary.ok,
+.timeline-event.ok {
+  border-color: #2e7d32;
+}
+
+.tool-summary.warn,
+.timeline-event.warn {
+  border-color: #f9a825;
+}
+
+.timeline-event.important,
+.ptt-recording.important {
+  border-color: #ff5252;
+}
+
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.tool-grid section {
+  padding: 10px;
+}
+
+.tool-grid h2,
+.tool-page section h2 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+
+.tool-meta,
+.ptt-recording-meta {
+  display: grid;
+  grid-template-columns: minmax(90px, 150px) 1fr;
+  gap: 3px 10px;
+  margin: 0;
+}
+
+.tool-meta dt,
+.tool-meta dd,
+.ptt-recording-meta dt,
+.ptt-recording-meta dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.tool-meta dt,
+.ptt-recording-meta dt {
+  color: #ddd;
+  font-weight: bold;
+}
+
+.tool-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0 4rem;
+}
+
+.tool-table th,
+.tool-table td {
+  border: 1px solid #444;
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.timeline-list {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 4rem;
+  display: grid;
+  gap: 8px;
+}
+
+.timeline-event {
+  padding: 10px;
+  display: grid;
+  grid-template-columns: minmax(150px, 190px) minmax(70px, 100px) 1fr;
+  gap: 6px 10px;
+  align-items: start;
+}
+
+.timeline-event p {
+  grid-column: 3;
+  margin: 0;
+  color: #ccc;
+}
+
+.timeline-event time,
+.timeline-event span {
+  color: #ccc;
+}
+
 .ptt-hinweis,
 .ptt-leer {
   color: #ddd;
+}
+
+.ptt-toolbar,
+.ptt-edit-form,
+.ptt-delete-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.ptt-edit-form input[type="text"] {
+  min-width: 280px;
+  max-width: 100%;
 }
 
 .ptt-recording-list {
@@ -1537,9 +1724,6 @@ select {
 
 .ptt-recording {
   padding: 10px;
-  background: var(--surface-color);
-  border: 1px solid #444;
-  border-radius: 8px;
 }
 
 .ptt-recording-header {
@@ -1557,25 +1741,6 @@ select {
 .ptt-recording audio {
   width: 100%;
   margin: 4px 0 8px;
-}
-
-.ptt-recording-meta {
-  display: grid;
-  grid-template-columns: minmax(90px, 150px) 1fr;
-  gap: 3px 10px;
-  margin: 0;
-}
-
-.ptt-recording-meta dt,
-.ptt-recording-meta dd {
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.ptt-recording-meta dt {
-  color: #ddd;
-  font-weight: bold;
 }
 
 /* Taximeter page */

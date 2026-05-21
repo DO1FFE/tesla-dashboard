@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Auffälligkeiten des Tesla-Dashboards">
+    <meta name="keywords" content="Tesla, Dashboard, Anomalien, Warnungen">
+    <title>Anomalien</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+    {% include 'analytics.html' %}
+</head>
+<body>
+    <main class="tool-page">
+        <h1>Anomalien</h1>
+        <nav class="tool-nav" aria-label="Dashboard-Werkzeuge">
+            <a href="/">Dashboard</a>
+            <a href="/timeline">Timeline</a>
+            <a href="/health">Gesundheit</a>
+            <a href="/laden">Laden</a>
+            <a href="/ptt">PTT</a>
+            <a href="/export">Export</a>
+        </nav>
+        <ol class="timeline-list">
+            {% for item in anomalien %}
+            <li class="timeline-event {{ item.severity }}">
+                <span>{{ item.severity }}</span>
+                <strong>{{ item.titel }}</strong>
+                <p>{{ item.details }}</p>
+            </li>
+            {% endfor %}
+        </ol>
+    </main>
+    <footer class="app-version">
+        <span>Tesla-Dashboard V{{ version }} - © 2025{% if year > 2025 %}-{{ year }}{% endif %} Erik Schauer, do1ffe@darc.de</span>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Service-Gesundheit des Tesla-Dashboards">
+    <meta name="keywords" content="Tesla, Dashboard, Gesundheit, Status, API">
+    <title>Service-Gesundheit</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+    {% include 'analytics.html' %}
+</head>
+<body>
+    <main class="tool-page">
+        <h1>Service-Gesundheit</h1>
+        <nav class="tool-nav" aria-label="Dashboard-Werkzeuge">
+            <a href="/">Dashboard</a>
+            <a href="/timeline">Timeline</a>
+            <a href="/laden">Laden</a>
+            <a href="/anomalien">Anomalien</a>
+            <a href="/ptt">PTT</a>
+            <a href="/export">Export</a>
+        </nav>
+        <section class="tool-summary {{ health.status }}">
+            <h2>Status: {{ health.status }}</h2>
+            <p>Läuft seit {{ health.uptime }} · Start {{ health.started_at }}</p>
+            {% for message in health.messages %}
+            <p>{{ message }}</p>
+            {% endfor %}
+        </section>
+        <div class="tool-grid">
+            <section>
+                <h2>Polling</h2>
+                <dl class="tool-meta">
+                    <dt>API-Intervall</dt><dd>{{ health.polling.api_interval }} s</dd>
+                    <dt>Leerlauf</dt><dd>{{ health.polling.api_interval_idle }} s</dd>
+                    <dt>Offline-State</dt><dd>{{ health.polling.offline_state_interval }} s</dd>
+                    <dt>Clients</dt><dd>{{ health.clients }}</dd>
+                </dl>
+            </section>
+            <section>
+                <h2>PTT</h2>
+                <dl class="tool-meta">
+                    <dt>Diagnosen</dt><dd>{{ health.ptt.diagnostics }}</dd>
+                    <dt>Aufnahmen</dt><dd>{{ health.ptt.recordings }}</dd>
+                    <dt>Limit</dt><dd>{{ health.ptt.recording_limit }}</dd>
+                    <dt>Aufbewahrung</dt><dd>{{ health.ptt.retention_hours }} h</dd>
+                </dl>
+            </section>
+            <section>
+                <h2>API</h2>
+                <dl class="tool-meta">
+                    <dt>Fehler 24 h</dt><dd>{{ health.api_errors_24h }}</dd>
+                    <dt>Fehler gesamt</dt><dd>{{ health.api_errors_total }}</dd>
+                    <dt>Statistik</dt><dd>{% if health.statistics.disabled %}aus{% elif health.statistics.aggregation_running %}läuft{% else %}steht{% endif %}</dd>
+                </dl>
+            </section>
+        </div>
+        <section>
+            <h2>Fahrzeuge</h2>
+            <table class="tool-table">
+                <thead><tr><th>Fahrzeug</th><th>State</th><th>State-Abruf</th><th>Live</th></tr></thead>
+                <tbody>
+                    {% for row in health.latest %}
+                    <tr><td>{{ row.vehicle_id }}</td><td>{{ row.state }}</td><td>vor {{ row.state_age }}</td><td>{{ 'ja' if row.live else 'nein' }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+    </main>
+    <footer class="app-version">
+        <span>Tesla-Dashboard V{{ version }} - © 2025{% if year > 2025 %}-{{ year }}{% endif %} Erik Schauer, do1ffe@darc.de</span>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Exportfunktionen des Tesla-Dashboards">
+    <meta name="keywords" content="Tesla, Dashboard, Export, CSV, JSON, PDF">
+    <title>Export</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+    {% include 'analytics.html' %}
+</head>
+<body>
+    <main class="tool-page">
+        <h1>Export</h1>
+        <nav class="tool-nav" aria-label="Dashboard-Werkzeuge">
+            <a href="/">Dashboard</a>
+            <a href="/timeline">Timeline</a>
+            <a href="/health">Gesundheit</a>
+            <a href="/laden">Laden</a>
+            <a href="/anomalien">Anomalien</a>
+            <a href="/ptt">PTT</a>
+        </nav>
+        <table class="tool-table">
+            <thead><tr><th>Datensatz</th><th>JSON</th><th>CSV</th><th>PDF</th></tr></thead>
+            <tbody>
+                {% for key, label in datasets.items() %}
+                <tr>
+                    <th>{{ label }}</th>
+                    <td><a href="{{ url_for('export_file', dataset=key, fmt='json') }}">JSON</a></td>
+                    <td><a href="{{ url_for('export_file', dataset=key, fmt='csv') }}">CSV</a></td>
+                    <td><a href="{{ url_for('export_file', dataset=key, fmt='pdf') }}">PDF</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </main>
+    <footer class="app-version">
+        <span>Tesla-Dashboard V{{ version }} - © 2025{% if year > 2025 %}-{{ year }}{% endif %} Erik Schauer, do1ffe@darc.de</span>
+    </footer>
+</body>
+</html>

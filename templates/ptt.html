@@ -14,15 +14,28 @@
 <body>
     <main class="ptt-archiv">
         <h1>PTT-Übertragungen</h1>
+        <nav class="tool-nav" aria-label="Dashboard-Werkzeuge">
+            <a href="/">Dashboard</a>
+            <a href="/timeline">Timeline</a>
+            <a href="/health">Gesundheit</a>
+            <a href="/laden">Laden</a>
+            <a href="/anomalien">Anomalien</a>
+            <a href="/export">Export</a>
+        </nav>
         <p class="ptt-hinweis">
             Gespeichert werden maximal {{ limit }} Übertragungen für {{ retention_hours }} Stunden.
         </p>
+        <form method="post" class="ptt-toolbar">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="cleanup">
+            <button type="submit">Bereinigung ausführen</button>
+        </form>
         {% if recordings %}
         <ol class="ptt-recording-list">
             {% for recording in recordings %}
-            <li class="ptt-recording">
+            <li class="ptt-recording{% if recording.important %} important{% endif %}">
                 <div class="ptt-recording-header">
-                    <strong>{{ recording.zeit }}</strong>
+                    <strong>{% if recording.important %}★ {% endif %}{{ recording.zeit }}</strong>
                     <span>{{ recording.dauer_text }} · {{ recording.größe_text }}</span>
                 </div>
                 <audio controls preload="none" src="{{ url_for('ptt_audio_file', recording_id=recording.id) }}"></audio>
@@ -36,6 +49,26 @@
                     <dt>Client</dt>
                     <dd>{{ recording.client_id or 'unbekannt' }}</dd>
                 </dl>
+                <form method="post" class="ptt-edit-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="save">
+                    <input type="hidden" name="recording_id" value="{{ recording.id }}">
+                    <label>
+                        Notiz
+                        <input type="text" name="note" maxlength="500" value="{{ recording.note or '' }}">
+                    </label>
+                    <label class="checkbox">
+                        <input type="checkbox" name="important" value="1" {% if recording.important %}checked{% endif %}>
+                        wichtig
+                    </label>
+                    <button type="submit">Speichern</button>
+                </form>
+                <form method="post" class="ptt-delete-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="recording_id" value="{{ recording.id }}">
+                    <button type="submit">Löschen</button>
+                </form>
             </li>
             {% endfor %}
         </ol>

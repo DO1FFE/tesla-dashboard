@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Ereignis-Timeline des Tesla-Dashboards">
+    <meta name="keywords" content="Tesla, Dashboard, Timeline, Ereignisse, Fahrzeugstatus">
+    <title>Timeline</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+    {% include 'analytics.html' %}
+</head>
+<body>
+    <main class="tool-page">
+        <h1>Ereignis-Timeline</h1>
+        <nav class="tool-nav" aria-label="Dashboard-Werkzeuge">
+            <a href="/">Dashboard</a>
+            <a href="/health">Gesundheit</a>
+            <a href="/laden">Laden</a>
+            <a href="/anomalien">Anomalien</a>
+            <a href="/ptt">PTT</a>
+            <a href="/export">Export</a>
+        </nav>
+        {% if events %}
+        <ol class="timeline-list">
+            {% for event in events %}
+            <li class="timeline-event {{ event.severity }}">
+                <time>{{ event.zeit }}</time>
+                <span>{{ event.typ }}</span>
+                <strong>{{ event.titel }}</strong>
+                {% if event.details %}<p>{{ event.details }}</p>{% endif %}
+            </li>
+            {% endfor %}
+        </ol>
+        {% else %}
+        <p>Es sind noch keine Ereignisse vorhanden.</p>
+        {% endif %}
+    </main>
+    <footer class="app-version">
+        <span>Tesla-Dashboard V{{ version }} - © 2025{% if year > 2025 %}-{{ year }}{% endif %} Erik Schauer, do1ffe@darc.de</span>
+    </footer>
+</body>
+</html>

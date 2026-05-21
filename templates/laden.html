@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Lade-Historie des Tesla-Dashboards">
+    <meta name="keywords" content="Tesla, Dashboard, Laden, Ladehistorie, kWh">
+    <title>Lade-Historie</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+    {% include 'analytics.html' %}
+</head>
+<body>
+    <main class="tool-page">
+        <h1>Lade-Historie</h1>
+        <nav class="tool-nav" aria-label="Dashboard-Werkzeuge">
+            <a href="/">Dashboard</a>
+            <a href="/timeline">Timeline</a>
+            <a href="/health">Gesundheit</a>
+            <a href="/anomalien">Anomalien</a>
+            <a href="/ptt">PTT</a>
+            <a href="/export">Export</a>
+        </nav>
+        <section class="tool-summary ok">
+            <h2>{{ summary.sessions }} Ladevorgänge · {{ summary.energy_kwh }} kWh</h2>
+        </section>
+        <div class="tool-grid">
+            {% for month in summary.months[:6] %}
+            <section>
+                <h2>{{ month.month }}</h2>
+                <p>{{ month.sessions }} Vorgänge · {{ month.energy_kwh }} kWh</p>
+            </section>
+            {% endfor %}
+        </div>
+        <table class="tool-table">
+            <thead><tr><th>Zeit</th><th>Fahrzeug</th><th>Energie</th></tr></thead>
+            <tbody>
+                {% for row in berichte %}
+                <tr><td>{{ row.zeit }}</td><td>{{ row.vehicle_id }}</td><td>{{ row.energy_kwh }} kWh</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </main>
+    <footer class="app-version">
+        <span>Tesla-Dashboard V{{ version }} - © 2025{% if year > 2025 %}-{{ year }}{% endif %} Erik Schauer, do1ffe@darc.de</span>
+    </footer>
+</body>
+</html>

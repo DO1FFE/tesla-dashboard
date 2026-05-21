@@ -19,6 +19,7 @@ var DEFAULT_ZOOM = 18;
 var superchargerMarkers = [];
 var lastSuperchargerData = null;
 var letzteKartenPosition = null;
+var privacyCircle = null;
 
 function normalizeShiftState(shift) {
     if (shift === null || shift === undefined) {
@@ -122,12 +123,162 @@ var lastUserZoom = 0;
 var USER_ZOOM_PRIORITY_MS = 30 * 1000;
 var zoomSetByApp = false;
 var $zoomLevel = $('#zoom-level');
+var $privacyMapNotice = $('#privacy-map-notice');
 function updateZoomDisplay() {
     if ($zoomLevel.length) {
         $zoomLevel.text('Zoom: ' + map.getZoom());
     }
 }
 updateZoomDisplay();
+
+function formatierePrivatsphaereRadius(radius) {
+    radius = Number(radius);
+    if (!isFinite(radius) || radius <= 0) {
+        return '';
+    }
+    if (radius >= 10000) {
+        return Math.round(radius / 1000) + ' km';
+    }
+    if (radius >= 1000) {
+        return (Math.round(radius / 100) / 10).toFixed(1) + ' km';
+    }
+    return Math.round(radius) + ' m';
+}
+
+function kartenPrivatmodusAktiv() {
+    return !!(CONFIG && CONFIG['privacy-mode']);
+}
+
+function kartenPrivatmodusGenauigkeit() {
+    var precision = CONFIG ? Number(CONFIG.privacy_precision) : 2;
+    if (!isFinite(precision)) {
+        precision = 2;
+    }
+    return Math.min(4, Math.max(0, Math.round(precision)));
+}
+
+function rundeKartenKoordinate(value) {
+    var numeric = Number(value);
+    if (!isFinite(numeric)) {
+        return numeric;
+    }
+    var precision = kartenPrivatmodusGenauigkeit();
+    var factor = Math.pow(10, precision);
+    return Math.round(numeric * factor) / factor;
+}
+
+function berechnePrivatsphaereRadius(latitude) {
+    var precision = kartenPrivatmodusGenauigkeit();
+    var halfDegree = 0.5 * Math.pow(10, -precision);
+    var lat = Number(latitude);
+    var latRad = isFinite(lat) ? lat * Math.PI / 180 : 0;
+    var latMeter = 111320 * halfDegree;
+    var lonMeter = 111320 * Math.abs(Math.cos(latRad)) * halfDegree;
+    return Math.max(1, Math.ceil(Math.sqrt(latMeter * latMeter + lonMeter * lonMeter)));
+}
+
+function privatisiereKartenPunkt(lat, lng) {
+    if (!kartenPrivatmodusAktiv()) {
+        return {lat: Number(lat), lng: Number(lng), radius: 0, active: false};
+    }
+    var privatLat = rundeKartenKoordinate(lat);
+    var privatLng = rundeKartenKoordinate(lng);
+    return {
+        lat: privatLat,
+        lng: privatLng,
+        radius: isFinite(privatLat) && isFinite(privatLng) ? berechnePrivatsphaereRadius(privatLat) : 0,
+        active: true
+    };
+}
+
+function privatisiereKartenPunkte(points) {
+    if (!kartenPrivatmodusAktiv() || !Array.isArray(points)) {
+        return points;
+    }
+    return points.map(function(point) {
+        if (!Array.isArray(point) || point.length < 2) {
+            return point;
+        }
+        var kopie = point.slice();
+        kopie[0] = rundeKartenKoordinate(kopie[0]);
+        kopie[1] = rundeKartenKoordinate(kopie[1]);
+        return kopie;
+    });
+}
+
+function entfernePrivatsphaereKreis() {
+    if (!privacyCircle) {
+        return;
+    }
+    try {
+        map.removeLayer(privacyCircle);
+    } catch (err) {}
+    privacyCircle = null;
+}
+
+function updatePrivatsphaereOverlay(active, lat, lng, radius) {
+    var hatPosition = isFinite(lat) && isFinite(lng);
+    radius = Number(radius);
+    if (!isFinite(radius) || radius <= 0) {
+        radius = 0;
+    }
+
+    if (!active) {
+        entfernePrivatsphaereKreis();
+        if ($privacyMapNotice.length) {
+            $privacyMapNotice.prop('hidden', true).text('');
+        }
+        return;
+    }
+
+    if ($privacyMapNotice.length) {
+        var text = 'Privatsphäre-Modus aktiv';
+        var radiusText = formatierePrivatsphaereRadius(radius);
+        if (radiusText) {
+            text += ' · Bereich ca. ' + radiusText;
+        }
+        $privacyMapNotice.text(text).prop('hidden', false);
+    }
+
+    if (!hatPosition || radius <= 0) {
+        entfernePrivatsphaereKreis();
+        return;
+    }
+
+    if (!privacyCircle) {
+        privacyCircle = L.circle([lat, lng], {
+            radius: radius,
+            color: '#ff9800',
+            weight: 2,
+            opacity: 0.95,
+            fillColor: '#ff9800',
+            fillOpacity: 0.14,
+            dashArray: '6 6',
+            interactive: false
+        }).addTo(map);
+        return;
+    }
+    privacyCircle.setLatLng([lat, lng]);
+    privacyCircle.setRadius(radius);
+}
+
+function zoomFuerPrivatsphaereRadius(radius, fallbackZoom) {
+    radius = Number(radius);
+    if (!isFinite(radius) || radius <= 0) {
+        return fallbackZoom;
+    }
+    if (radius >= 30000) return Math.min(fallbackZoom, 8);
+    if (radius >= 10000) return Math.min(fallbackZoom, 10);
+    if (radius >= 5000) return Math.min(fallbackZoom, 11);
+    if (radius >= 2000) return Math.min(fallbackZoom, 12);
+    if (radius >= 1000) return Math.min(fallbackZoom, 13);
+    if (radius >= 500) return Math.min(fallbackZoom, 14);
+    if (radius >= 250) return Math.min(fallbackZoom, 15);
+    if (radius >= 100) return Math.min(fallbackZoom, 16);
+    if (radius >= 30) return Math.min(fallbackZoom, 17);
+    return fallbackZoom;
+}
+
 map.on('zoomend', function() {
     if (zoomSetByApp) {
         zoomSetByApp = false;
@@ -658,32 +809,40 @@ function handleData(data) {
     updateAlarmPopup(alarm);
     var lat = Number(drive.latitude);
     var lng = Number(drive.longitude);
+    var privacyModeAktiv = kartenPrivatmodusAktiv();
+    var kartenPosition = privatisiereKartenPunkt(lat, lng);
+    var mapLat = privacyModeAktiv ? kartenPosition.lat : lat;
+    var mapLng = privacyModeAktiv ? kartenPosition.lng : lng;
+    var privacyRadius = kartenPosition.radius;
     var slide = false;
     var offline = istOfflineOderSchlaeft(data.state);
-    if (isFinite(lat) && isFinite(lng)) {
-        var coordsNeu = positionIstNeu(lat, lng);
+    if (isFinite(mapLat) && isFinite(mapLng)) {
+        var coordsNeu = positionIstNeu(mapLat, mapLng);
         if (offline) {
-            marker.setLatLng([lat, lng]);
+            marker.setLatLng([mapLat, mapLng]);
         } else if (typeof marker.slideTo === 'function') {
-            marker.slideTo([lat, lng], {duration: 1000});
+            marker.slideTo([mapLat, mapLng], {duration: 1000});
             slide = true;
         } else {
-            marker.setLatLng([lat, lng]);
+            marker.setLatLng([mapLat, mapLng]);
         }
         var speedVal = parseFloat(drive.speed);
         var units = data.gui_settings && data.gui_settings.gui_distance_units;
         var mph = !units || units.indexOf('km') === -1;
         var speedKmh = isNaN(speedVal) ? 0 : (mph ? speedVal * MILES_TO_KM : speedVal);
         var zoom = computeZoomForSpeed(speedKmh);
+        if (privacyModeAktiv) {
+            zoom = zoomFuerPrivatsphaereRadius(privacyRadius, zoom);
+        }
         if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
             zoom = map.getZoom();
         }
         if (!offline || coordsNeu || !letzteKartenPosition) {
             zoomSetByApp = true;
             if (offline) {
-                map.setView([lat, lng], zoom, {animate: false});
+                map.setView([mapLat, mapLng], zoom, {animate: false});
             } else {
-                map.flyTo([lat, lng], zoom);
+                map.flyTo([mapLat, mapLng], zoom);
             }
             updateZoomDisplay();
         }
@@ -691,7 +850,7 @@ function handleData(data) {
             var displayHeading = adjustHeadingForReverse(drive.heading, drive.shift_state);
             marker.setRotationAngle(displayHeading);
         }
-        letzteKartenPosition = [lat, lng];
+        letzteKartenPosition = [mapLat, mapLng];
     } else if (!letzteKartenPosition && !offline) {
         // Auf Standardposition zurücksetzen, wenn keine Koordinaten vorliegen
         var zoom = DEFAULT_ZOOM;
@@ -702,9 +861,13 @@ function handleData(data) {
         map.setView(DEFAULT_POS, zoom);
         updateZoomDisplay();
     }
+    updatePrivatsphaereOverlay(privacyModeAktiv, mapLat, mapLng, privacyRadius);
 
     var addr = data.location_address;
-    if (addr) {
+    if (privacyModeAktiv) {
+        $('#address-text').text('');
+        $('#address-error').hide();
+    } else if (addr) {
         $('#address-text').text(addr);
         $('#address-error').hide();
     } else {
@@ -715,19 +878,30 @@ function handleData(data) {
 
     // Show destination flag and route line if navigation is active
     if (drive.active_route_destination && drive.active_route_latitude && drive.active_route_longitude) {
-        var dLat = drive.active_route_latitude;
-        var dLng = drive.active_route_longitude;
+        var dLat = Number(drive.active_route_latitude);
+        var dLng = Number(drive.active_route_longitude);
+        if (privacyModeAktiv) {
+            var privatZiel = privatisiereKartenPunkt(dLat, dLng);
+            dLat = privatZiel.lat;
+            dLng = privatZiel.lng;
+        }
+    }
+    if (
+        drive.active_route_destination &&
+        isFinite(mapLat) &&
+        isFinite(mapLng) &&
+        isFinite(dLat) &&
+        isFinite(dLng)
+    ) {
         if (!destMarker) {
             destMarker = L.marker([dLat, dLng], { icon: flagIcon }).addTo(map);
         } else {
             destMarker.setLatLng([dLat, dLng]);
         }
-        if (lat && lng) {
-            if (!destLine) {
-                destLine = L.polyline([[lat, lng], [dLat, dLng]], { color: 'red', dashArray: '5, 5', weight: 2 }).addTo(map);
-            } else {
-                destLine.setLatLngs([[lat, lng], [dLat, dLng]]);
-            }
+        if (!destLine) {
+            destLine = L.polyline([[mapLat, mapLng], [dLat, dLng]], { color: 'red', dashArray: '5, 5', weight: 2 }).addTo(map);
+        } else {
+            destLine.setLatLngs([[mapLat, mapLng], [dLat, dLng]]);
         }
     } else {
         if (destMarker) {
@@ -740,13 +914,14 @@ function handleData(data) {
         }
     }
     var pathPoints = updatePathPoints(data);
-    if (pathPoints.length > 1) {
+    var sichtbarePathPoints = privatisiereKartenPunkte(pathPoints);
+    if (sichtbarePathPoints.length > 1) {
         if (!polyline) {
-            polyline = L.polyline(pathPoints, { color: 'blue' }).addTo(map);
+            polyline = L.polyline(sichtbarePathPoints, { color: 'blue' }).addTo(map);
         } else if (slide) {
-            pendingPath = pathPoints.slice();
+            pendingPath = sichtbarePathPoints.slice();
         } else {
-            polyline.setLatLngs(pathPoints);
+            polyline.setLatLngs(sichtbarePathPoints);
         }
     } else if (polyline) {
         map.removeLayer(polyline);

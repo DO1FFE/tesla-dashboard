@@ -9,6 +9,7 @@ except RuntimeError:
 eventlet.monkey_patch()
 
 import os
+import csv
 import json
 import queue
 from collections import deque
@@ -24,7 +25,7 @@ import argparse
 from urllib.parse import urlparse
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
-from io import UnsupportedOperation
+from io import BytesIO, StringIO, UnsupportedOperation
 from flask import (
     Flask,
     render_template,
@@ -136,6 +137,7 @@ def _soll_splashscreen_anzeigen():
 
 __version__ = get_version()
 CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
+APP_STARTED_AT = time.time()
 RECEIPT_TIME_FORMAT = "%d.%m.%Y %H:%M"
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
 TESLA_REQUEST_TIMEOUT = float(os.getenv("TESLA_REQUEST_TIMEOUT", "5"))
@@ -1090,6 +1092,7 @@ CONFIG_ITEMS = [
     {"id": "media-player", "desc": "Medienwiedergabe"},
     {"id": "ptt-controls", "desc": "Push-to-Talk"},
     {"id": "ptt-recordings", "desc": "PTT-Übertragungen speichern"},
+    {"id": "privacy-mode", "desc": "Privatmodus aktivieren", "default": False},
     {"id": "software-update", "desc": "Software-Update-Hinweis"},
     {"id": "offline-msg", "desc": "Offline-Meldung"},
     {"id": "loading-msg", "desc": "Ladehinweis"},
@@ -6444,8 +6447,7 @@ def api_reverse_geocode():
         lon = float(request.args.get("lon"))
     except (TypeError, ValueError):
         return jsonify({"error": "Missing coordinates"}), 400
-    vehicle_id = request.args.get("vehicle_id")
-    result = reverse_geocode(lat, lon, vehicle_id)
+    result = reverse_geocode(lat, lon, request.args.get("vehicle_id"))
     return jsonify(result)
 
 
@@ -6627,6 +6629,7 @@ def config_page():
         sms_drive_only = "sms_drive_only" in request.form
         api_interval = request.form.get("api_interval", "").strip()
         api_interval_idle = request.form.get("api_interval_idle", "").strip()
+        privacy_precision = request.form.get("privacy_precision", "").strip()
         tariff_base = request.form.get("tariff_base", "").replace(",", ".").strip()
         tariff_12 = request.form.get("tariff_12", "").replace(",", ".").strip()
         tariff_34 = request.form.get("tariff_34", "").replace(",", ".").strip()
@@ -6745,6 +6748,10 @@ def config_page():
             cfg["api_interval_idle"] = max(1, int(api_interval_idle))
         elif "api_interval_idle" in cfg:
             cfg.pop("api_interval_idle")
+        if privacy_precision.isdigit():
+            cfg["privacy_precision"] = min(4, max(0, int(privacy_precision)))
+        elif "privacy_precision" in cfg:
+            cfg.pop("privacy_precision")
         save_config(cfg)
         save_config(aprs_cfg, vehicle_id=selected_vehicle_id)
     else:
@@ -7480,6 +7487,48 @@ def _ptt_aufnahme_finden(aufnahme_id):
     return None
 
 
+def _ptt_aufnahme_löschen(aufnahme_id):
+    """Lösche eine gespeicherte PTT-Übertragung."""
+
+    gelöscht = False
+    with ptt_recording_lock:
+        einträge = _ptt_index_lesen_ungesperrt()
+        behalten = []
+        for eintrag in einträge:
+            if eintrag.get("id") == aufnahme_id:
+                _ptt_aufnahme_löschen_ungesperrt(eintrag)
+                gelöscht = True
+            else:
+                behalten.append(eintrag)
+        behalten = _ptt_aufnahmen_bereinigen_ungesperrt(behalten)
+        _ptt_index_schreiben_ungesperrt(behalten)
+    return gelöscht
+
+
+def _ptt_aufnahme_aktualisieren(aufnahme_id, note=None, important=None):
+    """Aktualisiere Notiz und Wichtig-Markierung einer PTT-Aufnahme."""
+
+    gefunden = False
+    with ptt_recording_lock:
+        einträge = _ptt_index_lesen_ungesperrt()
+        for eintrag in einträge:
+            if eintrag.get("id") != aufnahme_id:
+                continue
+            if note is not None:
+                text = str(note).strip()
+                if text:
+                    eintrag["note"] = text[:500]
+                else:
+                    eintrag.pop("note", None)
+            if important is not None:
+                eintrag["important"] = bool(important)
+            gefunden = True
+            break
+        einträge = _ptt_aufnahmen_bereinigen_ungesperrt(einträge)
+        _ptt_index_schreiben_ungesperrt(einträge)
+    return gefunden
+
+
 def _ptt_dauer_text(sekunden):
     sekunden = max(0, int(round(sekunden or 0)))
     minuten, rest = divmod(sekunden, 60)
@@ -7513,10 +7562,25 @@ def _ptt_aufnahmen_für_template():
     return einträge
 
 
-@app.route("/ptt")
+@app.route("/ptt", methods=["GET", "POST"])
 @requires_auth
 def ptt_recordings_page():
     """Zeige die gespeicherten Push-to-Talk-Übertragungen."""
+
+    if request.method == "POST":
+        action = request.form.get("action")
+        aufnahme_id = request.form.get("recording_id", "").strip()
+        if action == "delete" and aufnahme_id:
+            _ptt_aufnahme_löschen(aufnahme_id)
+        elif action == "save" and aufnahme_id:
+            _ptt_aufnahme_aktualisieren(
+                aufnahme_id,
+                note=request.form.get("note", ""),
+                important="important" in request.form,
+            )
+        elif action == "cleanup":
+            _ptt_aufnahmen_laden()
+        return redirect(url_for("ptt_recordings_page"))
 
     return render_template(
         "ptt.html",
@@ -7543,6 +7607,633 @@ def ptt_audio_file(recording_id):
         as_attachment=False,
         max_age=0,
     )
+
+
+def _alle_log_pfade(name):
+    """Finde vorhandene Logdateien im aktuellen Datenlayout."""
+
+    pfade = []
+    try:
+        legacy = os.path.join(DATA_DIR, name)
+        if os.path.isfile(legacy):
+            pfade.append(legacy)
+        for ordner in os.listdir(DATA_DIR):
+            pfad = os.path.join(DATA_DIR, ordner, name)
+            if os.path.isfile(pfad):
+                pfade.append(pfad)
+    except Exception:
+        pass
+    return sorted(set(pfade))
+
+
+def _json_log_einträge(name, limit=None):
+    """Lese JSON-Payloads aus App-Logs mit vorangestelltem Zeitstempel."""
+
+    einträge = []
+    for pfad in _alle_log_pfade(name):
+        try:
+            with open(pfad, "r", encoding="utf-8") as handle:
+                lines = handle.readlines()
+        except Exception:
+            continue
+        if limit:
+            lines = lines[-limit:]
+        for line in lines:
+            idx = line.find("{")
+            if idx == -1:
+                continue
+            ts = _parse_log_time(line[:idx].strip())
+            if ts is None:
+                continue
+            try:
+                payload = json.loads(line[idx:])
+            except Exception:
+                continue
+            if isinstance(payload, dict):
+                einträge.append({"timestamp": ts.timestamp(), "time": ts, "data": payload})
+    einträge.sort(key=lambda item: item["timestamp"], reverse=True)
+    return einträge if limit is None else einträge[:limit]
+
+
+def _zeit_text(timestamp):
+    try:
+        if isinstance(timestamp, datetime):
+            dt = timestamp.astimezone(LOCAL_TZ)
+        else:
+            dt = datetime.fromtimestamp(float(timestamp), LOCAL_TZ)
+        return dt.strftime("%d.%m.%Y %H:%M:%S")
+    except Exception:
+        return ""
+
+
+def _dauer_kurz(sekunden):
+    try:
+        sekunden = int(round(float(sekunden)))
+    except Exception:
+        sekunden = 0
+    if sekunden < 60:
+        return f"{sekunden} s"
+    minuten, rest = divmod(sekunden, 60)
+    if minuten < 60:
+        return f"{minuten} min {rest} s"
+    stunden, minuten = divmod(minuten, 60)
+    return f"{stunden} h {minuten} min"
+
+
+def _alter_text(timestamp):
+    try:
+        delta = max(0, time.time() - float(timestamp))
+    except Exception:
+        return "unbekannt"
+    return _dauer_kurz(delta)
+
+
+def _ladeberichte_laden(limit=None):
+    """Erzeuge einen einfachen Ladebericht aus energy.log."""
+
+    berichte = []
+    for eintrag in _json_log_einträge("energy.log"):
+        daten = eintrag["data"]
+        energie = _as_float(daten.get("added_energy"))
+        if energie is None or energie <= 0:
+            continue
+        timestamp = eintrag["timestamp"]
+        monat = datetime.fromtimestamp(timestamp, LOCAL_TZ).strftime("%Y-%m")
+        berichte.append(
+            {
+                "timestamp": timestamp,
+                "zeit": _zeit_text(timestamp),
+                "monat": monat,
+                "vehicle_id": daten.get("vehicle_id") or "",
+                "energy_kwh": round(energie, 3),
+            }
+        )
+    berichte.sort(key=lambda item: item["timestamp"], reverse=True)
+    return berichte if limit is None else berichte[:limit]
+
+
+def _ladebericht_zusammenfassung(berichte):
+    monate = {}
+    gesamt = 0.0
+    for eintrag in berichte:
+        key = eintrag.get("monat") or "unbekannt"
+        monat = monate.setdefault(key, {"month": key, "sessions": 0, "energy_kwh": 0.0})
+        monat["sessions"] += 1
+        monat["energy_kwh"] += float(eintrag.get("energy_kwh") or 0.0)
+        gesamt += float(eintrag.get("energy_kwh") or 0.0)
+    rows = sorted(monate.values(), key=lambda item: item["month"], reverse=True)
+    for row in rows:
+        row["energy_kwh"] = round(row["energy_kwh"], 2)
+    return {
+        "sessions": len(berichte),
+        "energy_kwh": round(gesamt, 2),
+        "months": rows,
+    }
+
+
+def _fahrtberichte_laden(limit=None):
+    """Erzeuge Fahrtberichte aus den gespeicherten Trip-Dateien."""
+
+    rows = []
+    for pfad in _get_trip_files():
+        rel = os.path.relpath(pfad, DATA_DIR)
+        for index, segment in enumerate(_split_trip_segments(pfad), start=1):
+            start = segment.get("start")
+            end = segment.get("end")
+            if start is None:
+                continue
+            dauer = max(0.0, (end or start) - start)
+            rows.append(
+                {
+                    "timestamp": start,
+                    "zeit": _zeit_text(start),
+                    "datei": rel,
+                    "segment": index,
+                    "distance_km": round(float(segment.get("distance") or 0.0), 2),
+                    "duration_seconds": round(dauer, 1),
+                    "duration": _dauer_kurz(dauer),
+                    "wait_seconds": round(float(segment.get("wait") or 0.0), 1),
+                }
+            )
+    rows.sort(key=lambda item: item["timestamp"], reverse=True)
+    return rows if limit is None else rows[:limit]
+
+
+def _timeline_events(limit=100):
+    """Sammle eine kompakte Ereignis-Timeline aus vorhandenen Daten."""
+
+    events = []
+    for eintrag in _json_log_einträge("state.log", limit=300):
+        state = eintrag["data"].get("state")
+        if not state:
+            continue
+        events.append(
+            {
+                "timestamp": eintrag["timestamp"],
+                "zeit": _zeit_text(eintrag["timestamp"]),
+                "typ": "Status",
+                "titel": f"Fahrzeugstatus: {state}",
+                "details": eintrag["data"].get("vehicle_id") or "",
+                "severity": "info" if state == "online" else "warn",
+            }
+        )
+    for bericht in _ladeberichte_laden(limit=100):
+        events.append(
+            {
+                "timestamp": bericht["timestamp"],
+                "zeit": bericht["zeit"],
+                "typ": "Laden",
+                "titel": f"Ladevorgang: {bericht['energy_kwh']:.2f} kWh",
+                "details": bericht.get("vehicle_id") or "",
+                "severity": "ok",
+            }
+        )
+    for fahrt in _fahrtberichte_laden(limit=100):
+        events.append(
+            {
+                "timestamp": fahrt["timestamp"],
+                "zeit": fahrt["zeit"],
+                "typ": "Fahrt",
+                "titel": f"Fahrt: {fahrt['distance_km']:.2f} km",
+                "details": f"{fahrt['duration']} · {fahrt['datei']}",
+                "severity": "info",
+            }
+        )
+    for eintrag in _ptt_aufnahmen_laden()[:100]:
+        timestamp = _ptt_timestamp(eintrag)
+        events.append(
+            {
+                "timestamp": timestamp,
+                "zeit": _zeit_text(timestamp),
+                "typ": "PTT",
+                "titel": "PTT-Übertragung",
+                "details": f"{_ptt_dauer_text(eintrag.get('duration_seconds'))} · {eintrag.get('ip') or 'unbekannt'}",
+                "severity": "important" if eintrag.get("important") else "info",
+            }
+        )
+    for eintrag in _json_log_einträge("sms.log", limit=100):
+        daten = eintrag["data"]
+        success = bool(daten.get("success"))
+        events.append(
+            {
+                "timestamp": eintrag["timestamp"],
+                "zeit": _zeit_text(eintrag["timestamp"]),
+                "typ": "SMS",
+                "titel": "SMS gesendet" if success else "SMS fehlgeschlagen",
+                "details": str(daten.get("message") or "")[:120],
+                "severity": "ok" if success else "warn",
+            }
+        )
+    try:
+        with open(os.path.join(DATA_DIR, "park-loss.log"), "r", encoding="utf-8") as f:
+            lines = f.readlines()[-100:]
+        for line in lines:
+            daten = json.loads(line)
+            if not isinstance(daten, dict):
+                continue
+            end = daten.get("end") or daten.get("start")
+            dt = datetime.fromisoformat(end).astimezone(LOCAL_TZ) if end else None
+            if dt is None:
+                continue
+            pct = _as_float(daten.get("energy_pct")) or 0.0
+            km = _as_float(daten.get("range_km")) or 0.0
+            events.append(
+                {
+                    "timestamp": dt.timestamp(),
+                    "zeit": _zeit_text(dt.timestamp()),
+                    "typ": "Parken",
+                    "titel": f"Standverbrauch: {pct:.1f} %",
+                    "details": f"{km:.1f} km Reichweite",
+                    "severity": "warn" if pct >= 3 else "info",
+                }
+            )
+    except Exception:
+        pass
+    with api_errors_lock:
+        fehler = list(api_errors)
+    for fehler_eintrag in fehler[-100:]:
+        timestamp = fehler_eintrag.get("timestamp")
+        events.append(
+            {
+                "timestamp": timestamp or 0,
+                "zeit": _zeit_text(timestamp or 0),
+                "typ": "API",
+                "titel": "API-Fehler",
+                "details": str(fehler_eintrag.get("message") or "")[:160],
+                "severity": "warn",
+            }
+        )
+    events.sort(key=lambda item: item.get("timestamp") or 0, reverse=True)
+    return events[:limit]
+
+
+def _aktive_clients_zählen():
+    now = time.time()
+    count = 0
+    for data in active_clients.values():
+        pages = data.get("pages", [])
+        last_seen = data.get("last_seen", now)
+        if pages and now - last_seen <= CLIENT_TIMEOUT:
+            count += 1
+    return count
+
+
+def _service_health_payload():
+    """Baue eine alltagstaugliche Statusübersicht."""
+
+    cfg = load_config()
+    now = time.time()
+    latest_rows = []
+    for vehicle_id, data in latest_data.items():
+        ts_ms = data.get("state_checked_at") if isinstance(data, dict) else None
+        ts = float(ts_ms) / 1000.0 if ts_ms else None
+        latest_rows.append(
+            {
+                "vehicle_id": vehicle_id,
+                "state": data.get("state") if isinstance(data, dict) else "",
+                "live": bool(data.get("_live")) if isinstance(data, dict) else False,
+                "state_age": _alter_text(ts) if ts else "unbekannt",
+                "state_age_seconds": None if ts is None else round(now - ts, 1),
+            }
+        )
+    with api_errors_lock:
+        fehler = list(api_errors)
+    fehler_24h = [
+        item for item in fehler
+        if now - float(item.get("timestamp") or 0) <= 24 * 3600
+    ]
+    ptt_diag = _ptt_diagnosen_auflisten()
+    ptt_records = _ptt_aufnahmen_laden()
+    status = "ok"
+    meldungen = []
+    if fehler_24h:
+        status = "warn"
+        meldungen.append(f"{len(fehler_24h)} API-Fehler in den letzten 24 Stunden")
+    if not latest_rows:
+        status = "warn"
+        meldungen.append("Noch keine Live-Daten im Speicher")
+    if any((row.get("state_age_seconds") or 0) > 120 for row in latest_rows):
+        status = "warn"
+        meldungen.append("Mindestens ein State-Abruf ist älter als 120 Sekunden")
+    return {
+        "status": status,
+        "messages": meldungen,
+        "uptime": _dauer_kurz(now - APP_STARTED_AT),
+        "started_at": _zeit_text(APP_STARTED_AT),
+        "clients": _aktive_clients_zählen(),
+        "api_errors_24h": len(fehler_24h),
+        "api_errors_total": len(fehler),
+        "latest": latest_rows,
+        "polling": {
+            "api_interval": cfg.get("api_interval", 3),
+            "api_interval_idle": cfg.get("api_interval_idle", 30),
+            "offline_state_interval": OFFLINE_STATE_INTERVALL_SEKUNDEN,
+        },
+        "ptt": {
+            "diagnostics": len(ptt_diag),
+            "recordings": len(ptt_records),
+            "recording_limit": PTT_RECORDING_LIMIT,
+            "retention_hours": PTT_RECORDING_RETENTION_HOURS,
+        },
+        "statistics": {
+            "aggregation_running": bool(_aggregation_thread and _aggregation_thread.is_alive()),
+            "disabled": DISABLE_STATISTICS_AGGREGATION,
+        },
+    }
+
+
+def _anomalien_laden():
+    """Leite einfache Auffälligkeiten aus Statistik, Logs und Live-Daten ab."""
+
+    anomalien = []
+    stats = _load_cached_statistics()
+    today = datetime.now(LOCAL_TZ).date().isoformat()
+    daily = [
+        (day, data)
+        for day, data in stats.items()
+        if len(day) == 10 and day != today
+    ][-14:]
+    heute = stats.get(today, {})
+    if daily:
+        avg_park = sum(float(data.get("park_energy_pct", 0.0) or 0.0) for _day, data in daily) / len(daily)
+        today_park = float(heute.get("park_energy_pct", 0.0) or 0.0)
+        if today_park >= max(3.0, avg_park * 2.0):
+            anomalien.append(
+                {
+                    "severity": "warn",
+                    "titel": "Ungewöhnlicher Standverbrauch",
+                    "details": f"Heute {today_park:.1f} %, Schnitt zuletzt {avg_park:.1f} %",
+                }
+            )
+    with api_errors_lock:
+        fehler = list(api_errors)
+    letzte_fehler = [
+        item for item in fehler
+        if time.time() - float(item.get("timestamp") or 0) <= 24 * 3600
+    ]
+    if letzte_fehler:
+        anomalien.append(
+            {
+                "severity": "warn",
+                "titel": "API-Fehler",
+                "details": f"{len(letzte_fehler)} Fehler in den letzten 24 Stunden",
+            }
+        )
+    for vehicle_id, data in latest_data.items():
+        if not isinstance(data, dict):
+            continue
+        charge = data.get("charge_state") or {}
+        drive = data.get("drive_state") or {}
+        vehicle_state = data.get("vehicle_state") or {}
+        ts_ms = data.get("state_checked_at")
+        if ts_ms and time.time() - float(ts_ms) / 1000.0 > 120:
+            anomalien.append(
+                {
+                    "severity": "warn",
+                    "titel": "State-Abruf wirkt alt",
+                    "details": f"{vehicle_id}: vor {_alter_text(float(ts_ms) / 1000.0)}",
+                }
+            )
+        for name, ist_key, soll_key in (
+            ("vorne links", "tpms_pressure_fl", "tpms_soft_warning_pressure_fl"),
+            ("vorne rechts", "tpms_pressure_fr", "tpms_soft_warning_pressure_fr"),
+            ("hinten links", "tpms_pressure_rl", "tpms_soft_warning_pressure_rl"),
+            ("hinten rechts", "tpms_pressure_rr", "tpms_soft_warning_pressure_rr"),
+        ):
+            ist = _as_float(vehicle_state.get(ist_key))
+            soll = _as_float(vehicle_state.get(soll_key))
+            if ist is not None and soll is not None and abs(ist - soll) >= 0.2:
+                anomalien.append(
+                    {
+                        "severity": "warn",
+                        "titel": f"Reifendruck {name}",
+                        "details": f"Ist {ist:.2f} bar, Soll {soll:.2f} bar",
+                    }
+                )
+        power = _as_float(drive.get("power"))
+        speed = _as_float(drive.get("speed"))
+        if speed is not None and speed <= 1 and power is not None and abs(power) > 8:
+            anomalien.append(
+                {
+                    "severity": "info",
+                    "titel": "Hohe Leistung im Stand",
+                    "details": f"{vehicle_id}: {power:.0f} kW bei {speed:.0f} km/h",
+                }
+            )
+        if charge.get("charging_state") in {"NoPower", "Stopped"}:
+            anomalien.append(
+                {
+                    "severity": "warn",
+                    "titel": "Laden unterbrochen",
+                    "details": f"{vehicle_id}: {charge.get('charging_state')}",
+                }
+            )
+    if not anomalien:
+        anomalien.append(
+            {
+                "severity": "ok",
+                "titel": "Keine Auffälligkeiten",
+                "details": "Die einfachen Regeln sehen aktuell nichts Kritisches.",
+            }
+        )
+    return anomalien
+
+
+def _datensatz_exportieren(name):
+    if name == "statistik":
+        return _prepare_statistics_payload().get("rows", [])
+    if name == "timeline":
+        return _timeline_events(limit=500)
+    if name == "laden":
+        return _ladeberichte_laden()
+    if name == "fahrten":
+        return _fahrtberichte_laden()
+    if name == "ptt":
+        rows = []
+        for eintrag in _ptt_aufnahmen_laden():
+            rows.append(
+                {
+                    "id": eintrag.get("id"),
+                    "zeit": _zeit_text(_ptt_timestamp(eintrag)),
+                    "dauer": _ptt_dauer_text(eintrag.get("duration_seconds")),
+                    "size_bytes": eintrag.get("size_bytes"),
+                    "codec": eintrag.get("codec"),
+                    "ip": eintrag.get("ip"),
+                    "important": bool(eintrag.get("important")),
+                    "note": eintrag.get("note", ""),
+                }
+            )
+        return rows
+    abort(404)
+
+
+EXPORT_DATASETS = {
+    "statistik": "Statistik",
+    "timeline": "Timeline",
+    "laden": "Lade-Historie",
+    "fahrten": "Fahrten",
+    "ptt": "PTT-Übertragungen",
+}
+
+
+def _rows_to_csv(rows):
+    output = StringIO()
+    fieldnames = []
+    for row in rows:
+        for key in row.keys():
+            if key not in fieldnames:
+                fieldnames.append(key)
+    writer = csv.DictWriter(output, fieldnames=fieldnames or ["leer"])
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({key: row.get(key, "") for key in fieldnames})
+    return output.getvalue()
+
+
+def _rows_to_pdf(title, rows):
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+    except Exception:
+        abort(503, description="PDF-Export ist nicht verfügbar")
+
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    y = height - 40
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawString(40, y, title[:80])
+    y -= 24
+    pdf.setFont("Helvetica", 8)
+    pdf.drawString(40, y, f"Export: {datetime.now(LOCAL_TZ).strftime('%d.%m.%Y %H:%M')}")
+    y -= 20
+    pdf.setFont("Helvetica", 8)
+    if not rows:
+        pdf.drawString(40, y, "Keine Daten vorhanden.")
+    for row in rows[:200]:
+        text = " | ".join(f"{key}: {row.get(key, '')}" for key in row.keys())
+        while text:
+            line = text[:130]
+            text = text[130:]
+            if y < 40:
+                pdf.showPage()
+                pdf.setFont("Helvetica", 8)
+                y = height - 40
+            pdf.drawString(40, y, line)
+            y -= 12
+        y -= 4
+    pdf.save()
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def _export_response(dataset, fmt):
+    rows = _datensatz_exportieren(dataset)
+    title = EXPORT_DATASETS.get(dataset, dataset)
+    if fmt == "json":
+        return jsonify({"dataset": dataset, "title": title, "rows": rows})
+    if fmt == "csv":
+        content = _rows_to_csv(rows)
+        resp = Response(content, mimetype="text/csv; charset=utf-8")
+        resp.headers["Content-Disposition"] = f"attachment; filename={dataset}.csv"
+        return resp
+    if fmt == "pdf":
+        content = _rows_to_pdf(title, rows)
+        resp = Response(content, mimetype="application/pdf")
+        resp.headers["Content-Disposition"] = f"attachment; filename={dataset}.pdf"
+        return resp
+    abort(404)
+
+
+@app.route("/timeline")
+@requires_auth
+def timeline_page():
+    return render_template(
+        "timeline.html",
+        events=_timeline_events(),
+        version=__version__,
+        year=CURRENT_YEAR,
+    )
+
+
+@app.route("/api/timeline")
+@requires_auth
+def api_timeline():
+    limit = request.args.get("limit", default=100, type=int)
+    limit = min(500, max(1, limit))
+    return jsonify({"events": _timeline_events(limit=limit)})
+
+
+@app.route("/health")
+@requires_auth
+def health_page():
+    return render_template(
+        "health.html",
+        health=_service_health_payload(),
+        diagnostics=_ptt_diagnosen_auflisten(),
+        version=__version__,
+        year=CURRENT_YEAR,
+    )
+
+
+@app.route("/api/health")
+@requires_auth
+def api_health():
+    return jsonify(_service_health_payload())
+
+
+@app.route("/laden")
+@requires_auth
+def charging_report_page():
+    berichte = _ladeberichte_laden()
+    return render_template(
+        "laden.html",
+        berichte=berichte[:100],
+        summary=_ladebericht_zusammenfassung(berichte),
+        version=__version__,
+        year=CURRENT_YEAR,
+    )
+
+
+@app.route("/api/laden")
+@requires_auth
+def api_charging_report():
+    berichte = _ladeberichte_laden()
+    return jsonify({"summary": _ladebericht_zusammenfassung(berichte), "rows": berichte})
+
+
+@app.route("/anomalien")
+@requires_auth
+def anomalies_page():
+    return render_template(
+        "anomalien.html",
+        anomalien=_anomalien_laden(),
+        version=__version__,
+        year=CURRENT_YEAR,
+    )
+
+
+@app.route("/api/anomalien")
+@requires_auth
+def api_anomalies():
+    return jsonify({"anomalies": _anomalien_laden()})
+
+
+@app.route("/export")
+@requires_auth
+def export_page():
+    return render_template(
+        "export.html",
+        datasets=EXPORT_DATASETS,
+        version=__version__,
+        year=CURRENT_YEAR,
+    )
+
+
+@app.route("/export/<dataset>.<fmt>")
+@requires_auth
+def export_file(dataset, fmt):
+    return _export_response(dataset, fmt.lower())
 
 
 # Socket.IO handlers for push-to-talk audio

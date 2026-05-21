@@ -88,6 +88,10 @@
                 Hinweistext
                 <textarea name="announcement" rows="6">{{ config.get('announcement','') }}</textarea>
             </label>
+            <label>
+                Privatmodus Genauigkeit (Nachkommastellen)
+                <input type="number" name="privacy_precision" min="0" max="4" step="1" value="{{ config.get('privacy_precision', 2) }}">
+            </label>
         </section>
 
         <section class="config-section">
