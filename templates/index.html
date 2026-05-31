@@ -13,7 +13,6 @@
     <link rel="preload" as="image" href="/static/images/tesla-model-s-90d-deep-blue-body.webp" type="image/webp">
     <link rel="preload" as="image" href="/static/images/tesla-model-s-90d-deep-blue-wheel-hinten.webp" type="image/webp">
     <link rel="preload" as="image" href="/static/images/tesla-model-s-90d-deep-blue-wheel-vorne.webp" type="image/webp">
-    <link rel="preload" as="audio" href="/static/audio/amishrob-car-horn-beep-beep-cc0.mp3" type="audio/mpeg">
     {% endif %}
     <script src="/static/js/jquery.min.js"></script>
     <script src="/static/js/tesla-browser.js"></script>
@@ -40,7 +39,6 @@
                     <img class="splash-karosserie" src="/static/images/tesla-model-s-90d-deep-blue-body.webp" alt="" loading="eager" decoding="async">
                 </div>
             </div>
-            <audio id="splash-hupe" preload="auto" src="/static/audio/amishrob-car-horn-beep-beep-cc0.mp3" aria-hidden="true"></audio>
         </div>
     </div>
     {% endif %}
@@ -309,40 +307,11 @@
         {% if splashscreen_anzeigen %}
         (function () {
             const splash = document.getElementById("splashscreen");
-            const hupe = document.getElementById("splash-hupe");
-            let hupeGespielt = false;
             if (!splash) {
                 return;
             }
-            if (hupe) {
-                hupe.load();
-            }
-            function spieleHupe() {
-                if (!hupe || hupeGespielt || !document.body.contains(splash)) {
-                    return;
-                }
-                hupeGespielt = true;
-                hupe.volume = 0.55;
-                hupe.currentTime = 0;
-                const wiedergabe = hupe.play();
-                if (wiedergabe && typeof wiedergabe.catch === "function") {
-                    wiedergabe.catch(function () {
-                        hupeGespielt = false;
-                    });
-                }
-            }
-            function spieleHupeNachInteraktion() {
-                spieleHupe();
-                document.removeEventListener("pointerdown", spieleHupeNachInteraktion);
-                document.removeEventListener("keydown", spieleHupeNachInteraktion);
-            }
-            window.setTimeout(spieleHupe, 20);
-            document.addEventListener("pointerdown", spieleHupeNachInteraktion, { once: true });
-            document.addEventListener("keydown", spieleHupeNachInteraktion, { once: true });
             window.setTimeout(function () {
                 splash.classList.add("is-hidden");
-                document.removeEventListener("pointerdown", spieleHupeNachInteraktion);
-                document.removeEventListener("keydown", spieleHupeNachInteraktion);
                 window.setTimeout(function () {
                     splash.remove();
                 }, 400);
