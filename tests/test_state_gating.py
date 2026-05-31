@@ -49,7 +49,9 @@ def test_fetch_data_once_offline_nutzt_nur_cache(monkeypatch):
     assert daten["_live"] is False
 
 
-def test_vorklimatisierung_wird_nur_im_stand_angezeigt():
+def test_vorklimatisierung_wird_nur_im_stand_angezeigt(monkeypatch):
+    monkeypatch.setattr(app, "occupant_present", False)
+
     assert app._vorklimatisierung_im_stand_erlaubt({
         "state": "online",
         "drive_state": {"shift_state": "P", "speed": 0, "power": 0},
@@ -68,6 +70,19 @@ def test_vorklimatisierung_wird_nur_im_stand_angezeigt():
     }) is False
     assert app._vorklimatisierung_im_stand_erlaubt({
         "state": "online",
+        "drive_state": {"shift_state": None, "speed": None, "power": 8},
+        "climate_state": {
+            "is_climate_on": True,
+            "is_preconditioning": True,
+        },
+    }) is True
+    assert app._vorklimatisierung_im_stand_erlaubt({
+        "state": "online",
+        "drive_state": {"shift_state": None, "speed": None, "power": 8},
+        "climate_state": {"is_climate_on": False},
+    }) is False
+    assert app._vorklimatisierung_im_stand_erlaubt({
+        "state": "online",
         "drive_state": {"shift_state": "P", "speed": 0, "power": 0},
         "vehicle_state": {"locked": False},
     }) is False
@@ -81,6 +96,41 @@ def test_vorklimatisierung_wird_nur_im_stand_angezeigt():
         "drive_state": {"shift_state": "P", "speed": 0, "power": 0},
         "vehicle_state": {"sun_roof_state": "open", "sun_roof_percent_open": 12},
     }) is False
+    assert app._vorklimatisierung_im_stand_erlaubt({
+        "state": "online",
+        "drive_state": {"shift_state": "P", "speed": 0, "power": 0},
+        "vehicle_state": {"is_user_present": True},
+    }) is False
+
+    monkeypatch.setattr(app, "occupant_present", True)
+    assert app._vorklimatisierung_im_stand_erlaubt({
+        "state": "online",
+        "drive_state": {"shift_state": "P", "speed": 0, "power": 0},
+        "vehicle_state": {"is_user_present": False},
+    }) is False
+
+
+def test_api_occupant_blendet_vorklimatisierung_sofort_aus(monkeypatch):
+    monkeypatch.setattr(app, "occupant_present", False)
+    monkeypatch.setattr(app, "subscribers", {})
+    monkeypatch.setattr(app, "latest_data", {
+        "default": {
+            "state": "online",
+            "drive_state": {"shift_state": "P", "speed": 0, "power": 0},
+            "vehicle_state": {"locked": True, "is_user_present": False},
+            "climate_state": {
+                "is_climate_on": True,
+                "is_preconditioning": True,
+            },
+            "preconditioning_display_allowed": True,
+        },
+    })
+
+    response = app.app.test_client().post("/api/occupant", json={"present": True})
+
+    assert response.status_code == 200
+    assert response.get_json()["present"] is True
+    assert app.latest_data["default"]["preconditioning_display_allowed"] is False
 
 
 def test_fetch_data_once_asleep_nutzt_nur_cache(monkeypatch):

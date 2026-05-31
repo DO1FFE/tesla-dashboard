@@ -155,6 +155,44 @@ def test_timeline_page_zeigt_ereignisse(monkeypatch):
     assert "Fahrzeugstatus: online".encode("utf-8") in response.data
 
 
+def test_werkzeug_navigation_markiert_aktuelle_seite(monkeypatch):
+    monkeypatch.setenv("TESLA_EMAIL", "test@example.org")
+    monkeypatch.setenv("TESLA_PASSWORD", "geheim")
+    monkeypatch.setattr(app_module, "_ladeberichte_laden", lambda: [])
+
+    response = app.test_client().get("/laden", headers=auth_headers())
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert '<a class="is-active" href="/laden" aria-current="page">Laden</a>' in html
+
+
+def test_seitenmenü_zeigt_aktuelle_seite_trotz_ausgeblendeter_links(monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "load_config",
+        lambda vehicle_id=None: {
+            "page-menu": True,
+            "menu-dashboard": False,
+            "menu-statistik": False,
+            "menu-history": False,
+            "menu-heatmap": False,
+        },
+    )
+    monkeypatch.setattr(app_module, "_get_trip_files", lambda: [])
+    monkeypatch.setattr(app_module, "_get_trip_periods", lambda: ([], [], []))
+    monkeypatch.setattr(app_module, "compute_trip_summaries", lambda: ({}, {}))
+
+    response = app.test_client().get("/history")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert (
+        '<a class="menu-button is-active" href="/history" '
+        'aria-current="page">History</a>'
+    ) in html
+
+
 def test_ptt_notiz_wichtig_und_löschen(tmp_path, monkeypatch):
     monkeypatch.setenv("TESLA_EMAIL", "test@example.org")
     monkeypatch.setenv("TESLA_PASSWORD", "geheim")
@@ -214,6 +252,31 @@ def test_ladebericht_zusammenfassung():
     assert summary["months"][0]["month"] == "2026-05"
 
 
+def test_ladeberichte_laden_dedupliziert_migrierte_logs(monkeypatch):
+    einträge = [
+        {
+            "timestamp": 1779988768.813,
+            "data": {"vehicle_id": "1492931508551122", "added_energy": 38.95},
+        },
+        {
+            "timestamp": 1779988768.813,
+            "data": {"vehicle_id": "1492931508551122", "added_energy": 38.95},
+        },
+        {
+            "timestamp": 1779727020.766,
+            "data": {"vehicle_id": "1492931508551122", "added_energy": 30.76},
+        },
+    ]
+    monkeypatch.setattr(app_module, "_json_log_einträge", lambda name: einträge)
+
+    berichte = app_module._ladeberichte_laden()
+    summary = app_module._ladebericht_zusammenfassung(berichte)
+
+    assert len(berichte) == 2
+    assert summary["sessions"] == 2
+    assert summary["energy_kwh"] == 69.71
+
+
 def test_health_api(monkeypatch):
     monkeypatch.setenv("TESLA_EMAIL", "test@example.org")
     monkeypatch.setenv("TESLA_PASSWORD", "geheim")
@@ -226,6 +289,45 @@ def test_health_api(monkeypatch):
 
     assert response.status_code == 200
     assert "polling" in data
+
+
+def test_health_api_fasst_cache_aliase_zusammen(monkeypatch):
+    monkeypatch.setenv("TESLA_EMAIL", "test@example.org")
+    monkeypatch.setenv("TESLA_PASSWORD", "geheim")
+    monkeypatch.setattr(app_module, "load_config", lambda vehicle_id=None: {})
+    monkeypatch.setattr(app_module, "_ptt_aufnahmen_laden", lambda: [])
+    monkeypatch.setattr(app_module, "_ptt_diagnosen_auflisten", lambda: [])
+    monkeypatch.setattr(app_module, "api_errors", [])
+    monkeypatch.setattr(
+        app_module,
+        "latest_data",
+        {
+            "config.env": {
+                "id_s": "1492931508551122",
+                "state": "online",
+                "_live": True,
+                "state_checked_at": 1779988768000,
+            },
+            "debug.log": {
+                "id_s": "1492931508551122",
+                "state": "online",
+                "_live": True,
+                "state_checked_at": 1779988769000,
+            },
+            "1492931508551122": {
+                "id_s": "1492931508551122",
+                "state": "online",
+                "_live": True,
+                "state_checked_at": 1779988770000,
+            },
+        },
+    )
+
+    response = app.test_client().get("/api/health", headers=auth_headers())
+    data = json.loads(response.data)
+
+    assert response.status_code == 200
+    assert [row["vehicle_id"] for row in data["latest"]] == ["1492931508551122"]
 
 
 def test_supercharger_rate_limit_nutzt_retry_after(monkeypatch):

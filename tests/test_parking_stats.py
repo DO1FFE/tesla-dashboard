@@ -665,6 +665,69 @@ def test_process_dashboard_parking_log_ignores_oscillation(tmp_path, monkeypatch
     assert range_loss == pytest.approx(1 * app.MILES_TO_KM)
 
 
+def test_process_dashboard_parking_log_ignoriert_vollständigen_rücksprung(
+    tmp_path, monkeypatch
+):
+    import app
+
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    ts_base = datetime(2026, 5, 22, 4, 47, 0, tzinfo=app.LOCAL_TZ)
+    session_id = "veh-ruecksprung"
+    entries = [
+        {
+            "vehicle_id": "veh",
+            "battery_pct": 88.0,
+            "range_km": 343.787211,
+            "state": "asleep",
+            "session": session_id,
+        },
+        {
+            "vehicle_id": "veh",
+            "battery_pct": 74.0,
+            "range_km": 288.940904,
+            "state": "asleep",
+            "session": session_id,
+        },
+        {
+            "vehicle_id": "veh",
+            "battery_pct": 88.0,
+            "range_km": 343.787211,
+            "state": "asleep",
+            "session": session_id,
+        },
+        {
+            "vehicle_id": "veh",
+            "battery_pct": 74.0,
+            "range_km": 288.940904,
+            "state": "asleep",
+            "session": session_id,
+        },
+        {
+            "vehicle_id": "veh",
+            "battery_pct": 88.0,
+            "range_km": 343.787211,
+            "state": "asleep",
+            "session": session_id,
+        },
+    ]
+
+    log_path = tmp_path / "park-ui.log"
+    with log_path.open("w", encoding="utf-8") as handle:
+        for idx, payload in enumerate(entries):
+            handle.write(_park_line(ts_base + timedelta(seconds=10 * idx), payload))
+
+    losses = []
+
+    def capture_loss(*args):
+        losses.append(args)
+
+    processed = app._process_dashboard_parking_log(str(log_path), capture_loss)
+
+    assert processed is True
+    assert losses == []
+
+
 def test_compute_parking_losses_uses_est_range_when_ideal_missing(tmp_path, monkeypatch):
     import app
 

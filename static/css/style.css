@@ -889,10 +889,19 @@ select {
   text-decoration: none;
 }
 
-#page-menu a:hover {
+#page-menu a:hover,
+#page-menu a.is-active,
+#page-menu a[aria-current="page"] {
   background: var(--accent-color);
   color: var(--bg-color);
   text-decoration: none;
+}
+
+#page-menu a.is-active,
+#page-menu a[aria-current="page"] {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.18);
+  font-weight: 700;
 }
 
 /* Simple automatic gear shift display */
@@ -1672,6 +1681,21 @@ select {
   border-radius: 4px;
   padding: 6px 10px;
   text-decoration: none;
+}
+
+.tool-nav a:hover,
+.tool-nav a.is-active,
+.tool-nav a[aria-current="page"] {
+  color: var(--bg-color);
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  text-decoration: none;
+}
+
+.tool-nav a.is-active,
+.tool-nav a[aria-current="page"] {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.18);
+  font-weight: 700;
 }
 
 .tool-summary,

@@ -785,7 +785,7 @@ function handleData(data) {
     updateBatteryIndicator(charge.battery_level, rangeMiles, charge.charging_state, charge.battery_heater_on);
     updateV2LInfos(charge, drive);
     updateChargingInfo(charge, data);
-    updateLadeplanungInfo(charge, drive);
+    updateLadeplanungInfo(charge, drive, data);
     var climate = data.climate_state || {};
     updateThermometers(climate.inside_temp, climate.outside_temp, charge.battery_temp);
     updateClimateStatus(climate.is_climate_on);
@@ -1645,6 +1645,13 @@ function fahrzeugIstOffen(vehicle) {
     if (!vehicle) {
         return false;
     }
+    if (istAktiv(vehicle.is_user_present) ||
+        istAktiv(vehicle.user_present) ||
+        istAktiv(vehicle.occupant_present) ||
+        istAktiv(vehicle.is_driver_present) ||
+        istAktiv(vehicle.driver_present)) {
+        return true;
+    }
     if (vehicle.locked === false) {
         return true;
     }
@@ -1687,11 +1694,11 @@ function fahrzeugStehtFuerVorklimatisierung(drive) {
 }
 
 function darfVorklimatisierungAnzeigen(data, drive) {
-    if (data && typeof data.preconditioning_display_allowed !== 'undefined') {
-        return istAktiv(data.preconditioning_display_allowed);
-    }
     if (data && fahrzeugIstOffen(data.vehicle_state)) {
         return false;
+    }
+    if (data && typeof data.preconditioning_display_allowed !== 'undefined') {
+        return istAktiv(data.preconditioning_display_allowed);
     }
     return fahrzeugStehtFuerVorklimatisierung(drive);
 }
@@ -1970,7 +1977,7 @@ function ladeendeText(minuten) {
     return dauer;
 }
 
-function updateLadeplanungInfo(charge, drive) {
+function updateLadeplanungInfo(charge, drive, data) {
     var $info = $('#ladeplanung-info');
     if (!$info.length || !configEnabled('ladeplanung-info')) {
         $info.empty().hide();
@@ -1986,7 +1993,7 @@ function updateLadeplanungInfo(charge, drive) {
     var laedt = ladezustand === 'Charging' || ladezustand === 'Starting';
     var ladezeitMinuten = ladeRestzeitMinuten(charge);
     var hatRestzeit = ladezeitMinuten != null && ladezeitMinuten > 0;
-    var vorklimatisierungErlaubt = fahrzeugStehtFuerVorklimatisierung(drive);
+    var vorklimatisierungErlaubt = darfVorklimatisierungAnzeigen(data, drive);
     var vorklimatisierung = vorklimatisierungErlaubt &&
                             istAktiv(charge.preconditioning_enabled);
     var nebenzeit = istAktiv(charge.off_peak_charging_enabled);

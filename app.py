@@ -767,6 +767,7 @@ LOCAL_TZ = ZoneInfo("Europe/Berlin")
 MILES_TO_KM = 1.60934
 PARK_UI_LOG = "park-ui.log"
 PARKING_CHARGING_STATES = {"Charging", "Starting", "Stopped", "NoPower"}
+PARKING_DROP_CONFIRM_SECONDS = 300
 OFFLINE_STATE_INTERVALL_SEKUNDEN = 10
 _active_parking_sessions = {}
 _last_parking_samples = {}
@@ -1479,6 +1480,12 @@ api_errors_lock = threading.Lock()
 state_lock = threading.Lock()
 _statistics_cache_lock = threading.Lock()
 _statistics_cache = {"signature": None, "data": None}
+_trip_summary_cache_lock = threading.Lock()
+_trip_summary_cache = {"signature": None, "data": None}
+_trip_file_cache_lock = threading.Lock()
+_trip_distance_cache = {}
+_trip_speed_cache = {}
+_trip_segment_cache = {}
 _aggregation_lock = threading.Lock()
 _aggregation_initialized = False
 _aggregation_thread = None
@@ -2696,7 +2703,7 @@ def _hat_normale_fahrzeugaktivitaet(fahrzeugdaten):
     if not isinstance(charge_state, dict):
         charge_state = {}
 
-    if vehicle_state.get("is_user_present"):
+    if _anwesenheit_erkannt(vehicle_state):
         return True
     if _hat_offene_fahrzeugöffnung(vehicle_state):
         return True
@@ -2727,6 +2734,8 @@ def _vorklimatisierung_im_stand_erlaubt(fahrzeugdaten):
 
     vehicle_state = fahrzeugdaten.get("vehicle_state", {})
     if isinstance(vehicle_state, dict):
+        if _anwesenheit_erkannt(vehicle_state):
+            return False
         if vehicle_state.get("locked") is False:
             return False
         if _hat_offene_fahrzeugöffnung(vehicle_state):
@@ -2747,8 +2756,60 @@ def _vorklimatisierung_im_stand_erlaubt(fahrzeugdaten):
 
     state = fahrzeugdaten.get("state")
     if isinstance(state, str):
-        return state.strip().lower() in {"asleep", "offline", "parked"}
+        state_norm = state.strip().lower()
+        if state_norm in {"asleep", "offline", "parked"}:
+            return True
+        if state_norm == "online" and _vorklimatisierung_oder_klima_aktiv(fahrzeugdaten):
+            return True
     return False
+
+
+def _wert_ist_aktiv(value):
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "on", "yes"}
+    return bool(value)
+
+
+def _anwesenheit_erkannt(vehicle_state):
+    """Erkenne Anwesenheit aus Dashboard- oder Fahrzeugdaten."""
+
+    if _wert_ist_aktiv(occupant_present):
+        return True
+    if not isinstance(vehicle_state, dict):
+        return False
+    anwesenheitsfelder = (
+        "is_user_present",
+        "user_present",
+        "occupant_present",
+        "is_driver_present",
+        "driver_present",
+    )
+    return any(_wert_ist_aktiv(vehicle_state.get(key)) for key in anwesenheitsfelder)
+
+
+def _vorklimatisierung_oder_klima_aktiv(fahrzeugdaten):
+    climate = fahrzeugdaten.get("climate_state", {})
+    charge = fahrzeugdaten.get("charge_state", {})
+    if not isinstance(climate, dict):
+        climate = {}
+    if not isinstance(charge, dict):
+        charge = {}
+
+    climate_keys = (
+        "is_preconditioning",
+        "is_auto_conditioning_on",
+        "is_climate_on",
+        "battery_heater",
+        "battery_heater_no_power",
+    )
+    charge_keys = (
+        "preconditioning_enabled",
+        "battery_heater_on",
+        "not_enough_power_to_heat",
+    )
+    return any(_wert_ist_aktiv(climate.get(key)) for key in climate_keys) or any(
+        _wert_ist_aktiv(charge.get(key)) for key in charge_keys
+    )
 
 
 def _wert_ist_offen(value):
@@ -3737,6 +3798,50 @@ def _trip_date_from_filename(path):
         return None
 
 
+def _trip_datei_signatur(path):
+    """Gibt mtime und Größe einer Trip-Datei als Cache-Signatur zurück."""
+
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
+
+
+def _trip_dateien_signatur():
+    """Gibt eine kompakte Signatur aller bekannten Trip-Dateien zurück."""
+
+    signatur = []
+    for path in _get_trip_files():
+        signatur.append((path, _trip_datei_signatur(path)))
+    return tuple(signatur)
+
+
+def _trip_cache_lesen(cache, path):
+    signatur = _trip_datei_signatur(path)
+    if signatur is None:
+        return None
+    with _trip_file_cache_lock:
+        eintrag = cache.get(path)
+        if eintrag and eintrag.get("signatur") == signatur:
+            return eintrag.get("wert")
+    return None
+
+
+def _trip_cache_schreiben(cache, path, wert):
+    signatur = _trip_datei_signatur(path)
+    if signatur is None:
+        return wert
+    with _trip_file_cache_lock:
+        cache[path] = {"signatur": signatur, "wert": wert}
+    return wert
+
+
+def _trip_datei_sortierwert(path):
+    tag = _trip_date_from_filename(path) or datetime.min.date()
+    return tag, path
+
+
 def _load_trip_period(prefix, key):
     """Load all trip points for the given week or month key."""
     points = []
@@ -3887,24 +3992,32 @@ def _haversine(lat1, lon1, lat2, lon2):
 
 def _trip_distance(filename):
     """Return total distance in km for a trip CSV file."""
+    cached = _trip_cache_lesen(_trip_distance_cache, filename)
+    if cached is not None:
+        return cached
+
     points = _load_trip(filename)
     dist = 0.0
     for i in range(1, len(points)):
         lat1, lon1 = points[i - 1][:2]
         lat2, lon2 = points[i][:2]
         dist += _haversine(lat1, lon1, lat2, lon2)
-    return dist
+    return _trip_cache_schreiben(_trip_distance_cache, filename, dist)
 
 
 def _trip_max_speed(filename):
     """Return the maximum speed recorded in a trip CSV file in km/h."""
+    cached = _trip_cache_lesen(_trip_speed_cache, filename)
+    if cached is not None:
+        return cached
+
     points = _load_trip(filename)
     max_speed = 0.0
     for p in points:
         speed = p[2]
         if speed is not None and speed > max_speed:
             max_speed = speed
-    return max_speed * MILES_TO_KM
+    return _trip_cache_schreiben(_trip_speed_cache, filename, max_speed * MILES_TO_KM)
 
 
 def _split_trip_segments(filename):
@@ -3913,6 +4026,10 @@ def _split_trip_segments(filename):
     A new segment starts when shifting from P to R, N or D and ends when
     returning to P from any of these gears.
     """
+    cached = _trip_cache_lesen(_trip_segment_cache, filename)
+    if cached is not None:
+        return cached
+
     points = _load_trip(filename)
     segments = []
     current = []
@@ -3959,7 +4076,7 @@ def _split_trip_segments(filename):
         if end_ts is not None and end_ts > 1e12:
             end_ts /= 1000.0
         result.append({"start": start_ts, "end": end_ts, "distance": dist, "wait": wait})
-    return result
+    return _trip_cache_schreiben(_trip_segment_cache, filename, result)
 
 
 def _period_distance(prefix, key):
@@ -4154,6 +4271,61 @@ def _process_dashboard_parking_log(filename, distribute_loss):
     processed = False
     drop_tolerance = 0.01
 
+    def _verlust_erholt(pending, pct, rng_km):
+        if pending.get("pct_loss", 0.0) > 0:
+            baseline = pending.get("pct_baseline")
+            if pct is None or baseline is None or pct < baseline - drop_tolerance:
+                return False
+        if pending.get("range_loss", 0.0) > 0:
+            baseline = pending.get("range_baseline")
+            if rng_km is None or baseline is None or rng_km < baseline - drop_tolerance:
+                return False
+        return True
+
+    def _verlust_bestätigt(pending, jetzt_ts=None):
+        start_ts = pending.get("start_ts")
+        ende_ts = jetzt_ts or pending.get("end_ts")
+        if not isinstance(start_ts, datetime) or not isinstance(ende_ts, datetime):
+            return True
+        return (ende_ts - start_ts).total_seconds() >= PARKING_DROP_CONFIRM_SECONDS
+
+    def _verlust_aktualisieren(pending, pct, rng_km, ts_dt, context):
+        aktualisiert = False
+        pct_baseline = pending.get("pct_baseline")
+        if pct is not None and pct_baseline is not None:
+            pct_loss = pct_baseline - pct
+            if pct_loss > pending.get("pct_loss", 0.0):
+                pending["pct_loss"] = pct_loss
+                pending["pct"] = pct
+                aktualisiert = True
+        range_baseline = pending.get("range_baseline")
+        if rng_km is not None and range_baseline is not None:
+            range_loss = range_baseline - rng_km
+            if range_loss > pending.get("range_loss", 0.0):
+                pending["range_loss"] = range_loss
+                pending["range"] = rng_km
+                aktualisiert = True
+        if aktualisiert and ts_dt is not None:
+            pending["end_ts"] = ts_dt
+            pending["context"] = context or pending.get("context") or "parked"
+
+    def _verlust_bestätigen(session, pending):
+        distribute_loss(
+            pending.get("start_ts"),
+            pending.get("end_ts"),
+            pending.get("pct_loss", 0.0),
+            pending.get("range_loss", 0.0),
+            pending.get("context") or "parked",
+        )
+        if pending.get("pct") is not None:
+            session["pct_min"] = pending["pct"]
+            session["pct"] = pending["pct"]
+        if pending.get("range") is not None:
+            session["range_min"] = pending["range"]
+            session["range"] = pending["range"]
+        if pending.get("end_ts") is not None:
+            session["ts"] = pending["end_ts"]
+
     for ts_dt, payload in _iter_parking_log_lines(filename):
         processed = True
         vehicle_id = str(payload.get("vehicle_id") or "default")
@@ -4166,6 +4338,18 @@ def _process_dashboard_parking_log(filename, distribute_loss):
         pct = _as_float(payload.get("battery_pct"))
         rng_km = _as_float(payload.get("range_km"))
         state_value = payload.get("state") or "parked"
+
+        for anderer_key, anderer_session in list(sessions.items()):
+            if anderer_key == session_key or anderer_key[0] != vehicle_id:
+                continue
+            pending = anderer_session.get("pending_loss")
+            if pending is None:
+                continue
+            if _verlust_erholt(pending, pct, rng_km):
+                anderer_session.pop("pending_loss", None)
+            elif _verlust_bestätigt(pending, ts_dt):
+                _verlust_bestätigen(anderer_session, pending)
+                anderer_session.pop("pending_loss", None)
 
         session = sessions.get(session_key)
         if session is None:
@@ -4181,6 +4365,23 @@ def _process_dashboard_parking_log(filename, distribute_loss):
 
         if state_value:
             session["state"] = state_value
+
+        pending = session.get("pending_loss")
+        if pending is not None:
+            if _verlust_erholt(pending, pct, rng_km):
+                session.pop("pending_loss", None)
+            elif _verlust_bestätigt(pending, ts_dt):
+                _verlust_bestätigen(session, pending)
+                session.pop("pending_loss", None)
+            else:
+                _verlust_aktualisieren(
+                    pending,
+                    pct,
+                    rng_km,
+                    ts_dt,
+                    session.get("state") or "parked",
+                )
+                continue
 
         last_ts = session.get("ts")
         pct_baseline = session.get("pct_min")
@@ -4204,21 +4405,37 @@ def _process_dashboard_parking_log(filename, distribute_loss):
             and ts_dt is not None
             and ts_dt > last_ts
         ):
-            distribute_loss(last_ts, ts_dt, pct_loss, range_loss, session.get("state") or "parked")
+            session["pending_loss"] = {
+                "start_ts": last_ts,
+                "end_ts": ts_dt,
+                "pct_loss": pct_loss,
+                "range_loss": range_loss,
+                "pct_baseline": pct_baseline,
+                "range_baseline": range_baseline,
+                "pct": pct,
+                "range": rng_km,
+                "context": session.get("state") or "parked",
+            }
+            continue
 
         updated_measurement = False
         if pct is not None:
             session["pct"] = pct
-            if pct_loss > 0 or pct_baseline is None:
+            if pct_baseline is None:
                 session["pct_min"] = pct
             updated_measurement = True
         if rng_km is not None:
             session["range"] = rng_km
-            if range_loss > 0 or range_baseline is None:
+            if range_baseline is None:
                 session["range_min"] = rng_km
             updated_measurement = True
         if (updated_measurement or session.get("ts") is None) and ts_dt is not None:
             session["ts"] = ts_dt
+
+    for session in sessions.values():
+        pending = session.get("pending_loss")
+        if pending is not None and _verlust_bestätigt(pending):
+            _verlust_bestätigen(session, pending)
 
     return processed
 
@@ -4808,6 +5025,12 @@ def _load_cached_statistics():
     """Return statistics stored in the aggregation database."""
 
     signature = _statistics_dependency_signature()
+    with _statistics_cache_lock:
+        if (
+            _statistics_cache.get("signature") == signature
+            and _statistics_cache.get("data") is not None
+        ):
+            return dict(_statistics_cache["data"])
 
     thread_alive = _aggregation_thread is not None and _aggregation_thread.is_alive()
     if DISABLE_STATISTICS_AGGREGATION:
@@ -4878,8 +5101,49 @@ def _load_monthly_statistics():
         return {}
 
 
+def _trip_zusammenfassungen_aus_statistik(stats):
+    """Leite Wochen- und Monatssummen aus aggregierten Tagesdaten ab."""
+
+    weekly = {}
+    monthly = {}
+    if not isinstance(stats, dict):
+        return weekly, monthly
+    for day_text, payload in stats.items():
+        if not isinstance(day_text, str) or len(day_text) != 10:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        km = _as_float(payload.get("km"))
+        if km is None or km <= 0:
+            continue
+        try:
+            day = datetime.strptime(day_text, "%Y-%m-%d").date()
+        except Exception:
+            continue
+        iso_year, iso_week, _ = day.isocalendar()
+        week_key = f"{iso_year}-W{iso_week:02d}"
+        weekly[week_key] = round(weekly.get(week_key, 0.0) + km, 2)
+        month_key = day.strftime("%Y-%m")
+        monthly[month_key] = round(monthly.get(month_key, 0.0) + km, 2)
+    return weekly, monthly
+
+
 def compute_trip_summaries():
     """Return weekly and monthly distance summaries."""
+    stats = _load_cached_statistics()
+    weekly, monthly = _trip_zusammenfassungen_aus_statistik(stats)
+    if weekly or monthly:
+        return weekly, monthly
+
+    signature = _trip_dateien_signatur()
+    with _trip_summary_cache_lock:
+        if (
+            _trip_summary_cache.get("signature") == signature
+            and _trip_summary_cache.get("data") is not None
+        ):
+            cached_weekly, cached_monthly = _trip_summary_cache["data"]
+            return dict(cached_weekly), dict(cached_monthly)
+
     weekly = {}
     monthly = {}
     for path in _get_trip_files():
@@ -4895,6 +5159,9 @@ def compute_trip_summaries():
         weekly[week_key] = round(weekly.get(week_key, 0.0) + km, 2)
         month_key = day.strftime("%Y-%m")
         monthly[month_key] = round(monthly.get(month_key, 0.0) + km, 2)
+    with _trip_summary_cache_lock:
+        _trip_summary_cache["signature"] = signature
+        _trip_summary_cache["data"] = (dict(weekly), dict(monthly))
     return weekly, monthly
 
 
@@ -6225,6 +6492,21 @@ def _fetch_data_once(vehicle_id="default"):
     return data
 
 
+def _vorklimatisierungsanzeige_aktualisieren(vehicle_id=None):
+    """Bewerte die Vorklimatisierungsanzeige in aktuellen Live-Daten neu."""
+
+    vehicle_ids = [vehicle_id] if vehicle_id is not None else list(latest_data.keys())
+    for cache_id in vehicle_ids:
+        data = latest_data.get(cache_id)
+        if not isinstance(data, dict):
+            continue
+        data["preconditioning_display_allowed"] = (
+            _vorklimatisierung_im_stand_erlaubt(data)
+        )
+        for q in subscribers.get(cache_id, []):
+            q.put(data)
+
+
 def _sleep_idle(seconds):
     """Sleep up to ``seconds`` but return early when occupant presence is detected."""
     remaining = seconds
@@ -6272,7 +6554,7 @@ def _fetch_loop(vehicle_id, interval=3):
             c_state = data.get("charge_state", {})
             öffnung_offen = _hat_offene_fahrzeugöffnung(v_state)
             unlocked = v_state.get("locked") is False
-            present = present or v_state.get("is_user_present")
+            present = present or _anwesenheit_erkannt(v_state)
             gear_active = _normalize_shift_state(d_state.get("shift_state")) in {"R", "N", "D"}
             speed = d_state.get("speed")
             power = d_state.get("power")
@@ -6751,6 +7033,7 @@ def api_occupant():
             occupant_present = val.lower() in ("1", "true", "yes")
         else:
             occupant_present = bool(val)
+        _vorklimatisierungsanzeige_aktualisieren()
     return jsonify({"present": occupant_present})
 
 
@@ -7909,19 +8192,25 @@ def _ladeberichte_laden(limit=None):
     """Erzeuge einen einfachen Ladebericht aus energy.log."""
 
     berichte = []
+    gesehene_ladevorgänge = set()
     for eintrag in _json_log_einträge("energy.log"):
         daten = eintrag["data"]
         energie = _as_float(daten.get("added_energy"))
         if energie is None or energie <= 0:
             continue
         timestamp = eintrag["timestamp"]
+        vehicle_id = daten.get("vehicle_id") or ""
+        schlüssel = (round(float(timestamp), 3), vehicle_id, round(float(energie), 3))
+        if schlüssel in gesehene_ladevorgänge:
+            continue
+        gesehene_ladevorgänge.add(schlüssel)
         monat = datetime.fromtimestamp(timestamp, LOCAL_TZ).strftime("%Y-%m")
         berichte.append(
             {
                 "timestamp": timestamp,
                 "zeit": _zeit_text(timestamp),
                 "monat": monat,
-                "vehicle_id": daten.get("vehicle_id") or "",
+                "vehicle_id": vehicle_id,
                 "energy_kwh": round(energie, 3),
             }
         )
@@ -7952,7 +8241,19 @@ def _fahrtberichte_laden(limit=None):
     """Erzeuge Fahrtberichte aus den gespeicherten Trip-Dateien."""
 
     rows = []
-    for pfad in _get_trip_files():
+    pfade = _get_trip_files()
+    if limit is not None:
+        pfade = sorted(pfade, key=_trip_datei_sortierwert, reverse=True)
+    grenz_tag = None
+    for pfad in pfade:
+        tag = _trip_date_from_filename(pfad)
+        if (
+            limit is not None
+            and len(rows) >= limit
+            and grenz_tag is not None
+            and tag != grenz_tag
+        ):
+            break
         rel = os.path.relpath(pfad, DATA_DIR)
         for index, segment in enumerate(_split_trip_segments(pfad), start=1):
             start = segment.get("start")
@@ -7972,6 +8273,8 @@ def _fahrtberichte_laden(limit=None):
                     "wait_seconds": round(float(segment.get("wait") or 0.0), 1),
                 }
             )
+        if limit is not None and len(rows) >= limit and grenz_tag is None:
+            grenz_tag = tag
     rows.sort(key=lambda item: item["timestamp"], reverse=True)
     return rows if limit is None else rows[:limit]
 
@@ -8101,19 +8404,36 @@ def _service_health_payload():
 
     cfg = load_config()
     now = time.time()
-    latest_rows = []
+    latest_by_vehicle = {}
     for vehicle_id, data in latest_data.items():
         ts_ms = data.get("state_checked_at") if isinstance(data, dict) else None
         ts = float(ts_ms) / 1000.0 if ts_ms else None
-        latest_rows.append(
-            {
-                "vehicle_id": vehicle_id,
-                "state": data.get("state") if isinstance(data, dict) else "",
-                "live": bool(data.get("_live")) if isinstance(data, dict) else False,
-                "state_age": _alter_text(ts) if ts else "unbekannt",
-                "state_age_seconds": None if ts is None else round(now - ts, 1),
-            }
-        )
+        kanonische_id = vehicle_id
+        if isinstance(data, dict):
+            kanonische_id = (
+                data.get("id_s")
+                or data.get("vehicle_id")
+                or vehicle_id
+            )
+        kanonische_id = str(kanonische_id or vehicle_id)
+        row = {
+            "vehicle_id": kanonische_id,
+            "state": data.get("state") if isinstance(data, dict) else "",
+            "live": bool(data.get("_live")) if isinstance(data, dict) else False,
+            "state_age": _alter_text(ts) if ts else "unbekannt",
+            "state_age_seconds": None if ts is None else round(now - ts, 1),
+            "_state_ts": ts or 0,
+        }
+        bisher = latest_by_vehicle.get(kanonische_id)
+        if bisher is None or row["_state_ts"] >= bisher.get("_state_ts", 0):
+            latest_by_vehicle[kanonische_id] = row
+    latest_rows = sorted(
+        latest_by_vehicle.values(),
+        key=lambda item: item.get("_state_ts", 0),
+        reverse=True,
+    )
+    for row in latest_rows:
+        row.pop("_state_ts", None)
     with api_errors_lock:
         fehler = list(api_errors)
     fehler_24h = [
