@@ -20,6 +20,7 @@ def test_ladeplanung_und_reifendruckdetails_sind_konfigurierbar():
 
     assert "ladeplanung-info" in ids
     assert "preconditioning-info" in ids
+    assert "technical-info" in ids
     assert "reifendruck-details" in ids
 
 
@@ -32,4 +33,5 @@ def test_hauptseite_enthält_zusatzanzeigen(monkeypatch):
     assert response.status_code == 200
     assert 'id="ladeplanung-info"' in html
     assert 'id="preconditioning-info"' in html
+    assert 'id="technical-info"' in html
     assert 'id="reifendruck-details"' in html

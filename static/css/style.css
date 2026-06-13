@@ -642,6 +642,7 @@ select {
 #v2l-infos,
 #charging-info,
 #ladeplanung-info,
+#technical-info,
 #preconditioning-info,
 #reifendruck-details,
 /* Navigation bar below the status bar */
@@ -667,6 +668,12 @@ select {
   display: none;
   background: rgba(0, 150, 136, 0.2);
   border: 1px solid #009688;
+}
+
+#technical-info {
+  display: none;
+  background: rgba(96, 125, 139, 0.2);
+  border: 1px solid #607d8b;
 }
 
 #preconditioning-info {
@@ -741,6 +748,7 @@ select {
 #v2l-infos table,
 #charging-info table,
 #ladeplanung-info table,
+#technical-info table,
 #preconditioning-info table,
 #reifendruck-details table,
 #nav-bar table {
@@ -755,6 +763,8 @@ select {
 #charging-info td,
 #ladeplanung-info th,
 #ladeplanung-info td,
+#technical-info th,
+#technical-info td,
 #preconditioning-info th,
 #preconditioning-info td,
 #reifendruck-details th,
@@ -770,6 +780,7 @@ select {
 #v2l-infos th,
 #charging-info th,
 #ladeplanung-info th,
+#technical-info th,
 #preconditioning-info th,
 #reifendruck-details th,
 #nav-bar th {
@@ -780,6 +791,7 @@ select {
 #v2l-infos span.icon,
 #charging-info span.icon,
 #ladeplanung-info span.icon,
+#technical-info span.icon,
 #preconditioning-info span.icon,
 #reifendruck-details span.icon,
 #nav-bar span.icon {
@@ -787,6 +799,7 @@ select {
 }
 
 #ladeplanung-info h3,
+#technical-info h3,
 #preconditioning-info h3,
 #reifendruck-details h3 {
   margin: 0 0 6px;
@@ -1036,6 +1049,136 @@ select {
   margin-top: 2px;
 }
 
+.vehicle-symbols {
+  display: inline-grid;
+  grid-template-columns: 30px;
+  grid-auto-rows: 30px;
+  gap: 3px;
+  align-self: flex-start;
+  align-items: center;
+  justify-items: center;
+  margin: 0 4px;
+}
+
+.vehicle-symbol {
+  box-sizing: border-box;
+  position: relative;
+  width: 30px;
+  height: 30px;
+  color: #777;
+  opacity: 0.45;
+}
+
+.vehicle-symbol.is-active {
+  opacity: 1;
+}
+
+.vehicle-symbol-speed-limit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid #7d2323;
+  border-radius: 50%;
+  background: #f8f8f8;
+  color: #222;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.vehicle-symbol-speed-limit.is-active {
+  border-color: #d71920;
+  box-shadow: 0 0 10px rgba(215, 25, 32, 0.7);
+}
+
+.vehicle-symbol-speed-limit span {
+  display: block;
+  max-width: 22px;
+  overflow: hidden;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.vehicle-symbol-display::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  top: 7px;
+  height: 15px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.vehicle-symbol-display::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 24px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.vehicle-symbol-display.is-active {
+  color: #4caf50;
+  filter: drop-shadow(0 0 5px rgba(76, 175, 80, 0.75));
+}
+
+.vehicle-symbol-display.is-standby {
+  color: #ffb300;
+}
+
+.vehicle-symbol-update {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.vehicle-symbol-update::before {
+  content: '↻';
+  font-size: 25px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.vehicle-symbol-update.is-active {
+  color: #9c27b0;
+  filter: drop-shadow(0 0 7px rgba(156, 39, 176, 0.8));
+}
+
+.vehicle-symbol-update.is-progress::before {
+  animation: update-drehen 1.3s linear infinite;
+}
+
+#software-update-compact-progress {
+  position: absolute;
+  right: -4px;
+  bottom: -1px;
+  min-width: 18px;
+  padding: 0 2px;
+  border-radius: 7px;
+  background: #222;
+  color: #fff;
+  border: 1px solid currentColor;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+}
+
+@keyframes update-drehen {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Simple speedometer next to the gear shift */
 #speedometer {
   display: inline-block;
@@ -1253,6 +1396,7 @@ select {
   #v2l-infos th,
   #charging-info th,
   #ladeplanung-info th,
+  #technical-info th,
   #preconditioning-info th,
   #media-player th,
   #nav-bar th {
@@ -1418,6 +1562,13 @@ select {
 
 #openings-indicator .part-closed {
   fill: #555;
+}
+
+#openings-indicator .part-unknown {
+  fill: #444;
+  stroke: #b0b0b0;
+  stroke-dasharray: 3 2;
+  opacity: 0.75;
 }
 
 #openings-indicator .brake-lights {

@@ -1201,6 +1201,7 @@ CONFIG_ITEMS = [
     {"id": "tpms-indicator", "desc": "Reifendruck"},
     {"id": "openings-indicator", "desc": "Türen/Fenster"},
     {"id": "blue-openings", "desc": "Türen/Fenster blau einfärben", "default": False},
+    {"id": "vehicle-symbols", "desc": "Fahrzeugsymbole"},
     {"id": "software-update", "desc": "Software-Update-Hinweis"},
     {"id": "loading-msg", "desc": "Ladehinweis"},
     {"id": "offline-msg", "desc": "Offline-Meldung"},
@@ -1212,6 +1213,7 @@ CONFIG_ITEMS = [
     {"id": "v2l-infos", "desc": "V2L-Hinweis"},
     {"id": "charging-info", "desc": "Ladeinformationen"},
     {"id": "ladeplanung-info", "desc": "Ladeplanung"},
+    {"id": "technical-info", "desc": "Technische Details"},
     {"id": "reifendruck-details", "desc": "Reifendruckdetails"},
     {"id": "nav-bar", "desc": "Navigationsleiste"},
     {"id": "media-player", "desc": "Medienwiedergabe"},
@@ -1235,6 +1237,14 @@ OWNER_API_TOPLEVEL_FELDER = {
     "release_notes_supported",
     "supercharger_payment_needed",
     "supercharging_enabled",
+}
+FLEET_TELEMETRIE_SCHIEBEDACH_STATUS_FELDER = {
+    "SunroofOpenPercent",
+    "SunroofPercentOpen",
+    "SunroofState",
+    "SunRoofOpenPercent",
+    "SunRoofPercentOpen",
+    "SunRoofState",
 }
 
 
@@ -3440,6 +3450,19 @@ def _fleet_telemetrie_entferne_fremddaten(data):
         return data
     for field in OWNER_API_TOPLEVEL_FELDER:
         data.pop(field, None)
+    vehicle_state = data.get("vehicle_state")
+    if isinstance(vehicle_state, dict):
+        rohwerte = data.get("fleet_telemetry_raw")
+        if not isinstance(rohwerte, dict):
+            rohwerte = {}
+        hat_schiebedach_status = any(
+            field in rohwerte
+            for field in FLEET_TELEMETRIE_SCHIEBEDACH_STATUS_FELDER
+        )
+        if not hat_schiebedach_status:
+            vehicle_state.pop("sun_roof_state", None)
+            vehicle_state.pop("sun_roof_percent_open", None)
+            vehicle_state["sun_roof_status_available"] = False
     return data
 
 
@@ -4208,6 +4231,29 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
             "SunroofInstalledState",
         )
         config["timestamp"] = timestamp_ms
+        return True
+    if field in {"SunroofState", "SunRoofState"}:
+        state = _fleet_telemetrie_enum_suffix(value, "SunroofState")
+        if state:
+            vehicle_state["sun_roof_state"] = state.lower()
+        else:
+            vehicle_state.pop("sun_roof_state", None)
+        vehicle_state["sun_roof_status_available"] = True
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field in {
+        "SunroofOpenPercent",
+        "SunroofPercentOpen",
+        "SunRoofOpenPercent",
+        "SunRoofPercentOpen",
+    }:
+        value_float = _as_float(value)
+        if value_float is None:
+            vehicle_state.pop("sun_roof_percent_open", None)
+        else:
+            vehicle_state["sun_roof_percent_open"] = value_float
+        vehicle_state["sun_roof_status_available"] = True
+        vehicle_state["timestamp"] = timestamp_ms
         return True
 
     if field == "Setting24HourTime":

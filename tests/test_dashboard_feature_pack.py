@@ -59,6 +59,30 @@ def test_stream_fehlerpfad_setzt_karte_nicht_auf_default():
     assert "map.setView(DEFAULT_POS" not in fehlerpfad
 
 
+def test_fahrzeugsymbole_sind_in_ui_eingebunden():
+    html = pathlib.Path("templates/index.html").read_text(encoding="utf-8")
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+
+    assert 'id="vehicle-symbols"' in html
+    assert 'id="speed-limit-symbol"' in html
+    assert 'id="center-display-symbol"' in html
+    assert 'id="software-update-symbol"' in html
+    assert "updateVehicleSymbols(vehicle, data.gui_settings || {})" in js
+    assert "sun_roof_status_available" in js
+    assert "part-unknown" in js
+
+
+def test_technische_packdetails_sind_in_ui_eingebunden():
+    html = pathlib.Path("templates/index.html").read_text(encoding="utf-8")
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+
+    assert 'id="technical-info"' in html
+    assert "updateTechnischeDetails(charge)" in js
+    assert "charge.pack_voltage" in js
+    assert "charge.pack_current" in js
+    assert "charge.pack_power" in js
+
+
 def test_history_nutzt_trotz_privatmodus_reale_punkte(monkeypatch):
     trip_path = str(pathlib.Path(app_module.DATA_DIR) / "fahrzeug" / "trips" / "trip_20260521.csv")
     monkeypatch.setattr(

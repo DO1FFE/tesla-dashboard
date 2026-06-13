@@ -130,6 +130,15 @@
             <div data-gear="D">D</div>
         </div>
         <div id="battery-indicator"></div>
+        <div id="vehicle-symbols" class="vehicle-symbols" aria-label="Fahrzeugsymbole">
+            <div id="speed-limit-symbol" class="vehicle-symbol vehicle-symbol-speed-limit" role="img" aria-label="Tempolimit-Modus aus" title="Tempolimit-Modus aus">
+                <span id="speed-limit-value">--</span>
+            </div>
+            <div id="center-display-symbol" class="vehicle-symbol vehicle-symbol-display" role="img" aria-label="Center Display unbekannt" title="Center Display unbekannt"></div>
+            <div id="software-update-symbol" class="vehicle-symbol vehicle-symbol-update" role="img" aria-label="Kein Software-Update" title="Kein Software-Update">
+                <span id="software-update-compact-progress"></span>
+            </div>
+        </div>
             <div id="speedometer">
                 <div id="turn-indicator" class="turn-indicator" role="img" aria-label="Blinker aus">
                     <span id="turn-left" class="turn-arrow" aria-hidden="true">◀</span>
@@ -298,6 +307,7 @@
     <div id="v2l-infos"></div>
     <div id="charging-info"></div>
     <div id="ladeplanung-info"></div>
+    <div id="technical-info"></div>
     <div id="reifendruck-details"></div>
     <div id="nav-bar"></div>
     <div id="media-player"></div>

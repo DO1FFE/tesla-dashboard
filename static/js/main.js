@@ -334,6 +334,7 @@ var TOGGLE_DEFAULTS = {
     'menu-statistik': true,
     'menu-history': true,
     'nav-bar': true,
+    'technical-info': true,
     'media-player': true,
     'ptt-controls': true,
     'software-update': true,
@@ -474,6 +475,7 @@ function showConfigured() {
         if (
             id === 'ladeplanung-info' ||
             id === 'preconditioning-info' ||
+            id === 'technical-info' ||
             id === 'reifendruck-details'
         ) return;
         $('#' + id).toggle(configEnabled(id));
@@ -497,6 +499,9 @@ function showConfigured() {
     }
     if (!configEnabled('preconditioning-info')) {
         $('#preconditioning-info').empty().hide();
+    }
+    if (!configEnabled('technical-info')) {
+        $('#technical-info').empty().hide();
     }
     if (!configEnabled('reifendruck-details')) {
         $('#reifendruck-details').empty().hide();
@@ -795,6 +800,7 @@ function handleData(data) {
     updateUserPresence(vehicle.is_user_present);
     updateTurnSignalIndicator(vehicle.lights_turn_signal, vehicle.lights_hazards_active);
     updateHighBeamIndicator(vehicle.lights_high_beams);
+    updateVehicleSymbols(vehicle, data.gui_settings || {});
     updateGearShift(drive.shift_state);
     updateParkTime(data.park_start);
     updateNavBar(drive);
@@ -812,6 +818,7 @@ function handleData(data) {
     updateV2LInfos(charge, drive);
     updateChargingInfo(charge, data);
     updateLadeplanungInfo(charge, drive, data);
+    updateTechnischeDetails(charge);
     updateThermometers(climate.inside_temp, climate.outside_temp, charge.battery_temp);
     updateClimateStatus(climate.is_climate_on);
     updateClimateMode(climate.climate_keeper_mode);
@@ -1679,11 +1686,19 @@ function updateOpenings(vehicle, charge) {
 
     var srPct = vehicle.sun_roof_percent_open;
     var srState = vehicle.sun_roof_state;
-    if (srPct != null || srState) {
+    var sunroofStatusKnown = vehicle.sun_roof_status_available !== false &&
+        (srPct != null || srState);
+    if (sunroofStatusKnown) {
         var pct = Number(srPct);
-        var open = srState && srState.toLowerCase() !== 'closed' && pct > 0;
+        var state = srState == null ? '' : String(srState).toLowerCase();
+        var open = state && state !== 'closed' && (isNaN(pct) || pct > 0);
         $('#sunroof').attr('class', open ? 'part-open' : 'part-closed');
         $('#sunroof-percent').text(open && !isNaN(pct) ? Math.round(pct) + '%' : '');
+        $('#sunroof title').text(open ? 'Schiebedach offen' : 'Schiebedach geschlossen');
+    } else {
+        $('#sunroof').attr('class', 'part-unknown');
+        $('#sunroof-percent').text('?');
+        $('#sunroof title').text('Schiebedachstatus über Fleet Telemetry nicht verfügbar');
     }
 
     var charging = charge && charge.charging_state === 'Charging';
@@ -1818,6 +1833,7 @@ var lastChargeSessionStartMs = null;
 var lastChargingState = null;
 var lastChargingInfoHtml = null;
 var letzteBatterieTemperatur = null;
+var letzteTechnischeDetailsHtml = null;
 
 function parseNumber(value) {
     if (value == null || value === '') {
@@ -2544,6 +2560,71 @@ function updateChargingInfo(charge, wurzelDaten) {
     lastChargingState = state;
 }
 
+function formatiereTechnischenWert(wert, nachkommastellen, einheit) {
+    var zahl = parseNumber(wert);
+    if (zahl == null) {
+        return null;
+    }
+    return zahl.toFixed(nachkommastellen) + ' ' + einheit;
+}
+
+function updateTechnischeDetails(charge) {
+    var $info = $('#technical-info');
+    if (!$info.length) {
+        return;
+    }
+    if (!configEnabled('technical-info') || !charge) {
+        $info.empty().hide();
+        letzteTechnischeDetailsHtml = '';
+        return;
+    }
+
+    var packSpannung = parseNumber(charge.pack_voltage);
+    var packStrom = parseNumber(charge.pack_current);
+    var packLeistung = parseNumber(charge.pack_power);
+    if (packLeistung == null && packSpannung != null && packStrom != null) {
+        packLeistung = packSpannung * packStrom / 1000;
+    }
+
+    var rows = [];
+    var spannungText = formatiereTechnischenWert(packSpannung, 1, 'V');
+    var stromText = formatiereTechnischenWert(packStrom, 2, 'A');
+    var leistungText = formatiereTechnischenWert(packLeistung, 2, 'kW');
+    if (spannungText) {
+        rows.push('<tr><th>Packspannung:</th><td>' + escapeHtml(spannungText) + '</td></tr>');
+    }
+    if (stromText) {
+        rows.push('<tr><th>Packstrom:</th><td>' + escapeHtml(stromText) + '</td></tr>');
+    }
+    if (leistungText) {
+        rows.push('<tr><th>Packleistung:</th><td>' + escapeHtml(leistungText) + '</td></tr>');
+    }
+    if (packLeistung != null) {
+        var richtung = 'neutral';
+        if (packLeistung > 0.05) {
+            richtung = 'Batterie nimmt Energie auf';
+        } else if (packLeistung < -0.05) {
+            richtung = 'Batterie gibt Energie ab';
+        }
+        rows.push('<tr><th>Richtung:</th><td>' + escapeHtml(richtung) + '</td></tr>');
+    }
+
+    if (!rows.length) {
+        $info.empty().hide();
+        letzteTechnischeDetailsHtml = '';
+        return;
+    }
+
+    var html = '<h3>Technische Details</h3>' +
+        '<table>' + rows.join('') + '</table>';
+    if (html === letzteTechnischeDetailsHtml) {
+        $info.show();
+        return;
+    }
+    $info.html(html).show();
+    letzteTechnischeDetailsHtml = html;
+}
+
 function updateNavBar(drive) {
     var $nav = $('#nav-bar');
     if (!drive || !('active_route_destination' in drive) || !drive.active_route_destination) {
@@ -2878,6 +2959,111 @@ function softwareFortschritt(label, prozent) {
            '<div class="software-progress" aria-label="' + escapeHtml(label) + ' ' + prozent + '%">' +
            '<div class="software-progress-bar" style="width:' + prozent + '%"></div>' +
            '</div></div>';
+}
+
+function speedLimitMphZuAnzeige(limitMph, gui) {
+    var limit = parseNumber(limitMph);
+    if (limit == null) {
+        return null;
+    }
+    var einheiten = gui && gui.gui_distance_units;
+    var nutztKm = !einheiten || String(einheiten).toLowerCase().indexOf('km') !== -1;
+    return {
+        wert: Math.round(nutztKm ? limit * MILES_TO_KM : limit),
+        einheit: nutztKm ? 'km/h' : 'mph'
+    };
+}
+
+function updateSpeedLimitSymbol(speedLimitMode, gui) {
+    var $symbol = $('#speed-limit-symbol');
+    var $value = $('#speed-limit-value');
+    if (!$symbol.length) {
+        return;
+    }
+    speedLimitMode = speedLimitMode || {};
+    var aktiv = istAktiv(speedLimitMode.active);
+    var limit = speedLimitMphZuAnzeige(speedLimitMode.current_limit_mph, gui);
+    var text = aktiv ? 'Tempolimit-Modus an' : 'Tempolimit-Modus aus';
+    if (aktiv && limit != null) {
+        text += ': ' + limit.wert + ' ' + limit.einheit;
+    }
+    $symbol
+        .toggleClass('is-active', aktiv)
+        .attr('title', text)
+        .attr('aria-label', text);
+    $value.text(aktiv && limit != null ? String(limit.wert) : '--');
+}
+
+function updateCenterDisplaySymbol(status) {
+    var $symbol = $('#center-display-symbol');
+    if (!$symbol.length) {
+        return;
+    }
+    var text = typeof status === 'string' ? status.trim() : '';
+    var norm = text.toLowerCase();
+    var aktiv = !!text && ['off', 'false', 'none', 'unknown', 'invalid'].indexOf(norm) === -1;
+    var standby = norm.indexOf('standby') !== -1 || norm.indexOf('sleep') !== -1;
+    var beschreibung = text ? 'Center Display: ' + text : 'Center Display unbekannt';
+    $symbol
+        .toggleClass('is-active', aktiv && !standby)
+        .toggleClass('is-standby', standby)
+        .attr('title', beschreibung)
+        .attr('aria-label', beschreibung);
+}
+
+function softwareUpdateAktiv(info) {
+    if (!info) {
+        return false;
+    }
+    var version = info && typeof info.version === 'string' ? info.version.trim() : '';
+    var available = version ? parseVersion(version) : '';
+    var status = info && info.status ? String(info.status).trim() : '';
+    var downloadProzent = softwareProzent(info && info.download_perc);
+    var installationProzent = softwareProzent(info && info.install_perc);
+    var fortschrittAktiv = version && (
+        (downloadProzent != null && downloadProzent > 0 && downloadProzent < 100) ||
+        (installationProzent != null && installationProzent > 0 && installationProzent < 100)
+    );
+    var neuereVersion = version && installedVersion && isNewerVersion(installedVersion, available);
+    return !!(
+        softwareStatusAktiv(status) ||
+        fortschrittAktiv ||
+        (version && (!installedVersion || neuereVersion))
+    );
+}
+
+function updateSoftwareUpdateSymbol(info) {
+    var $symbol = $('#software-update-symbol');
+    var $progress = $('#software-update-compact-progress');
+    if (!$symbol.length) {
+        return;
+    }
+    var aktiv = softwareUpdateAktiv(info);
+    var downloadProzent = softwareProzent(info && info.download_perc);
+    var installationProzent = softwareProzent(info && info.install_perc);
+    var prozent = installationProzent != null ? installationProzent : downloadProzent;
+    var statusText = softwareStatusText(info && info.status);
+    var version = info && typeof info.version === 'string' ? parseVersion(info.version) : '';
+    var titel = aktiv ? (statusText || 'Software-Update verfügbar') : 'Kein Software-Update';
+    if (version) {
+        titel += ': Version ' + version;
+    }
+    if (prozent != null) {
+        titel += ' (' + prozent + '%)';
+    }
+    $symbol
+        .toggleClass('is-active', aktiv)
+        .toggleClass('is-progress', aktiv && prozent != null && prozent > 0 && prozent < 100)
+        .attr('title', titel)
+        .attr('aria-label', titel);
+    $progress.text(aktiv && prozent != null ? prozent + '%' : '');
+}
+
+function updateVehicleSymbols(vehicle, gui) {
+    vehicle = vehicle || {};
+    updateSpeedLimitSymbol(vehicle.speed_limit_mode, gui || {});
+    updateCenterDisplaySymbol(vehicle.center_display_state);
+    updateSoftwareUpdateSymbol(vehicle.software_update);
 }
 
 function updateSoftwareUpdate(info) {

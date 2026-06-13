@@ -209,10 +209,14 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
         "DriverSeatOccupied": b"true",
         "BrakePedal": b"true",
         "BrakePedalPos": b"3.4",
+        "CenterDisplay": b'"DisplayStateOn"',
+        "SpeedLimitMode": b"true",
+        "CurrentLimitMph": b"56",
         "LightsHazardsActive": b"false",
         "LightsTurnSignal": b'"TurnSignalStateLeft"',
         "LightsHighBeams": b"true",
         "SoftwareUpdateVersion": b'"2026.20.1"',
+        "SoftwareUpdateDownloadPercentComplete": b"35",
         "SoftwareUpdateExpectedDurationMinutes": b"45",
         "TpmsPressureFl": b"2.9",
         "TpmsSoftWarnings": b'"TireLocationFrontLeft"',
@@ -253,10 +257,14 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
     assert daten["vehicle_state"]["is_user_present"] is True
     assert daten["vehicle_state"]["brake_pedal"] is True
     assert daten["vehicle_state"]["brake_pedal_pos"] == 3.4
+    assert daten["vehicle_state"]["center_display_state"] == "On"
+    assert daten["vehicle_state"]["speed_limit_mode"]["active"] is True
+    assert daten["vehicle_state"]["speed_limit_mode"]["current_limit_mph"] == 56
     assert daten["vehicle_state"]["lights_hazards_active"] is False
     assert daten["vehicle_state"]["lights_turn_signal"] == "Left"
     assert daten["vehicle_state"]["lights_high_beams"] is True
     assert daten["vehicle_state"]["software_update"]["version"] == "2026.20.1"
+    assert daten["vehicle_state"]["software_update"]["download_perc"] == 35
     assert daten["vehicle_state"]["software_update"]["expected_duration_sec"] == 2700
     assert daten["vehicle_state"]["tpms_pressure_fl"] == 2.9
     assert daten["vehicle_state"]["tpms_soft_warning_fl"] is True
@@ -371,6 +379,49 @@ def test_telemetrie_cache_entfernt_owner_api_supercharger(monkeypatch):
 
     assert "nearby_superchargers" not in daten
     assert "access_type" not in daten
+
+
+def test_telemetrie_cache_entfernt_owner_api_schiebedachstatus(monkeypatch):
+    cache = {
+        "state": "online",
+        "fleet_telemetry_updated_at": int(app.time.time() * 1000),
+        "fleet_telemetry_raw": {
+            "SunroofInstalled": "SunroofInstalledStateGen2Installed",
+        },
+        "vehicle_state": {
+            "sun_roof_state": "open",
+            "sun_roof_percent_open": 20,
+        },
+    }
+
+    monkeypatch.setattr(app, "_fleet_telemetrie_aktiv", lambda: True)
+
+    daten = app._fleet_telemetrie_cache_fuer_dashboard("veh-1", cache)
+
+    vehicle_state = daten["vehicle_state"]
+    assert "sun_roof_state" not in vehicle_state
+    assert "sun_roof_percent_open" not in vehicle_state
+    assert vehicle_state["sun_roof_status_available"] is False
+
+
+def test_fleet_telemetrie_mqtt_mappt_schiebedachstatus_falls_verfuegbar(monkeypatch):
+    monkeypatch.setattr(app, "_fleet_telemetrie_fahrzeuge", lambda: [{
+        "vin": "TESTVIN",
+        "id_s": "veh-1",
+    }])
+    monkeypatch.setattr(app, "_load_cached", lambda vehicle_id: {})
+    monkeypatch.setattr(app, "_save_cached", lambda vehicle_id, data: None)
+    monkeypatch.setattr(app, "latest_data", {})
+
+    assert app._fleet_telemetrie_mqtt_message(
+        "tesla/TESTVIN/v/SunroofPercentOpen",
+        b"30",
+        {"topic_base": "tesla"},
+    )
+
+    vehicle_state = app.latest_data["veh-1"]["vehicle_state"]
+    assert vehicle_state["sun_roof_percent_open"] == 30
+    assert vehicle_state["sun_roof_status_available"] is True
 
 
 def test_api_config_deaktiviert_owner_api_supercharger_im_telemetrie_only(monkeypatch):
