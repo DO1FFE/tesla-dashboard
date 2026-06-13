@@ -3303,7 +3303,14 @@ def _fleet_telemetrie_wahr(value):
     if isinstance(value, (int, float)):
         return abs(value) > 0.001
     if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "on", "yes"}
+        norm = value.strip().lower()
+        if not norm:
+            return False
+        if norm in {"0", "false", "off", "no", "none", "null", "unknown"}:
+            return False
+        if norm in {"1", "true", "on", "yes", "active", "enabled"}:
+            return True
+        return norm.endswith("on") or norm.endswith("active") or norm.endswith("enabled")
     return bool(value)
 
 
@@ -3479,8 +3486,42 @@ def _fleet_telemetrie_setze_software_update(vehicle_state):
     info = vehicle_state.get("software_update")
     if not isinstance(info, dict):
         info = {}
-        vehicle_state["software_update"] = info
+    vehicle_state["software_update"] = info
     return info
+
+
+def _fleet_telemetrie_rohdaten_anreichern(data):
+    """Ergänze Dashboard-Felder aus bereits empfangenen Fleet-Rohdaten."""
+
+    if not isinstance(data, dict):
+        return
+    raw = data.get("fleet_telemetry_raw")
+    if not isinstance(raw, dict):
+        return
+    vehicle_state = data.setdefault("vehicle_state", {})
+    climate = data.setdefault("climate_state", {})
+    tpms_pressure_map = {
+        "TpmsPressureFl": "tpms_pressure_fl",
+        "TpmsPressureFr": "tpms_pressure_fr",
+        "TpmsPressureRl": "tpms_pressure_rl",
+        "TpmsPressureRr": "tpms_pressure_rr",
+    }
+    for source, target in tpms_pressure_map.items():
+        if source in raw and vehicle_state.get(target) is None:
+            vehicle_state[target] = _fleet_telemetrie_wert(raw.get(source))
+    tpms_time_map = {
+        "TpmsLastSeenPressureTimeFl": "tpms_last_seen_pressure_time_fl",
+        "TpmsLastSeenPressureTimeFr": "tpms_last_seen_pressure_time_fr",
+        "TpmsLastSeenPressureTimeRl": "tpms_last_seen_pressure_time_rl",
+        "TpmsLastSeenPressureTimeRr": "tpms_last_seen_pressure_time_rr",
+    }
+    for source, target in tpms_time_map.items():
+        if source in raw and vehicle_state.get(target) is None:
+            vehicle_state[target] = _fleet_telemetrie_zeitstempel_ms(raw.get(source))
+    if "RearDefrostEnabled" in raw and climate.get("side_mirror_heaters") is None:
+        climate["side_mirror_heaters"] = _fleet_telemetrie_wahr(
+            raw.get("RearDefrostEnabled")
+        )
 
 
 def _fleet_telemetrie_tpms_warnungen(value):
@@ -3623,14 +3664,16 @@ def _fleet_telemetrie_basisdaten(data, vin, cache_id, timestamp_ms):
     _fleet_telemetrie_entferne_fremddaten(data)
     data.setdefault("state", "online")
     data["state"] = "online"
-    data.setdefault("id_s", cache_id if cache_id != "default" else _default_vehicle_id)
     if vin:
         data.setdefault("vin", vin)
+    canonical_id = cache_id if cache_id != "default" else _default_vehicle_id
     for vehicle in _fleet_telemetrie_fahrzeuge():
         if str(vehicle.get("vin") or "") == str(vin):
-            data.setdefault("id_s", str(vehicle.get("id_s") or vehicle.get("id") or data.get("id_s")))
+            canonical_id = vehicle.get("id_s") or vehicle.get("id") or canonical_id
             data.setdefault("display_name", vehicle.get("display_name"))
             break
+    if canonical_id is not None:
+        data["id_s"] = str(canonical_id)
     data.setdefault("drive_state", {})
     data.setdefault("charge_state", {})
     data.setdefault("vehicle_state", {})
@@ -3785,7 +3828,6 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
             charge["dc_charge_energy_added"] = value
         if value is not None:
             charge["charge_energy_added"] = value
-            data["last_charge_energy_added"] = value
         charge["timestamp"] = timestamp_ms
         return True
     if field in {"ModuleTempMin", "ModuleTempMax"}:
@@ -4151,6 +4193,7 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         return True
     if field == "RearDefrostEnabled":
         climate["is_rear_defroster_on"] = _fleet_telemetrie_wahr(value)
+        climate["side_mirror_heaters"] = climate["is_rear_defroster_on"]
         climate["timestamp"] = timestamp_ms
         return True
     if field == "WiperHeatEnabled":
@@ -4296,6 +4339,9 @@ def _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data):
     """Aktualisiere abgeleitete Dashboard-Daten für Telemetry-Ereignisse."""
     if not isinstance(data, dict):
         return data
+
+    _fleet_telemetrie_rohdaten_anreichern(data)
+    _fleet_telemetrie_ladeinformationen_aktualisieren(cache_id, data)
 
     try:
         track_park_time(data)
@@ -4582,11 +4628,13 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
         if age is not None and age <= TESLA_FLEET_TELEMETRY_STALE_SECONDS:
             data = dict(data)
             _fleet_telemetrie_entferne_fremddaten(data)
+            _fleet_telemetrie_rohdaten_anreichern(data)
             data["_live"] = True
             return data
     if data:
         data = dict(data)
         _fleet_telemetrie_entferne_fremddaten(data)
+        _fleet_telemetrie_rohdaten_anreichern(data)
         data["_live"] = False
         data.setdefault("api_error", "Noch keine aktuellen Fleet-Telemetry-Daten empfangen")
         return data
@@ -5032,6 +5080,129 @@ def _apply_charge_session_payload(charge_state, session_start, session_start_soc
         charge_state["charge_added_percent"] = max(0, current_soc - session_start_soc)
     else:
         charge_state.pop("charge_added_percent", None)
+
+
+def _fleet_telemetrie_primärer_cache(cache_id, data):
+    """Prüfe, ob ``cache_id`` der primäre Cache für Ladehistorie ist."""
+
+    if not isinstance(data, dict):
+        return False
+    primary = data.get("id_s") or data.get("vehicle_id")
+    if primary is None:
+        return str(cache_id) != "default"
+    return str(cache_id) == str(primary)
+
+
+def _fleet_telemetrie_ladeinformationen_aktualisieren(cache_id, data, cached=None):
+    """Aktualisiere Ladehistorie aus Fleet-Telemetry-Daten."""
+
+    if not isinstance(data, dict):
+        return data
+    if not _fleet_telemetrie_primärer_cache(cache_id, data):
+        return data
+
+    charge = data.get("charge_state")
+    if not isinstance(charge, dict):
+        charge = {}
+        data["charge_state"] = charge
+
+    charging_state = charge.get("charging_state")
+    current_soc = _extract_current_charge_soc(charge)
+    current_energy = _as_float(charge.get("charge_energy_added"))
+
+    cached_last_val = None
+    if isinstance(cached, dict):
+        cached_last_val = _as_float(cached.get("last_charge_energy_added"))
+
+    last_val = _load_last_energy(cache_id)
+    if last_val is None:
+        last_val = _last_logged_energy(cache_id)
+
+    last_duration = _load_last_charge_duration(cache_id)
+    last_added_percent = _load_last_charge_added_percent(cache_id)
+    last_start_soc = _load_last_charge_start_soc(cache_id)
+    last_end_soc = _load_last_charge_end_soc(cache_id)
+
+    session_start = _load_session_start(cache_id)
+    session_start_soc = _load_session_start_soc(cache_id)
+    session_last_soc = _load_session_last_soc(cache_id)
+    now = datetime.now(LOCAL_TZ)
+
+    if charging_state in ("Charging", "Starting"):
+        if session_start is None:
+            session_start = now
+            session_start_soc = _start_charging_session(cache_id, session_start, charge)
+        elif session_start_soc is None and current_soc is not None:
+            session_start_soc = current_soc
+            _save_session_start_soc(cache_id, current_soc)
+        if current_soc is not None:
+            _save_session_last_soc(cache_id, current_soc)
+            session_last_soc = current_soc
+        _apply_charge_session_payload(charge, session_start, session_start_soc, now)
+        if last_val is not None:
+            data["last_charge_energy_added"] = last_val
+            charge["last_charge_energy_added"] = last_val
+        return data
+
+    end_states = ("Complete", "Disconnected", "Stopped", "NoPower")
+    if charging_state in end_states and current_energy is not None and current_energy > 0.001:
+        vorherige_energie = _as_float(last_val)
+        neue_session = (
+            vorherige_energie is None
+            or current_energy - vorherige_energie > 0.001
+            or session_start is not None
+        )
+        if neue_session:
+            start_time = session_start
+            duration_s = None
+            if start_time is not None:
+                try:
+                    duration_s = int(max(0, (now - start_time).total_seconds()))
+                except Exception:
+                    duration_s = None
+            end_soc = current_soc if current_soc is not None else session_last_soc
+            start_soc = session_start_soc
+            added_percent = None
+            if start_soc is not None and end_soc is not None:
+                added_percent = max(0, end_soc - start_soc)
+
+            logged = _log_energy(cache_id, current_energy, timestamp=start_time)
+            if logged:
+                _save_last_energy(cache_id, current_energy)
+                last_val = current_energy
+            if duration_s is not None:
+                _save_last_charge_duration(cache_id, duration_s)
+                last_duration = duration_s
+            if added_percent is not None:
+                _save_last_charge_added_percent(cache_id, added_percent)
+                last_added_percent = added_percent
+            if start_soc is not None:
+                _save_last_charge_start_soc(cache_id, start_soc)
+                last_start_soc = start_soc
+            if end_soc is not None:
+                _save_last_charge_end_soc(cache_id, end_soc)
+                last_end_soc = end_soc
+            _clear_session_start(cache_id)
+
+    if last_val is None and cached_last_val is not None:
+        last_val = cached_last_val
+    if last_val is not None:
+        data["last_charge_energy_added"] = last_val
+        charge["last_charge_energy_added"] = last_val
+    if last_duration is not None:
+        data["last_charge_duration_s"] = last_duration
+        charge["last_charge_duration_s"] = last_duration
+    if last_added_percent is not None:
+        data["last_charge_added_percent"] = last_added_percent
+        charge["last_charge_added_percent"] = last_added_percent
+    if last_start_soc is not None:
+        data["last_charge_start_soc"] = last_start_soc
+        charge["last_charge_start_soc"] = last_start_soc
+    if last_end_soc is not None:
+        data["last_charge_end_soc"] = last_end_soc
+        charge["last_charge_end_soc"] = last_end_soc
+
+    return data
 
 
 def send_aprs(vehicle_data):
@@ -7486,6 +7657,9 @@ def _fetch_data_once(vehicle_id="default"):
     cached = _load_cached(cache_id)
     telemetry_data = _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached)
     if telemetry_data is not None:
+        telemetry_data = _fleet_telemetrie_ladeinformationen_aktualisieren(
+            cache_id, telemetry_data, cached
+        )
         _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, telemetry_data, vid)
         latest_data[cache_id] = telemetry_data
         return telemetry_data
@@ -7693,6 +7867,31 @@ def _fetch_data_once(vehicle_id="default"):
         elif last_charging_state == "Charging" and charging_state != "Charging":
             session_ended = True
 
+        abgeschlossene_energie_nachtrag = False
+        if not session_ended and charging_state in end_states and val is not None:
+            try:
+                current_amount = float(val)
+            except (TypeError, ValueError):
+                current_amount = None
+            except Exception:
+                current_amount = None
+            try:
+                previous_amount = float(saved_val)
+            except (TypeError, ValueError):
+                previous_amount = None
+            except Exception:
+                previous_amount = None
+            if (
+                current_amount is not None
+                and current_amount > 0.001
+                and (
+                    previous_amount is None
+                    or current_amount - previous_amount > 0.001
+                )
+            ):
+                session_ended = True
+                abgeschlossene_energie_nachtrag = True
+
         end_soc_letzter = None
         if session_ended:
             end_soc_letzter = current_soc
@@ -7764,7 +7963,7 @@ def _fetch_data_once(vehicle_id="default"):
             should_log = True
             if value_to_log is None:
                 should_log = False
-            elif start_time is None:
+            elif start_time is None and not abgeschlossene_energie_nachtrag:
                 try:
                     prev_amount = float(saved_val)
                 except (TypeError, ValueError):
@@ -7817,6 +8016,7 @@ def _fetch_data_once(vehicle_id="default"):
 
         if saved_val is not None:
             data["last_charge_energy_added"] = saved_val
+            charge["last_charge_energy_added"] = saved_val
         if isinstance(charge, dict):
             _apply_charge_session_payload(
                 charge, session_start, session_start_soc, now

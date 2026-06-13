@@ -10,12 +10,17 @@ import app
 
 @pytest.fixture(autouse=True)
 def keine_echten_parking_logs(monkeypatch):
-    """Verhindere echte Park-Log-Einträge in Fleet-Telemetry-Tests."""
+    """Verhindere echte Log-Einträge in Fleet-Telemetry-Tests."""
 
     monkeypatch.setattr(
         app,
         "_record_dashboard_parking_state",
         lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_ladeinformationen_aktualisieren",
+        lambda _cache_id, data, cached=None: data,
     )
 
 
@@ -214,6 +219,24 @@ def test_fleet_telemetrie_mqtt_normalisiert_oeffnungen(monkeypatch):
     assert vehicle_state["rp_window"] == 1
 
 
+def test_fleet_telemetrie_basisdaten_ueberschreibt_alias_id(monkeypatch):
+    monkeypatch.setattr(app, "_fleet_telemetrie_fahrzeuge", lambda: [{
+        "vin": "TESTVIN",
+        "id_s": "primaer",
+        "vehicle_id": "alias",
+        "display_name": "Testauto",
+    }])
+
+    daten = app._fleet_telemetrie_basisdaten(
+        {"id_s": "alias"},
+        "TESTVIN",
+        "alias",
+        1234567890,
+    )
+
+    assert daten["id_s"] == "primaer"
+
+
 def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
     monkeypatch.setattr(app, "_fleet_telemetrie_fahrzeuge", lambda: [{
         "vin": "TESTVIN",
@@ -252,7 +275,7 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
         "BrakePedal": b"true",
         "BrakePedalPos": b"3.4",
         "CenterDisplay": b'"DisplayStateOn"',
-        "SpeedLimitMode": b"true",
+        "SpeedLimitMode": b'"SpeedLimitModeStateOn"',
         "CurrentLimitMph": b"56",
         "LightsHazardsActive": b"false",
         "LightsTurnSignal": b'"TurnSignalStateLeft"',
@@ -293,6 +316,7 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
     assert daten["climate_state"]["cop_activation_temperature"] == "High"
     assert daten["climate_state"]["is_front_defroster_on"] is True
     assert daten["climate_state"]["is_rear_defroster_on"] is True
+    assert daten["climate_state"]["side_mirror_heaters"] is True
     assert daten["climate_state"]["wiper_blade_heater"] is True
     assert daten["climate_state"]["steering_wheel_heater"] is True
     assert daten["climate_state"]["seat_heater_left"] == 3
@@ -312,6 +336,24 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
     assert daten["vehicle_state"]["tpms_soft_warning_fl"] is True
     assert daten["vehicle_state"]["media_info"]["now_playing_title"] == "Song"
     assert daten["vehicle_state"]["media_info"]["media_playback_status"] == "Playing"
+
+
+def test_fleet_telemetrie_reichert_tpms_und_spiegel_aus_rohdaten_an():
+    daten = {
+        "fleet_telemetry_raw": {
+            "TpmsPressureFl": 2.95,
+            "TpmsLastSeenPressureTimeFl": 1781412111,
+            "RearDefrostEnabled": True,
+        },
+        "vehicle_state": {},
+        "climate_state": {},
+    }
+
+    app._fleet_telemetrie_rohdaten_anreichern(daten)
+
+    assert daten["vehicle_state"]["tpms_pressure_fl"] == 2.95
+    assert daten["vehicle_state"]["tpms_last_seen_pressure_time_fl"] == 1781412111000
+    assert daten["climate_state"]["side_mirror_heaters"] is True
 
 
 def test_fetch_data_once_nutzt_telemetrie_cache_ohne_owner_api(monkeypatch):

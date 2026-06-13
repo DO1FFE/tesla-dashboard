@@ -62,7 +62,11 @@ def test_log_energy_prevents_follow_up_writes(tmp_path, monkeypatch):
         for original in old_handlers:
             app.energy_logger.addHandler(original)
 
-    lines = [line for line in energy_file.read_text(encoding="utf-8").splitlines() if line]
+    lines = [
+        line
+        for line in energy_file.read_text(encoding="utf-8").splitlines()
+        if line
+    ]
     assert len(lines) == 1
     assert '"added_energy": 15.0' in lines[0]
 
@@ -366,6 +370,91 @@ def test_fetch_data_does_not_duplicate_last_session_after_restart(
     ]
     assert len(energy_lines) == 1
     assert '"added_energy": 4.5' in energy_lines[0]
+
+
+def test_fleet_telemetrie_traegt_beendete_ladung_nach(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    os.makedirs(app.DATA_DIR, exist_ok=True)
+
+    vehicle_id = "fleet_nachtrag"
+    fahrzeug_dir = pathlib.Path(app.vehicle_dir(vehicle_id))
+    (fahrzeug_dir / "last_energy.txt").write_text("16.04", encoding="utf-8")
+
+    old_handlers = list(app.energy_logger.handlers)
+    for handler in old_handlers:
+        app.energy_logger.removeHandler(handler)
+
+    logger = logging.getLogger(f"energy_logger_{app._vehicle_key(vehicle_id)}")
+    alte_logger_handler = list(logger.handlers)
+    for handler in alte_logger_handler:
+        logger.removeHandler(handler)
+
+    app._charging_session_start.clear()
+    app._charging_session_start_soc.clear()
+    app._charging_session_last_soc.clear()
+    app._recently_logged_sessions.clear()
+    app._last_energy_markers.clear()
+
+    daten = {
+        "state": "online",
+        "charge_state": {
+            "charging_state": "Disconnected",
+            "charge_energy_added": 30.1,
+            "battery_level": 91,
+        },
+        "drive_state": {},
+    }
+    cached = {
+        "last_charge_energy_added": 30.1,
+        "charge_state": {"charging_state": "Disconnected"},
+    }
+
+    try:
+        app._fleet_telemetrie_ladeinformationen_aktualisieren(
+            vehicle_id, daten, cached
+        )
+        for handler in logger.handlers:
+            handler.flush()
+    finally:
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+            handler.close()
+        for handler in alte_logger_handler:
+            logger.addHandler(handler)
+        for handler in old_handlers:
+            app.energy_logger.addHandler(handler)
+
+    energy_file = fahrzeug_dir / "energy.log"
+    lines = [
+        line
+        for line in energy_file.read_text(encoding="utf-8").splitlines()
+        if line
+    ]
+
+    assert len(lines) == 1
+    assert '"added_energy": 30.1' in lines[0]
+    assert (fahrzeug_dir / "last_energy.txt").read_text(encoding="utf-8") == "30.1"
+    assert daten["last_charge_energy_added"] == 30.1
+    assert daten["charge_state"]["last_charge_energy_added"] == 30.1
+    assert list(app._compute_energy_stats(vehicle_id=vehicle_id).values()) == [30.1]
+
+
+def test_fleet_telemetrie_schreibt_ladung_nicht_fuer_alias_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    os.makedirs(app.DATA_DIR, exist_ok=True)
+
+    daten = {
+        "id_s": "primaer",
+        "charge_state": {
+            "charging_state": "Disconnected",
+            "charge_energy_added": 12.0,
+        },
+    }
+
+    app._fleet_telemetrie_ladeinformationen_aktualisieren("default", daten, daten)
+
+    assert not (pathlib.Path(app.vehicle_dir("default")) / "energy.log").exists()
+    assert "last_charge_energy_added" not in daten
 
 
 def test_compute_energy_stats_respects_data_dir(tmp_path, monkeypatch):

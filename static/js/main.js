@@ -472,6 +472,15 @@ function applyConfig(cfg) {
 function showConfigured() {
     Object.keys(TOGGLE_DEFAULTS).forEach(function(id) {
         if (id === 'blue-openings') return;
+        if (id === 'tpms-indicator') {
+            var $tpms = $('#' + id);
+            if (configEnabled(id)) {
+                $tpms.css('display', '');
+            } else {
+                $tpms.css('display', 'none');
+            }
+            return;
+        }
         if (
             id === 'ladeplanung-info' ||
             id === 'preconditioning-info' ||
@@ -865,14 +874,7 @@ function handleData(data) {
     if (isFinite(mapLat) && isFinite(mapLng)) {
         var coordsNeu = positionIstNeu(mapLat, mapLng);
         if (coordsNeu) {
-            if (offline) {
-                marker.setLatLng([mapLat, mapLng]);
-            } else if (typeof marker.slideTo === 'function') {
-                marker.slideTo([mapLat, mapLng], {duration: 1000});
-                slide = true;
-            } else {
-                marker.setLatLng([mapLat, mapLng]);
-            }
+            marker.setLatLng([mapLat, mapLng]);
         }
         var speedVal = parseFloat(drive.speed);
         var units = data.gui_settings && data.gui_settings.gui_distance_units;
@@ -887,11 +889,7 @@ function handleData(data) {
         }
         if (coordsNeu || !letzteKartenPosition) {
             zoomSetByApp = true;
-            if (offline) {
-                map.setView([mapLat, mapLng], zoom, {animate: false});
-            } else {
-                map.flyTo([mapLat, mapLng], zoom);
-            }
+            map.setView([mapLat, mapLng], zoom, {animate: false});
             updateZoomDisplay();
         }
         if (typeof drive.heading === 'number') {
@@ -2828,12 +2826,7 @@ function zeichneVehicleState() {
         $state.text('');
         return;
     }
-    var text = 'State: ' + lastVehicleState;
-    var alter = formatiereKurzesAlter(lastStateTimestamp);
-    if (alter) {
-        text += ' (Abruf vor ' + alter + ')';
-    }
-    $state.text(text);
+    $state.text('State: ' + lastVehicleState);
 }
 
 function updateParkTime(ts) {
