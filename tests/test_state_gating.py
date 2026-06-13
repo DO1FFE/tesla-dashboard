@@ -254,6 +254,40 @@ def test_get_vehicle_state_asleep_prueft_state_erst_nach_10_sekunden(monkeypatch
     assert aufrufe_fahrzeugliste == [False]
 
 
+def test_get_vehicle_state_fahrzeuglistenfehler_nutzt_cache_state(monkeypatch):
+    monkeypatch.setattr(app, "last_vehicle_state", {"veh-list-error": "online"})
+    monkeypatch.setattr(app, "_last_state_refresh_ts", {})
+    monkeypatch.setattr(
+        app,
+        "load_config",
+        lambda vehicle_id=None: {"api_interval": 1, "api_interval_idle": 30},
+    )
+    monkeypatch.setattr(
+        app,
+        "_load_cached",
+        lambda vehicle_id: {
+            "state": "online",
+            "vehicle_state": {
+                "locked": True,
+                "is_user_present": False,
+                "service_mode": False,
+                "service_mode_plus": False,
+            },
+        },
+    )
+    monkeypatch.setattr(app.time, "time", lambda: 123.0)
+    monkeypatch.setattr(app, "get_tesla", lambda: object())
+    monkeypatch.setattr(app, "_cached_vehicle_list", lambda *args, **kwargs: [])
+
+    daten = app.get_vehicle_state("veh-list-error")
+
+    assert daten["state"] == "online"
+    assert daten["error"] == "No vehicles found"
+    assert daten["state_checked_at"] == 123000
+    assert daten["service_mode"] is False
+    assert daten["service_mode_plus"] is False
+
+
 def test_fetch_data_once_online_ruft_live_abruf_auf_und_nutzt_fallback(monkeypatch):
     aufrufe_get_vehicle_data = []
 
@@ -283,6 +317,34 @@ def test_fetch_data_once_online_ruft_live_abruf_auf_und_nutzt_fallback(monkeypat
     assert aufrufe_get_vehicle_data == [("veh-online", "online")]
     assert daten["state"] == "online"
     assert daten["source"] == "cache"
+    assert daten["_live"] is False
+
+
+def test_fetch_data_once_statusfehler_erhaelt_cache_state(monkeypatch):
+    _setze_neutrale_ladehilfen(monkeypatch)
+    monkeypatch.setattr(app, "occupant_present", False)
+    monkeypatch.setattr(app, "latest_data", {})
+    monkeypatch.setattr(app, "last_vehicle_state", {"veh-forbidden": "online"})
+    monkeypatch.setattr(
+        app,
+        "get_vehicle_state",
+        lambda vid: {"state": None, "error": "403 forbidden"},
+    )
+    monkeypatch.setattr(
+        app,
+        "_load_cached",
+        lambda vehicle_id: {
+            "state": "online",
+            "charge_state": {"charging_state": "Disconnected"},
+            "drive_state": {"shift_state": None, "speed": 0, "power": 0},
+            "vehicle_state": {"locked": True, "is_user_present": False},
+        },
+    )
+
+    daten = app._fetch_data_once("veh-forbidden")
+
+    assert daten["state"] == "online"
+    assert daten["api_error"] == "403 forbidden"
     assert daten["_live"] is False
 
 
@@ -584,6 +646,36 @@ def test_fetch_loop_locked_ohne_insassen_nutzt_idle_intervall(monkeypatch):
     assert idle_aufrufe == [30]
 
 
+def test_fetch_loop_protokolliert_abruffehler_und_laeuft_weiter(monkeypatch):
+    fehler = []
+
+    monkeypatch.setattr(
+        app,
+        "load_config",
+        lambda: {"api_interval": 5, "api_interval_idle": 30},
+    )
+
+    def _fake_fetch_data_once(vehicle_id):
+        raise RuntimeError("api kaputt")
+
+    monkeypatch.setattr(app, "_fetch_data_once", _fake_fetch_data_once)
+    monkeypatch.setattr(app, "_log_api_error", lambda exc: fehler.append(str(exc)))
+    monkeypatch.setattr(app.logging, "exception", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app.time, "time", lambda: 100.0)
+    monkeypatch.setattr(app.time, "sleep", lambda sekunden: None)
+    monkeypatch.setattr(app, "occupant_present", False)
+
+    def _fake_sleep_idle(sekunden):
+        raise RuntimeError("stop-loop")
+
+    monkeypatch.setattr(app, "_sleep_idle", _fake_sleep_idle)
+
+    with pytest.raises(RuntimeError, match="stop-loop"):
+        app._fetch_loop("veh")
+
+    assert fehler == ["api kaputt"]
+
+
 def test_fetch_loop_offline_nutzt_state_intervall_trotz_aktivitaetsdaten(monkeypatch):
     schlaf_aufrufe = []
 
@@ -662,6 +754,37 @@ def test_fetch_loop_unlocked_nutzt_normales_intervall(monkeypatch):
         app._fetch_loop("veh")
 
     assert schlaf_aufrufe == [5]
+
+
+def test_start_thread_ersetzt_beendeten_thread(monkeypatch):
+    gestartete_threads = []
+
+    class BeendeterThread:
+        def is_alive(self):
+            return False
+
+    class NeuerThread:
+        def __init__(self, target, args, daemon):
+            self.target = target
+            self.args = args
+            self.daemon = daemon
+            self.gestartet = False
+            gestartete_threads.append(self)
+
+        def is_alive(self):
+            return self.gestartet
+
+        def start(self):
+            self.gestartet = True
+
+    monkeypatch.setattr(app, "threads", {"veh": BeendeterThread()})
+    monkeypatch.setattr(app.threading, "Thread", NeuerThread)
+
+    app._start_thread("veh")
+
+    assert len(gestartete_threads) == 1
+    assert app.threads["veh"] is gestartete_threads[0]
+    assert gestartete_threads[0].gestartet is True
 
 
 def test_fetch_loop_schiebedach_offen_nutzt_normales_intervall(monkeypatch):

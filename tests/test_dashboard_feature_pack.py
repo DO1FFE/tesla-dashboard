@@ -50,6 +50,15 @@ def test_api_daten_bleiben_trotz_privatmodus_real(monkeypatch):
     assert "privacy_radius_m" not in payload
 
 
+def test_stream_fehlerpfad_setzt_karte_nicht_auf_default():
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+    start = js.index("eventSource.onerror = function()")
+    ende = js.index("function startStreamIfOnline()", start)
+    fehlerpfad = js[start:ende]
+
+    assert "map.setView(DEFAULT_POS" not in fehlerpfad
+
+
 def test_history_nutzt_trotz_privatmodus_reale_punkte(monkeypatch):
     trip_path = str(pathlib.Path(app_module.DATA_DIR) / "fahrzeug" / "trips" / "trip_20260521.csv")
     monkeypatch.setattr(
