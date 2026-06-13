@@ -4345,6 +4345,36 @@ def _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data):
     return data
 
 
+def _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, data, vehicle_id=None):
+    """Zeichne Park-Samples aus Fleet-Telemetry-Daten auf."""
+
+    if not isinstance(data, dict):
+        return
+    vehicle_identifier = None
+    vin = data.get("vin")
+    if vin:
+        for vehicle in _fleet_telemetrie_fahrzeuge():
+            if str(vehicle.get("vin") or "") == str(vin):
+                vehicle_identifier = (
+                    vehicle.get("id_s")
+                    or vehicle.get("id")
+                    or vehicle.get("vehicle_id")
+                )
+                break
+    if vehicle_identifier is None:
+        vehicle_identifier = (
+            data.get("id_s")
+            or data.get("vehicle_id")
+            or vehicle_id
+            or cache_id
+            or "default"
+        )
+    try:
+        _record_dashboard_parking_state(str(vehicle_identifier), data)
+    except Exception:
+        pass
+
+
 def _fleet_telemetrie_cache_aktualisieren(vin, field, value, timestamp_ms=None):
     """Übernehme ein MQTT-Telemetry-Feld in Cache, Live-Daten und Streams."""
     if timestamp_ms is None:
@@ -4367,6 +4397,7 @@ def _fleet_telemetrie_cache_aktualisieren(vin, field, value, timestamp_ms=None):
                 _vorklimatisierung_im_stand_erlaubt(data)
             )
             data = _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data)
+            _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, data)
             data["_live"] = True
             data.pop("api_error", None)
             latest_data[cache_id] = data
@@ -4416,6 +4447,7 @@ def _fleet_telemetrie_verbindung_aktualisieren(vin, payload, timestamp_ms=None):
             data["state"] = state
             data["state_checked_at"] = timestamp_ms
             data["fleet_telemetry_connectivity"] = payload
+            _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, data)
             data["_live"] = True
             latest_data[cache_id] = data
             try:
@@ -6400,6 +6432,8 @@ def _statistics_dependency_signature():
         resolve_log_path(vid, "state.log"),
         resolve_log_path(vid, "energy.log"),
         resolve_log_path(vid, "api.log"),
+        _parking_log_path(),
+        os.path.join(DATA_DIR, "park-loss.log"),
     ]
     files.extend(_get_trip_files())
 
@@ -7452,6 +7486,7 @@ def _fetch_data_once(vehicle_id="default"):
     cached = _load_cached(cache_id)
     telemetry_data = _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached)
     if telemetry_data is not None:
+        _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, telemetry_data, vid)
         latest_data[cache_id] = telemetry_data
         return telemetry_data
     if _nur_fleet_telemetrie_datenquelle():

@@ -39,3 +39,16 @@ def test_normalisierung_blaeht_offline_nicht_systematisch_auf():
     assert offline == 16.67
     assert asleep == 16.66
     assert round(online + offline + asleep, 2) == 100.0
+
+
+def test_statistics_dependency_signature_enthaelt_parking_logs(monkeypatch, tmp_path):
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(app, "_default_vehicle_id", "demo")
+    monkeypatch.setattr(app, "default_vehicle_id", lambda: "demo")
+    monkeypatch.setattr(app, "_get_trip_files", lambda: [])
+
+    signature = app._statistics_dependency_signature()
+    pfade = [eintrag[0] for eintrag in signature]
+
+    assert str(tmp_path / app.PARK_UI_LOG) in pfade
+    assert str(tmp_path / "park-loss.log") in pfade

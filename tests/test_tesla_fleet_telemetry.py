@@ -1,9 +1,22 @@
 import pathlib
 import sys
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import app
+
+
+@pytest.fixture(autouse=True)
+def keine_echten_parking_logs(monkeypatch):
+    """Verhindere echte Park-Log-Einträge in Fleet-Telemetry-Tests."""
+
+    monkeypatch.setattr(
+        app,
+        "_record_dashboard_parking_state",
+        lambda *args, **kwargs: None,
+    )
 
 
 def test_fleet_telemetrie_mqtt_aktualisiert_dashboard_cache(monkeypatch):
@@ -12,6 +25,7 @@ def test_fleet_telemetrie_mqtt_aktualisiert_dashboard_cache(monkeypatch):
     monkeypatch.setattr(app, "_fleet_telemetrie_fahrzeuge", lambda: [{
         "vin": "TESTVIN",
         "id_s": "veh-1",
+        "vehicle_id": "legacy-veh-1",
         "display_name": "Testauto",
     }])
     monkeypatch.setattr(app, "_load_cached", lambda vehicle_id: {})
@@ -48,6 +62,34 @@ def test_fleet_telemetrie_mqtt_aktualisiert_dashboard_cache(monkeypatch):
     assert daten["charge_state"]["charging_state"] == "Charging"
     assert daten["_live"] is True
     assert gespeicherte_daten["veh-1"]["fleet_telemetry_updated_at"]
+
+
+def test_fleet_telemetrie_mqtt_zeichnet_parkstatus_auf(monkeypatch):
+    parking_aufrufe = []
+
+    monkeypatch.setattr(app, "_fleet_telemetrie_fahrzeuge", lambda: [{
+        "vin": "TESTVIN",
+        "id_s": "veh-1",
+        "vehicle_id": "legacy-veh-1",
+        "display_name": "Testauto",
+    }])
+    monkeypatch.setattr(app, "_default_vehicle_id", None)
+    monkeypatch.setattr(app, "_load_cached", lambda vehicle_id: {})
+    monkeypatch.setattr(app, "_save_cached", lambda vehicle_id, data: None)
+    monkeypatch.setattr(app, "latest_data", {})
+    monkeypatch.setattr(
+        app,
+        "_record_dashboard_parking_state",
+        lambda vehicle_id, data: parking_aufrufe.append((vehicle_id, data)),
+    )
+
+    assert app._fleet_telemetrie_mqtt_message(
+        "tesla/TESTVIN/v/BatteryLevel",
+        b"84",
+        {"topic_base": "tesla"},
+    )
+
+    assert {vehicle_id for vehicle_id, _data in parking_aufrufe} == {"veh-1"}
 
 
 def test_fleet_telemetrie_mqtt_ignoriert_unveraenderte_rohwerte(monkeypatch):
@@ -274,9 +316,11 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
 
 def test_fetch_data_once_nutzt_telemetrie_cache_ohne_owner_api(monkeypatch):
     aufrufe = []
+    parking_aufrufe = []
     cache = {
         "state": "online",
         "fleet_telemetry_updated_at": int(app.time.time() * 1000),
+        "id_s": "veh-1",
         "charge_state": {"battery_level": 90},
         "drive_state": {},
         "vehicle_state": {},
@@ -296,12 +340,18 @@ def test_fetch_data_once_nutzt_telemetrie_cache_ohne_owner_api(monkeypatch):
         "get_vehicle_data",
         lambda vehicle_id=None, state=None: aufrufe.append("data"),
     )
+    monkeypatch.setattr(
+        app,
+        "_record_dashboard_parking_state",
+        lambda vehicle_id, data: parking_aufrufe.append((vehicle_id, data)),
+    )
 
     daten = app._fetch_data_once("default")
 
     assert daten["charge_state"]["battery_level"] == 90
     assert daten["_live"] is True
     assert aufrufe == []
+    assert parking_aufrufe == [("veh-1", daten)]
 
 
 def test_fetch_data_once_telemetrie_only_ohne_cache_ruft_keine_owner_api(monkeypatch):
@@ -475,6 +525,7 @@ def test_fetch_data_once_sendet_telemetrie_cache_nicht_an_stream(monkeypatch):
     monkeypatch.setattr(app, "_load_cached", lambda vehicle_id: dict(cache))
     monkeypatch.setattr(app, "latest_data", {})
     monkeypatch.setattr(app, "subscribers", {"default": [sammler]})
+    monkeypatch.setattr(app, "_record_dashboard_parking_state", lambda *args: None)
 
     daten = app._fetch_data_once("default")
 
