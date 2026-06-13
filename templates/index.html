@@ -131,6 +131,11 @@
         </div>
         <div id="battery-indicator"></div>
             <div id="speedometer">
+                <div id="turn-indicator" class="turn-indicator" role="img" aria-label="Blinker aus">
+                    <span id="turn-left" class="turn-arrow" aria-hidden="true">◀</span>
+                    <span id="high-beam-indicator" class="high-beam-indicator" role="img" aria-label="Fernlicht aus" title="Fernlicht aus"></span>
+                    <span id="turn-right" class="turn-arrow" aria-hidden="true">▶</span>
+                </div>
                 <svg width="140" height="70" viewBox="0 -5 120 60">
                     <path d="M10,50 A50,50 0 0,1 110,50" stroke="#ccc" stroke-width="12" fill="none"/>
                     <g id="speedometer-ticks" stroke="#000" stroke-width="2">
@@ -199,6 +204,11 @@
                 <path id="trunk" class="part-closed" d="M30 165 H70 V175 L50 185 L30 175 Z">
                     <title>Kofferraum</title>
                 </path>
+                <g id="brake-lights" class="brake-lights" role="img" aria-label="Bremslicht aus">
+                    <title>Bremslicht aus</title>
+                    <rect class="brake-light brake-light-left" x="25" y="176" width="14" height="5" rx="2" ry="2" />
+                    <rect class="brake-light brake-light-right" x="61" y="176" width="14" height="5" rx="2" ry="2" />
+                </g>
                 <rect id="door-fl" class="part-closed" x="20" y="40" width="10" height="45">
                     <title>T&#252;r vorne links</title>
                 </rect>

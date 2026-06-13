@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tesla-Dashboard - Wartung</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --hintergrund: #101418;
+            --fläche: #182027;
+            --akzent: #3fb984;
+            --text: #eef4f0;
+            --sekundär: #a8b4ad;
+            --linie: #2b363f;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            background: var(--hintergrund);
+            color: var(--text);
+            font-family: Arial, Helvetica, sans-serif;
+        }
+
+        main {
+            width: min(680px, calc(100% - 32px));
+            margin: auto;
+            padding: 32px;
+            border: 1px solid var(--linie);
+            border-radius: 8px;
+            background: var(--fläche);
+        }
+
+        h1 {
+            margin: 0 0 16px;
+            font-size: clamp(1.8rem, 4vw, 2.6rem);
+            line-height: 1.1;
+        }
+
+        p {
+            margin: 0 0 14px;
+            color: var(--sekundär);
+            font-size: 1.05rem;
+            line-height: 1.55;
+        }
+
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            color: var(--akzent);
+            font-weight: 700;
+        }
+
+        .punkt {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--akzent);
+            box-shadow: 0 0 18px rgba(63, 185, 132, 0.8);
+        }
+
+        footer {
+            padding: 20px;
+            color: var(--sekundär);
+            text-align: center;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <div class="status"><span class="punkt" aria-hidden="true"></span>Umstellung läuft</div>
+        <h1>Dashboard wird gerade auf Fleet Telemetry umgestellt</h1>
+        <p>
+            Die Fahrzeugdaten werden aktuell auf den neuen Tesla-Fleet-Telemetry-Stream
+            umgestellt. Währenddessen ist die öffentliche Ansicht vorübergehend gesperrt.
+        </p>
+        <p>
+            Die Seite wird wieder freigegeben, sobald Standort, Ladezustand, Klima und
+            Fahrzeugstatus vollständig im Dashboard angezeigt werden.
+        </p>
+    </main>
+    <footer>Tesla-Dashboard V{{ version }} - © 2025{% if year > 2025 %}-{{ year }}{% endif %} Erik Schauer, do1ffe@darc.de</footer>
+</body>
+</html>

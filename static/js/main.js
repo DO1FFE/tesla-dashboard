@@ -19,6 +19,9 @@ var DEFAULT_ZOOM = 18;
 var superchargerMarkers = [];
 var lastSuperchargerData = null;
 var letzteKartenPosition = null;
+var letzteKartenRichtung = null;
+var letzteZielSignatur = null;
+var letztePfadSignatur = null;
 var privacyCircle = null;
 
 function normalizeShiftState(shift) {
@@ -297,6 +300,7 @@ var CONFIG = {};
 var HIGHLIGHT_BLUE = false;
 var currentPath = [];
 var OFFLINE_TEXT = 'Das Fahrzeug ist offline und schläft - Bitte nicht wecken! - Die Daten sind die zuletzt bekannten und somit nicht aktuell!';
+var DISCONNECTED_TEXT = 'Die Fleet-Telemetry-Verbindung zum Fahrzeug ist getrennt. Es werden die zuletzt bekannten Daten angezeigt.';
 var SERVICE_MODE_TEXT = 'Fahrzeug befindet sich im Service Mode.';
 var SERVICE_MODE_PLUS_TEXT = 'Fahrzeug befindet sich im Service Mode Plus.';
 var smsForm = $('#sms-form');
@@ -394,6 +398,21 @@ function positionIstNeu(lat, lng) {
     var diffLat = Math.abs(lat - letzteKartenPosition[0]);
     var diffLng = Math.abs(lng - letzteKartenPosition[1]);
     return diffLat > 1e-6 || diffLng > 1e-6;
+}
+
+function kartenPunkteSignatur(points) {
+    if (!Array.isArray(points) || !points.length) {
+        return 'leer';
+    }
+    var erstes = points[0] || [];
+    var letztes = points[points.length - 1] || [];
+    return [
+        points.length,
+        erstes[0],
+        erstes[1],
+        letztes[0],
+        letztes[1]
+    ].join('|');
 }
 
 function planeNaechsteStatusabfrage() {
@@ -769,14 +788,21 @@ function handleData(data) {
     updateOfflineInfo(data.state, vehicle.service_mode, vehicle.service_mode_plus);
     updateSoftwareUpdate(vehicle.software_update);
     var drive = data.drive_state || {};
-    updateDataAge(vehicle.timestamp);
+    var charge = data.charge_state || {};
+    var climate = data.climate_state || {};
+    updateDataAge(neuesterDatenZeitstempel(data, vehicle, drive, charge, climate));
     updateLockStatus(vehicle.locked);
     updateUserPresence(vehicle.is_user_present);
+    updateTurnSignalIndicator(vehicle.lights_turn_signal, vehicle.lights_hazards_active);
+    updateHighBeamIndicator(vehicle.lights_high_beams);
     updateGearShift(drive.shift_state);
     updateParkTime(data.park_start);
     updateNavBar(drive);
-    var charge = data.charge_state || {};
-    updateSpeedometer(drive.speed, drive.power, charge.charging_state);
+    var displayPower = drive.power;
+    if (charge.charging_state === 'Charging' && charge.charger_power != null) {
+        displayPower = charge.charger_power;
+    }
+    updateSpeedometer(drive.speed, displayPower, charge.charging_state);
     updateOdometer(vehicle.odometer);
     var rangeMiles = charge.ideal_battery_range;
     if (rangeMiles == null) {
@@ -786,7 +812,6 @@ function handleData(data) {
     updateV2LInfos(charge, drive);
     updateChargingInfo(charge, data);
     updateLadeplanungInfo(charge, drive, data);
-    var climate = data.climate_state || {};
     updateThermometers(climate.inside_temp, climate.outside_temp, charge.battery_temp);
     updateClimateStatus(climate.is_climate_on);
     updateClimateMode(climate.climate_keeper_mode);
@@ -832,13 +857,15 @@ function handleData(data) {
     var offline = istOfflineOderSchlaeft(data.state);
     if (isFinite(mapLat) && isFinite(mapLng)) {
         var coordsNeu = positionIstNeu(mapLat, mapLng);
-        if (offline) {
-            marker.setLatLng([mapLat, mapLng]);
-        } else if (typeof marker.slideTo === 'function') {
-            marker.slideTo([mapLat, mapLng], {duration: 1000});
-            slide = true;
-        } else {
-            marker.setLatLng([mapLat, mapLng]);
+        if (coordsNeu) {
+            if (offline) {
+                marker.setLatLng([mapLat, mapLng]);
+            } else if (typeof marker.slideTo === 'function') {
+                marker.slideTo([mapLat, mapLng], {duration: 1000});
+                slide = true;
+            } else {
+                marker.setLatLng([mapLat, mapLng]);
+            }
         }
         var speedVal = parseFloat(drive.speed);
         var units = data.gui_settings && data.gui_settings.gui_distance_units;
@@ -851,7 +878,7 @@ function handleData(data) {
         if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
             zoom = map.getZoom();
         }
-        if (!offline || coordsNeu || !letzteKartenPosition) {
+        if (coordsNeu || !letzteKartenPosition) {
             zoomSetByApp = true;
             if (offline) {
                 map.setView([mapLat, mapLng], zoom, {animate: false});
@@ -862,7 +889,13 @@ function handleData(data) {
         }
         if (typeof drive.heading === 'number') {
             var displayHeading = adjustHeadingForReverse(drive.heading, drive.shift_state);
-            marker.setRotationAngle(displayHeading);
+            if (
+                letzteKartenRichtung == null ||
+                Math.abs(Number(displayHeading) - Number(letzteKartenRichtung)) > 0.1
+            ) {
+                marker.setRotationAngle(displayHeading);
+                letzteKartenRichtung = displayHeading;
+            }
         }
         letzteKartenPosition = [mapLat, mapLng];
     } else if (!letzteKartenPosition && !offline) {
@@ -907,15 +940,25 @@ function handleData(data) {
         isFinite(dLat) &&
         isFinite(dLng)
     ) {
-        if (!destMarker) {
-            destMarker = L.marker([dLat, dLng], { icon: flagIcon }).addTo(map);
-        } else {
-            destMarker.setLatLng([dLat, dLng]);
-        }
-        if (!destLine) {
-            destLine = L.polyline([[mapLat, mapLng], [dLat, dLng]], { color: 'red', dashArray: '5, 5', weight: 2 }).addTo(map);
-        } else {
-            destLine.setLatLngs([[mapLat, mapLng], [dLat, dLng]]);
+        var zielSignatur = [
+            drive.active_route_destination,
+            mapLat,
+            mapLng,
+            dLat,
+            dLng
+        ].join('|');
+        if (zielSignatur !== letzteZielSignatur) {
+            if (!destMarker) {
+                destMarker = L.marker([dLat, dLng], { icon: flagIcon }).addTo(map);
+            } else {
+                destMarker.setLatLng([dLat, dLng]);
+            }
+            if (!destLine) {
+                destLine = L.polyline([[mapLat, mapLng], [dLat, dLng]], { color: 'red', dashArray: '5, 5', weight: 2 }).addTo(map);
+            } else {
+                destLine.setLatLngs([[mapLat, mapLng], [dLat, dLng]]);
+            }
+            letzteZielSignatur = zielSignatur;
         }
     } else {
         if (destMarker) {
@@ -926,20 +969,28 @@ function handleData(data) {
             map.removeLayer(destLine);
             destLine = null;
         }
+        letzteZielSignatur = null;
     }
     var pathPoints = updatePathPoints(data);
     var sichtbarePathPoints = privatisiereKartenPunkte(pathPoints);
+    var pfadSignatur = kartenPunkteSignatur(sichtbarePathPoints);
     if (sichtbarePathPoints.length > 1) {
-        if (!polyline) {
-            polyline = L.polyline(sichtbarePathPoints, { color: 'blue' }).addTo(map);
-        } else if (slide) {
-            pendingPath = sichtbarePathPoints.slice();
-        } else {
-            polyline.setLatLngs(sichtbarePathPoints);
+        if (pfadSignatur !== letztePfadSignatur) {
+            if (!polyline) {
+                polyline = L.polyline(sichtbarePathPoints, { color: 'blue' }).addTo(map);
+            } else if (slide) {
+                pendingPath = sichtbarePathPoints.slice();
+            } else {
+                polyline.setLatLngs(sichtbarePathPoints);
+            }
+            letztePfadSignatur = pfadSignatur;
         }
     } else if (polyline) {
         map.removeLayer(polyline);
         polyline = null;
+        letztePfadSignatur = pfadSignatur;
+    } else {
+        letztePfadSignatur = pfadSignatur;
     }
 }
 
@@ -1009,6 +1060,51 @@ function updateUserPresence(present) {
     }
 }
 
+function updateTurnSignalIndicator(turnSignal, hazardsActive) {
+    var $indicator = $('#turn-indicator');
+    var $left = $('#turn-left');
+    var $right = $('#turn-right');
+    var signal = typeof turnSignal === 'string' ? turnSignal.toLowerCase() : '';
+    if (signal.indexOf('turnsignalstate') === 0) {
+        signal = signal.substring('turnsignalstate'.length).toLowerCase();
+    }
+    var hazards = false;
+    if (typeof hazardsActive === 'string') {
+        var hazardsText = hazardsActive.toLowerCase();
+        hazards = hazardsText === 'true' || hazardsText === '1' || hazardsText === 'on';
+    } else {
+        hazards = !!hazardsActive;
+    }
+    var leftActive = hazards || signal === 'left' || signal === 'both';
+    var rightActive = hazards || signal === 'right' || signal === 'both';
+    $left.toggleClass('is-active', leftActive);
+    $right.toggleClass('is-active', rightActive);
+    var title = 'Blinker aus';
+    if (hazards || signal === 'both') {
+        title = 'Warnblinker an';
+    } else if (signal === 'left') {
+        title = 'Blinker links';
+    } else if (signal === 'right') {
+        title = 'Blinker rechts';
+    }
+    $indicator.attr('title', title).attr('aria-label', title);
+}
+
+function updateHighBeamIndicator(highBeamsActive) {
+    var $el = $('#high-beam-indicator');
+    var active = false;
+    if (typeof highBeamsActive === 'string') {
+        var text = highBeamsActive.toLowerCase();
+        active = text === 'true' || text === '1' || text === 'on';
+    } else {
+        active = !!highBeamsActive;
+    }
+    var title = active ? 'Fernlicht an' : 'Fernlicht aus';
+    $el.toggleClass('is-active', active)
+        .attr('title', title)
+        .attr('aria-label', title);
+}
+
 function updateClimateStatus(on) {
     if (on == null) {
         $('#climate-status').text('').attr('title', '').attr('aria-label', '');
@@ -1048,6 +1144,9 @@ function updateFanStatus(speed) {
 
 function updateClimateMode(mode) {
     var $el = $('#climate-mode');
+    if (typeof mode === 'string') {
+        mode = mode.toLowerCase();
+    }
     if (!mode || mode === 'off') {
         $el.text('').attr('title', '').attr('aria-label', '').hide();
         return;
@@ -1057,9 +1156,12 @@ function updateClimateMode(mode) {
     if (mode === 'dog') {
         icon = '\uD83D\uDC36';
         title = 'Hundemodus';
-    } else if (mode === 'camp') {
+    } else if (mode === 'camp' || mode === 'party') {
         icon = '\u26FA';
         title = 'Camp-Modus';
+    } else if (mode === 'on') {
+        icon = '\u267B';
+        title = 'Klimaanlage halten';
     } else {
         $el.text('').attr('title', '').hide();
         return;
@@ -1291,6 +1393,22 @@ function reifendruckStatus(ist, soll, weichWarnung, hartWarnung) {
     return {klasse: 'ok', text: 'OK'};
 }
 
+function reifendruckHinweis(eintrag, status) {
+    var hinweise = [];
+    if (istAktiv(eintrag.hart)) {
+        hinweise.push('harte Warnung');
+    }
+    if (istAktiv(eintrag.weich)) {
+        hinweise.push('weiche Warnung');
+    }
+    if (status.klasse === 'kritisch' && hinweise.length === 0) {
+        hinweise.push('kritische Abweichung');
+    } else if (status.klasse === 'warnung' && hinweise.length === 0) {
+        hinweise.push('prüfen');
+    }
+    return hinweise.join(', ') || status.text;
+}
+
 function reifendruckReifen(vehicle) {
     vehicle = vehicle || {};
     var vorneSoll = vehicle.tpms_rcp_front_value;
@@ -1338,13 +1456,18 @@ function reifendruckReifen(vehicle) {
 function updateTPMS(vehicle) {
     function set(reifen) {
         var $group = $('#tpms-' + reifen.id);
+        var $title = $group.find('title');
         var $text = $group.find('text');
         var $circle = $group.find('circle');
         var val = reifen.wert;
         if (val == null || isNaN(val)) {
             $text.text('--');
             $circle.css('stroke', '#555');
-            $group.attr('aria-label', reifen.name + ': kein Reifendruckwert');
+            $group
+                .removeClass('tpms-ok tpms-warnung tpms-kritisch')
+                .addClass('tpms-unbekannt')
+                .attr('aria-label', reifen.name + ': kein Reifendruckwert');
+            $title.text(reifen.name + ': kein Reifendruckwert');
             return;
         }
         var num = Number(val);
@@ -1358,15 +1481,86 @@ function updateTPMS(vehicle) {
             color = '#d00';
         }
         $circle.css('stroke', color);
+        $group
+            .removeClass('tpms-ok tpms-warnung tpms-kritisch tpms-unbekannt')
+            .addClass('tpms-' + status.klasse);
         var ziel = parseNumber(reifen.soll);
         var text = reifen.name + ': ' + num.toFixed(2) + ' bar';
         if (ziel != null) {
             text += ', Soll ' + ziel.toFixed(2) + ' bar';
         }
-        text += ', Status ' + status.text;
+        var alter = formatiereAlter(reifen.zeit);
+        if (alter) {
+            text += ', Messung ' + alter;
+        }
+        text += ', Status ' + reifendruckHinweis(reifen, status);
         $group.attr('aria-label', text);
+        $title.text(text);
     }
-    reifendruckReifen(vehicle).forEach(set);
+    var reifen = reifendruckReifen(vehicle);
+    reifen.forEach(set);
+    updateReifendruckKurzstatus(reifen);
+}
+
+function updateReifendruckKurzstatus(reifen) {
+    var $summary = $('#tpms-summary');
+    if (!$summary.length) {
+        return;
+    }
+    var mitDaten = reifen.filter(function(eintrag) {
+        return parseNumber(eintrag.wert) != null;
+    });
+    if (!mitDaten.length) {
+        $summary
+            .removeClass('tpms-ok tpms-warnung tpms-kritisch')
+            .addClass('tpms-unbekannt')
+            .text('Reifendruck: --')
+            .attr('title', 'Keine Reifendruckwerte')
+            .attr('aria-label', 'Keine Reifendruckwerte');
+        return;
+    }
+    var statusKlasse = 'ok';
+    var kritische = 0;
+    var warnungen = 0;
+    var niedrigster = null;
+    var juengsteMessung = null;
+    mitDaten.forEach(function(eintrag) {
+        var status = reifendruckStatus(eintrag.wert, eintrag.soll, eintrag.weich, eintrag.hart);
+        if (status.klasse === 'kritisch') {
+            kritische += 1;
+        } else if (status.klasse === 'warnung') {
+            warnungen += 1;
+        }
+        var wert = parseNumber(eintrag.wert);
+        if (wert != null && (niedrigster == null || wert < niedrigster)) {
+            niedrigster = wert;
+        }
+        var zeit = leseZeitstempelMillis(eintrag.zeit);
+        if (zeit != null && (juengsteMessung == null || zeit > juengsteMessung)) {
+            juengsteMessung = zeit;
+        }
+    });
+    var text = 'Reifendruck OK';
+    if (kritische > 0) {
+        statusKlasse = 'kritisch';
+        text = kritische + ' kritisch';
+    } else if (warnungen > 0) {
+        statusKlasse = 'warnung';
+        text = warnungen === 1 ? '1 Reifen prüfen' : warnungen + ' Reifen prüfen';
+    }
+    if (niedrigster != null) {
+        text += ' · min ' + niedrigster.toFixed(1) + ' bar';
+    }
+    var alter = formatiereAlter(juengsteMessung);
+    if (alter) {
+        text += ' · ' + alter;
+    }
+    $summary
+        .removeClass('tpms-ok tpms-warnung tpms-kritisch tpms-unbekannt')
+        .addClass('tpms-' + statusKlasse)
+        .text(text)
+        .attr('title', text)
+        .attr('aria-label', text);
 }
 
 function updateReifendruckDetails(vehicle) {
@@ -1406,7 +1600,8 @@ function updateReifendruckDetails(vehicle) {
                '<td>' + formatiereBar(soll) + '</td>' +
                '<td>' + escapeHtml(abweichung) + '</td>' +
                '<td>' + escapeHtml(alter) + '</td>' +
-               '<td>' + escapeHtml(status.text) + '</td>' +
+               '<td><span class="tpms-status tpms-status-' + status.klasse + '">' +
+               escapeHtml(reifendruckHinweis(eintrag, status)) + '</span></td>' +
                '</tr>';
     });
     var zusammenfassung = 'Reifendruck im Zielbereich';
@@ -1422,6 +1617,26 @@ function updateReifendruckDetails(vehicle) {
                '<th>Reifen</th><th>Ist</th><th>Soll</th><th>Abweichung</th><th>Messung</th><th>Status</th>' +
                '</tr></thead><tbody>' + rows.join('') + '</tbody></table>';
     $details.html(html).show();
+}
+
+function updateBrakeLights(vehicle) {
+    var $lights = $('#brake-lights');
+    if (!$lights.length) {
+        return;
+    }
+    vehicle = vehicle || {};
+    var pedalAktiv = istAktiv(vehicle.brake_pedal);
+    var bremsdruck = parseNumber(vehicle.brake_pedal_pos);
+    var aktiv = pedalAktiv || (bremsdruck != null && bremsdruck > 0.1);
+    var titel = aktiv ? 'Bremslicht an' : 'Bremslicht aus';
+    if (bremsdruck != null) {
+        titel += ' · Bremsdruck ' + bremsdruck.toFixed(1);
+    }
+    $lights
+        .toggleClass('is-active', aktiv)
+        .attr('aria-label', titel)
+        .attr('title', titel);
+    $lights.find('title').text(titel);
 }
 
 function updateOpenings(vehicle, charge) {
@@ -1473,6 +1688,7 @@ function updateOpenings(vehicle, charge) {
 
     var charging = charge && charge.charging_state === 'Charging';
     $('#charge-cable').toggleClass('charging', charging);
+    updateBrakeLights(vehicle);
 }
 
 var MAX_SPEED = 250;
@@ -1566,7 +1782,8 @@ function updateThermometers(inside, outside, battery) {
 }
 
 function updateBatteryIndicator(level, rangeMiles, chargingState, heaterOn) {
-    var pct = level != null ? level : 0;
+    var pct = level != null && !isNaN(level) ? Math.max(0, Math.min(100, Number(level))) : 0;
+    var pctText = Math.round(pct);
     var range = rangeMiles != null ? Math.round(rangeMiles * MILES_TO_KM) : '?';
     var charging = chargingState === 'Charging';
     var heating = !!heaterOn;
@@ -1580,15 +1797,16 @@ function updateBatteryIndicator(level, rangeMiles, chargingState, heaterOn) {
         html += '<div class="heater">\uD83D\uDD25</div>';
     }
     html += '</div>';
-    html += '<div class="battery-value">' + pct + '%</div>';
+    html += '<div class="battery-value">' + pctText + '%</div>';
     html += '<div class="range">' + range + ' km</div>';
     $('#battery-indicator').html(html);
 }
 
 function batteryBar(level) {
-    var pct = level != null ? level : 0;
+    var pct = level != null && !isNaN(level) ? Math.max(0, Math.min(100, Number(level))) : 0;
+    var pctText = Math.round(pct);
     var clip = 'clip-path: inset(' + (100 - pct) + '% 0 0 0)';
-    return '<div class="battery-block"><div class="battery"><div class="level" style="' + clip + '"></div></div><div class="battery-value">' + pct + '%</div></div>';
+    return '<div class="battery-block"><div class="battery"><div class="level" style="' + clip + '"></div></div><div class="battery-value">' + pctText + '%</div></div>';
 }
 
 var lastChargeInfo = null;
@@ -1598,6 +1816,7 @@ var letzteLadedauerMs = null;
 var letzterLadezuwachsProzent = null;
 var lastChargeSessionStartMs = null;
 var lastChargingState = null;
+var lastChargingInfoHtml = null;
 var letzteBatterieTemperatur = null;
 
 function parseNumber(value) {
@@ -2078,7 +2297,12 @@ function updateLadeplanungInfo(charge, drive, data) {
 function updateChargingInfo(charge, wurzelDaten) {
     var $info = $('#charging-info');
     if (!charge) {
-        $info.empty().hide();
+        if (lastChargingInfoHtml !== '') {
+            $info.empty().hide();
+            lastChargingInfoHtml = '';
+        } else {
+            $info.hide();
+        }
         return;
     }
 
@@ -2299,10 +2523,19 @@ function updateChargingInfo(charge, wurzelDaten) {
         rows.push('<tr><th>Zuletzt hinzugefügte %:</th><td>' + lastChargeAddedPercentText + '</td></tr>');
     }
 
-    if (rows.length) {
-        $info.html('<table>' + rows.join('') + '</table>').show();
+    var chargingInfoHtml = rows.length ? '<table>' + rows.join('') + '</table>' : '';
+    if (chargingInfoHtml === lastChargingInfoHtml) {
+        if (rows.length) {
+            $info.show();
+        } else {
+            $info.hide();
+        }
+    } else if (rows.length) {
+        $info.html(chargingInfoHtml).show();
+        lastChargingInfoHtml = chargingInfoHtml;
     } else {
         $info.empty().hide();
+        lastChargingInfoHtml = chargingInfoHtml;
     }
 
     if (sessionStartMsAktuell != null) {
@@ -2432,6 +2665,25 @@ function describe(key) {
         return w.charAt(0).toUpperCase() + w.slice(1);
     }).join(" ");
     return result;
+}
+
+function neuesterDatenZeitstempel(data, vehicle, drive, charge, climate) {
+    var kandidaten = [
+        data && data.fleet_telemetry_updated_at,
+        data && data.timestamp,
+        vehicle && vehicle.timestamp,
+        drive && drive.timestamp,
+        charge && charge.timestamp,
+        climate && climate.timestamp
+    ];
+    var neuester = null;
+    kandidaten.forEach(function(wert) {
+        var millis = leseZeitstempelMillis(wert);
+        if (millis != null && (neuester == null || millis > neuester)) {
+            neuester = millis;
+        }
+    });
+    return neuester;
 }
 
 function updateDataAge(ts) {
@@ -2713,6 +2965,11 @@ function updateOfflineInfo(state, serviceMode, serviceModePlus) {
             $msg.text(OFFLINE_TEXT).show();
             return;
         }
+        if (st === 'disconnected') {
+            hideLoading();
+            $msg.text(DISCONNECTED_TEXT).show();
+            return;
+        }
     }
     hideLoading();
     $msg.hide().text('');
@@ -2826,14 +3083,6 @@ function startStream() {
                 }
             });
         });
-        // Ensure the map shows Essen if no cached data was found
-        var zoom = DEFAULT_ZOOM;
-        if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
-            zoom = map.getZoom();
-        }
-        zoomSetByApp = true;
-        map.setView(DEFAULT_POS, zoom);
-        updateZoomDisplay();
         // Attempt to reconnect after a short delay in case the browser has
         // suspended the connection while running in the background.
         if (!statusAbfrageTimer) {

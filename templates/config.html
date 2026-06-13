@@ -67,21 +67,19 @@
             </label>
         </section>
 
+        {% if not fleet_only %}
         <section class="config-section">
-            <h2>API</h2>
+            <h2>Aktualisierung</h2>
             <label>
-                API Intervall (Sekunden)
+                Intervall (Sekunden)
                 <input type="number" name="api_interval" min="1" step="1" value="{{ config.get('api_interval', 3) }}">
             </label>
             <label>
-                API Intervall ohne Client (Sekunden)
+                Intervall ohne Client (Sekunden)
                 <input type="number" name="api_interval_idle" min="1" step="1" value="{{ config.get('api_interval_idle', 30) }}">
             </label>
-            <label>
-                Tessie API-Token
-                <input type="password" name="tessie_api_token" value="{{ config.get('tessie_api_token','') }}" autocomplete="new-password" placeholder="Neuen API-Token eingeben">
-            </label>
         </section>
+        {% endif %}
 
         <section class="config-section">
             <h2>Anzeige</h2>
@@ -167,7 +165,9 @@
 
         <div class="config-actions">
             <button type="submit">Speichern</button>
+            {% if not fleet_only %}
             <button type="submit" name="refresh_vehicle_list" value="1">Fahrzeugliste aktualisieren</button>
+            {% endif %}
         </div>
     </form>
 </body>

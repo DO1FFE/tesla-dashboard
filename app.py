@@ -70,6 +70,11 @@ try:
 except ImportError:
     phonenumbers = None
 
+try:
+    import paho.mqtt.client as paho_mqtt
+except ImportError:
+    paho_mqtt = None
+
 
 def _secret_key():
     """Return the configured secret key or generate a temporary one."""
@@ -147,10 +152,19 @@ STATE_PERCENT_NORMALIZE_TOLERANCE = max(
     0.0, float(os.getenv("STATE_PERCENT_NORMALIZE_TOLERANCE", "0.05"))
 )
 SECRET_PLACEHOLDER = "********"
-TESLA_TESSIE_MIN_INTERVAL = 5
-letzte_anfrage_pro_vin = {}
 letzte_batterie_temp_pro_vin = {}
-tessie_anfrage_lock = threading.Lock()
+batterie_temp_cache_lock = threading.Lock()
+
+
+def _nur_fleet_telemetrie_datenquelle():
+    """Prüfe, ob Fahrzeugdaten ausschließlich aus Fleet Telemetry kommen dürfen."""
+
+    env_wert = os.getenv("TESLA_DASHBOARD_ONLY_FLEET_TELEMETRY")
+    if env_wert is not None:
+        return env_wert.strip().lower() not in {"", "0", "false", "no", "off"}
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return False
+    return True
 
 
 def _cache_battery_temp(vin, battery_temp):
@@ -161,7 +175,7 @@ def _cache_battery_temp(vin, battery_temp):
         temp_value = float(battery_temp)
     except (TypeError, ValueError):
         return
-    with tessie_anfrage_lock:
+    with batterie_temp_cache_lock:
         letzte_batterie_temp_pro_vin[vin] = temp_value
 
 
@@ -169,7 +183,7 @@ def _cached_battery_temp(vin):
     """Lese die letzte Batterietemperatur aus dem Cache."""
     if vin is None:
         return None
-    with tessie_anfrage_lock:
+    with batterie_temp_cache_lock:
         return letzte_batterie_temp_pro_vin.get(vin)
 
 """Utilities for serving a compatible Socket.IO client script.
@@ -300,6 +314,7 @@ def _ensure_background_started():
 def _ensure_background_started_once():
     _start_statistics_aggregation()
     _schedule_socketio_client_download()
+    _start_fleet_telemetry_listener()
 
 
 if hasattr(app, "before_first_request"):
@@ -665,6 +680,62 @@ def block_ip_clients():
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
+TESLA_FLEET_KEY_DIR = os.path.join(DATA_DIR, "tesla_fleet")
+TESLA_FLEET_PUBLIC_KEY_PATH = os.getenv(
+    "TESLA_FLEET_PUBLIC_KEY_PATH",
+    os.path.join(TESLA_FLEET_KEY_DIR, "com.tesla.3p.public-key.pem"),
+)
+TESLA_FLEET_TELEMETRY_RUNTIME_FILE = os.path.join(
+    TESLA_FLEET_KEY_DIR,
+    "telemetry_runtime.json",
+)
+TESLA_FLEET_VEHICLES_FILE = os.path.join(TESLA_FLEET_KEY_DIR, "vehicles.json")
+TESLA_FLEET_TELEMETRY_STALE_SECONDS = float(
+    os.getenv("TESLA_FLEET_TELEMETRY_STALE_SECONDS", "300")
+)
+WARTUNGSMODUS_DATEI = os.path.join(DATA_DIR, "wartungsmodus_aktiv")
+
+
+def _wartungsmodus_aktiv():
+    """Prüfe, ob die öffentliche Weboberfläche eine Wartungsseite zeigen soll."""
+    env_wert = os.getenv("TESLA_DASHBOARD_WARTUNG")
+    if env_wert is not None:
+        return env_wert.strip().lower() not in {"", "0", "false", "no", "off"}
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return False
+    return os.path.exists(WARTUNGSMODUS_DATEI)
+
+
+def _wartungsmodus_bypass_pfad(pfad):
+    """Lasse technische Endpunkte trotz Wartungsmodus erreichbar."""
+    if pfad in {"/maintenance", "/robots.txt", "/favicon.ico"}:
+        return True
+    return pfad.startswith((
+        "/api/",
+        "/static/",
+        "/images/",
+        "/socket.io/",
+        "/.well-known/",
+    ))
+
+
+@app.before_request
+def _wartungsmodus_anzeigen():
+    """Zeige normalen Besuchern während Umstellungen eine Wartungsseite."""
+    if request.method != "GET":
+        return None
+    if not _wartungsmodus_aktiv():
+        return None
+    if _wartungsmodus_bypass_pfad(request.path):
+        return None
+    response = make_response(
+        render_template("wartung.html", version=__version__, year=CURRENT_YEAR),
+        503,
+    )
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Retry-After"] = "300"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
 
 
 def _vehicle_key(vehicle_id):
@@ -1146,6 +1217,47 @@ CONFIG_ITEMS = [
     {"id": "media-player", "desc": "Medienwiedergabe"},
     {"id": "park-since", "desc": "Parkdauer"},
 ]
+FLEET_TELEMETRIE_UNTERSTÜTZTE_CONFIG_AUSNAHMEN = {"supercharger-list"}
+OWNER_API_TOPLEVEL_FELDER = {
+    "access_type",
+    "api_version",
+    "ble_autopair_enrolled",
+    "cached_data",
+    "calendar_enabled",
+    "color",
+    "command_signing",
+    "device_type",
+    "granular_access",
+    "in_service",
+    "mobile_access_disabled",
+    "nearby_superchargers",
+    "option_codes",
+    "release_notes_supported",
+    "supercharger_payment_needed",
+    "supercharging_enabled",
+}
+
+
+def _config_mit_telemetrie_only_regeln(cfg):
+    """Entferne Optionen, die im reinen Fleet-Telemetry-Modus nicht gelten."""
+
+    cfg = dict(cfg or {})
+    cfg.pop("tessie_api_token", None)
+    if _nur_fleet_telemetrie_datenquelle():
+        for item_id in FLEET_TELEMETRIE_UNTERSTÜTZTE_CONFIG_AUSNAHMEN:
+            cfg[item_id] = False
+    return cfg
+
+
+def _config_items_fuer_anzeige():
+    """Gib die sichtbaren Konfigurationspunkte passend zur Datenquelle zurück."""
+
+    if not _nur_fleet_telemetrie_datenquelle():
+        return CONFIG_ITEMS
+    return [
+        item for item in CONFIG_ITEMS
+        if item.get("id") not in FLEET_TELEMETRIE_UNTERSTÜTZTE_CONFIG_AUSNAHMEN
+    ]
 
 
 _config_cache = {}
@@ -1389,6 +1501,9 @@ def get_news_events_info():
 
     global _news_events_unavailable
 
+    if _nur_fleet_telemetrie_datenquelle():
+        return ""
+
     tesla = get_tesla()
     if tesla is None or _news_events_unavailable:
         return ""
@@ -1489,6 +1604,9 @@ _trip_segment_cache = {}
 _aggregation_lock = threading.Lock()
 _aggregation_initialized = False
 _aggregation_thread = None
+_fleet_telemetry_thread = None
+_fleet_telemetry_lock = threading.Lock()
+_fleet_telemetry_vehicle_cache = {"mtime": None, "vehicles": []}
 
 
 def _force_statistics_rebuild_on_start():
@@ -3166,6 +3284,1235 @@ def _save_cached(vehicle_id, data):
             json.dump(data, f)
     except Exception:
         pass
+
+
+def _fleet_telemetrie_wahr(value):
+    """Wandle Telemetry-Werte in Boolesche Werte um."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return abs(value) > 0.001
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "on", "yes"}
+    return bool(value)
+
+
+def _fleet_telemetrie_norm_text(value):
+    """Normalisiere Enum-Texte aus Fleet Telemetry."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _fleet_telemetrie_enum_suffix(value, prefix):
+    """Entferne einen bekannten Enum-Präfix aus einem Telemetry-Wert."""
+    text = _fleet_telemetrie_norm_text(value)
+    if text is None:
+        return None
+    if text.startswith(prefix):
+        text = text[len(prefix):]
+    return text or None
+
+
+def _fleet_telemetrie_shift(value):
+    """Wandle Fleet-Telemetry-Gangwerte in Dashboard-Werte um."""
+    text = _fleet_telemetrie_enum_suffix(value, "ShiftState")
+    if text in {"P", "R", "N", "D"}:
+        return text
+    return None
+
+
+def _fleet_telemetrie_ladestatus(value):
+    """Wandle Fleet-Telemetry-Ladestatus in vehicle_data-kompatible Werte um."""
+    text = _fleet_telemetrie_norm_text(value)
+    if text is None:
+        return None
+    for prefix in ("DetailedChargeState", "ChargeState"):
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+            break
+    mapping = {
+        "Disconnected": "Disconnected",
+        "Standby": "Disconnected",
+        "NoPower": "NoPower",
+        "Starting": "Starting",
+        "Charging": "Charging",
+        "Complete": "Complete",
+        "Stopped": "Stopped",
+    }
+    return mapping.get(text)
+
+
+def _fleet_telemetrie_fensterwert(value):
+    """Wandle Fleet-Telemetry-Fensterstatus in Owner-API-nahe Werte um."""
+    text = _fleet_telemetrie_norm_text(value)
+    if text is None:
+        return 0
+    text = text.removeprefix("WindowState").lower()
+    if text in {"opened", "partiallyopen"}:
+        return 1
+    return 0
+
+
+def _fleet_telemetrie_hvac_aktiv(value):
+    """Gib zurück, ob ein HvacPower-Wert aktive Klimatisierung bedeutet."""
+    text = _fleet_telemetrie_norm_text(value)
+    if text is None:
+        return False
+    text = text.removeprefix("HvacPowerState")
+    return text in {"On", "Precondition", "OverheatProtect"}
+
+
+def _fleet_telemetrie_hvac_vorklimatisiert(value):
+    text = _fleet_telemetrie_norm_text(value)
+    if text is None:
+        return False
+    text = text.removeprefix("HvacPowerState")
+    return text == "Precondition"
+
+
+def _fleet_telemetrie_klimawächtermodus(value):
+    """Wandle Fleet-Klimawächtermodi in Owner-API-kompatible Werte um."""
+    mode = _fleet_telemetrie_enum_suffix(value, "ClimateKeeperModeState")
+    if not isinstance(mode, str):
+        return mode
+    mode = mode.lower()
+    if mode == "party":
+        return "camp"
+    return mode
+
+
+def _fleet_telemetrie_ungueltig(value):
+    """Erkenne Fleet-Telemetry-Werte ohne verwertbaren Inhalt."""
+    if isinstance(value, dict):
+        return value.get("invalid") is True
+    if isinstance(value, str):
+        return value.strip().lower() in {
+            "",
+            "invalid",
+            "<invalid>",
+            "nan",
+            "none",
+            "null",
+        }
+    return False
+
+
+def _fleet_telemetrie_wert(value):
+    """Gib den nutzbaren Telemetry-Wert oder None zurück."""
+    if _fleet_telemetrie_ungueltig(value):
+        return None
+    if isinstance(value, dict) and "value" in value:
+        return _fleet_telemetrie_wert(value.get("value"))
+    return value
+
+
+def _fleet_telemetrie_vergleichswert(value):
+    """Normalisiere Telemetry-Werte für stabile Änderungsvergleiche."""
+    value = _fleet_telemetrie_wert(value)
+    if isinstance(value, float):
+        return round(value, 6)
+    if isinstance(value, dict):
+        return {
+            key: _fleet_telemetrie_vergleichswert(value[key])
+            for key in sorted(value)
+        }
+    if isinstance(value, list):
+        return [_fleet_telemetrie_vergleichswert(item) for item in value]
+    return value
+
+
+def _fleet_telemetrie_wert_unveraendert(data, field, value):
+    """Prüfe, ob ein Telemetry-Feld bereits mit gleichem Wert im Cache liegt."""
+    rohwerte = data.get("fleet_telemetry_raw") if isinstance(data, dict) else None
+    if not isinstance(rohwerte, dict) or field not in rohwerte:
+        return False
+    alter_wert = _fleet_telemetrie_vergleichswert(rohwerte.get(field))
+    neuer_wert = _fleet_telemetrie_vergleichswert(value)
+    return alter_wert == neuer_wert
+
+
+def _fleet_telemetrie_entferne_fremddaten(data):
+    """Entferne aktive Anzeigen, die nur aus alten Owner-API-Abrufen stammen."""
+
+    if not isinstance(data, dict):
+        return data
+    for field in OWNER_API_TOPLEVEL_FELDER:
+        data.pop(field, None)
+    return data
+
+
+def _fleet_telemetrie_setze_media(media, key, value):
+    """Schreibe ein Media-Feld und entferne ungültige Werte."""
+    if value is None:
+        media.pop(key, None)
+    else:
+        media[key] = value
+
+
+def _fleet_telemetrie_setze_software_update(vehicle_state):
+    """Erzeuge die Owner-API-Struktur für Software-Updates."""
+    info = vehicle_state.get("software_update")
+    if not isinstance(info, dict):
+        info = {}
+        vehicle_state["software_update"] = info
+    return info
+
+
+def _fleet_telemetrie_tpms_warnungen(value):
+    """Normalisiere TPMS-Warnungen auf Owner-API-Reifenfelder."""
+    textteile = []
+    if value is None:
+        return {}
+    if isinstance(value, (list, tuple, set)):
+        textteile = [str(v).lower() for v in value]
+    elif isinstance(value, dict):
+        for key, aktiv in value.items():
+            if _fleet_telemetrie_wahr(aktiv):
+                textteile.append(str(key).lower())
+    else:
+        textteile = [str(value).lower()]
+    text = " ".join(textteile)
+    if not text.strip() or "none" in text:
+        return {"fl": False, "fr": False, "rl": False, "rr": False}
+    return {
+        "fl": "frontleft" in text or "fl" in text or "front_left" in text,
+        "fr": "frontright" in text or "fr" in text or "front_right" in text,
+        "rl": "rearleft" in text or "rl" in text or "rear_left" in text,
+        "rr": "rearright" in text or "rr" in text or "rear_right" in text,
+    }
+
+
+def _fleet_telemetrie_zeitstempel_ms(value):
+    """Konvertiere Telemetry-Zeitstempel für die UI in Millisekunden."""
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except Exception:
+        return value
+    if numeric and numeric < 1e12:
+        numeric *= 1000
+    return int(numeric)
+
+
+def _fleet_telemetrie_packleistung_aktualisieren(data):
+    """Berechne die Owner-API-nahe Leistungsanzeige aus Packwerten."""
+    charge = data.setdefault("charge_state", {})
+    drive = data.setdefault("drive_state", {})
+    spannung = _as_float(charge.get("pack_voltage"))
+    strom = _as_float(charge.get("pack_current"))
+    if spannung is None or strom is None:
+        return
+    packleistung = round(spannung * strom / 1000.0, 2)
+    charge["pack_power"] = packleistung
+    drive["power"] = -packleistung
+
+
+def _fleet_telemetrie_runtime_config():
+    """Lade die lokale Fleet-Telemetry-Laufzeitkonfiguration."""
+    cfg = {}
+    try:
+        with open(TESLA_FLEET_TELEMETRY_RUNTIME_FILE, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+            if isinstance(loaded, dict):
+                cfg.update(loaded)
+    except Exception:
+        pass
+    env_enabled = os.getenv("TESLA_FLEET_TELEMETRY_ENABLED")
+    if env_enabled is not None:
+        cfg["enabled"] = env_enabled.strip().lower() not in {
+            "",
+            "0",
+            "false",
+            "no",
+            "off",
+        }
+    cfg.setdefault("enabled", False)
+    cfg.setdefault("mqtt_host", os.getenv("TESLA_FLEET_TELEMETRY_MQTT_HOST", "127.0.0.1"))
+    cfg.setdefault(
+        "mqtt_port",
+        int(os.getenv("TESLA_FLEET_TELEMETRY_MQTT_PORT", "1884")),
+    )
+    cfg.setdefault("topic_base", os.getenv("TESLA_FLEET_TELEMETRY_TOPIC_BASE", "tesla"))
+    cfg.setdefault("client_id", "tesla-dashboard-telemetry")
+    return cfg
+
+
+def _fleet_telemetrie_aktiv():
+    """Prüfe, ob der Fleet-Telemetry-Empfang aktiviert ist."""
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return False
+    cfg = _fleet_telemetrie_runtime_config()
+    return bool(cfg.get("enabled"))
+
+
+def _fleet_telemetrie_fahrzeuge():
+    """Lade VIN-zu-Dashboard-ID-Zuordnungen für Telemetry-Themen."""
+    try:
+        mtime = os.path.getmtime(TESLA_FLEET_VEHICLES_FILE)
+    except OSError:
+        mtime = None
+    if _fleet_telemetry_vehicle_cache.get("mtime") == mtime:
+        return list(_fleet_telemetry_vehicle_cache.get("vehicles") or [])
+    vehicles = []
+    if mtime is not None:
+        try:
+            with open(TESLA_FLEET_VEHICLES_FILE, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if isinstance(payload, dict):
+                raw_vehicles = payload.get("vehicles")
+            else:
+                raw_vehicles = payload
+            if isinstance(raw_vehicles, list):
+                vehicles = [v for v in raw_vehicles if isinstance(v, dict)]
+        except Exception:
+            vehicles = []
+    _fleet_telemetry_vehicle_cache["mtime"] = mtime
+    _fleet_telemetry_vehicle_cache["vehicles"] = vehicles
+    return list(vehicles)
+
+
+def _fleet_telemetrie_cache_ids(vin):
+    """Ermittle alle Dashboard-Cache-IDs für eine Telemetry-VIN."""
+    cache_ids = ["default"]
+    for vehicle in _fleet_telemetrie_fahrzeuge():
+        if str(vehicle.get("vin") or "") == str(vin):
+            for key in ("id_s", "id", "vehicle_id"):
+                value = vehicle.get(key)
+                if value is not None:
+                    cache_ids.append(str(value))
+            break
+    if _default_vehicle_id is not None:
+        cache_ids.append(str(_default_vehicle_id))
+    result = []
+    for cache_id in cache_ids:
+        if cache_id and cache_id not in result:
+            result.append(cache_id)
+    return result
+
+
+def _fleet_telemetrie_basisdaten(data, vin, cache_id, timestamp_ms):
+    """Erzeuge fehlende Dashboard-Unterstrukturen für Telemetry-Daten."""
+    if not isinstance(data, dict):
+        data = {}
+    _fleet_telemetrie_entferne_fremddaten(data)
+    data.setdefault("state", "online")
+    data["state"] = "online"
+    data.setdefault("id_s", cache_id if cache_id != "default" else _default_vehicle_id)
+    if vin:
+        data.setdefault("vin", vin)
+    for vehicle in _fleet_telemetrie_fahrzeuge():
+        if str(vehicle.get("vin") or "") == str(vin):
+            data.setdefault("id_s", str(vehicle.get("id_s") or vehicle.get("id") or data.get("id_s")))
+            data.setdefault("display_name", vehicle.get("display_name"))
+            break
+    data.setdefault("drive_state", {})
+    data.setdefault("charge_state", {})
+    data.setdefault("vehicle_state", {})
+    data.setdefault("climate_state", {})
+    data.setdefault("vehicle_config", {})
+    data["timestamp"] = timestamp_ms
+    data["fleet_telemetry_updated_at"] = timestamp_ms
+    return data
+
+
+def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
+    """Schreibe ein einzelnes Fleet-Telemetry-Feld in die Dashboard-Struktur."""
+    value = _fleet_telemetrie_wert(value)
+    data.setdefault("fleet_telemetry_raw", {})[field] = value
+    drive = data.setdefault("drive_state", {})
+    charge = data.setdefault("charge_state", {})
+    vehicle_state = data.setdefault("vehicle_state", {})
+    climate = data.setdefault("climate_state", {})
+    config = data.setdefault("vehicle_config", {})
+    gui = data.setdefault("gui_settings", {})
+
+    if field == "Location":
+        if isinstance(value, dict):
+            lat = value.get("latitude")
+            lon = value.get("longitude")
+            if lat is not None and lon is not None:
+                drive["latitude"] = lat
+                drive["longitude"] = lon
+                drive["native_latitude"] = lat
+                drive["native_longitude"] = lon
+                drive["native_location_supported"] = True
+                drive["native_type"] = "wgs"
+                drive["gps_as_of"] = timestamp_ms
+                drive["timestamp"] = timestamp_ms
+        return True
+    if field == "DestinationLocation":
+        if isinstance(value, dict):
+            lat = value.get("latitude")
+            lon = value.get("longitude")
+            if lat is not None and lon is not None:
+                drive["active_route_latitude"] = lat
+                drive["active_route_longitude"] = lon
+            else:
+                drive.pop("active_route_latitude", None)
+                drive.pop("active_route_longitude", None)
+        elif value is None:
+            drive.pop("active_route_latitude", None)
+            drive.pop("active_route_longitude", None)
+        drive["timestamp"] = timestamp_ms
+        return True
+    if field == "DestinationName":
+        if value is None:
+            drive.pop("active_route_destination", None)
+        else:
+            drive["active_route_destination"] = value
+        drive["timestamp"] = timestamp_ms
+        return True
+    if field == "ExpectedEnergyPercentAtTripArrival":
+        drive["active_route_energy_at_arrival"] = value
+        drive["timestamp"] = timestamp_ms
+        return True
+    if field == "MilesToArrival":
+        drive["active_route_miles_to_arrival"] = value
+        drive["timestamp"] = timestamp_ms
+        return True
+    if field == "MinutesToArrival":
+        drive["active_route_minutes_to_arrival"] = value
+        drive["timestamp"] = timestamp_ms
+        return True
+    if field == "RouteTrafficMinutesDelay":
+        drive["active_route_traffic_minutes_delay"] = value
+        drive["timestamp"] = timestamp_ms
+        return True
+    if field == "GpsHeading":
+        drive["heading"] = value
+        drive["timestamp"] = timestamp_ms
+        return True
+    if field == "GpsState":
+        drive["gps_state"] = value
+        drive["timestamp"] = timestamp_ms
+        return True
+    if field == "VehicleSpeed":
+        drive["speed"] = value
+        drive["timestamp"] = timestamp_ms
+        return True
+    if field == "Gear":
+        drive["shift_state"] = _fleet_telemetrie_shift(value)
+        drive["timestamp"] = timestamp_ms
+        return True
+
+    if field in {"BatteryLevel", "Soc"}:
+        charge["battery_level"] = value
+        charge["usable_battery_level"] = value
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field in {"DetailedChargeState", "ChargeState"}:
+        ladestatus = _fleet_telemetrie_ladestatus(value)
+        if ladestatus is not None:
+            charge["charging_state"] = ladestatus
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "ChargeLimitSoc":
+        charge["charge_limit_soc"] = value
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "EstBatteryRange":
+        charge["est_battery_range"] = value
+        charge["battery_range"] = value
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "IdealBatteryRange":
+        charge["ideal_battery_range"] = value
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "RatedRange":
+        charge["battery_range"] = value
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "TimeToFullCharge":
+        charge["time_to_full_charge"] = value
+        try:
+            charge["minutes_to_full_charge"] = int(round(float(value) * 60))
+        except Exception:
+            charge.pop("minutes_to_full_charge", None)
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "EstimatedHoursToChargeTermination":
+        charge["time_to_full_charge"] = value
+        try:
+            charge["minutes_to_full_charge"] = int(round(float(value) * 60))
+        except Exception:
+            charge.pop("minutes_to_full_charge", None)
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "ChargeAmps":
+        charge["charge_amps"] = value
+        charge["charger_actual_current"] = value
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "ChargeRateMilePerHour":
+        charge["charge_rate"] = value
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field in {"ACChargingPower", "DCChargingPower"}:
+        charge["charger_power"] = value
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field in {"ACChargingEnergyIn", "DCChargingEnergyIn"}:
+        if field == "ACChargingEnergyIn":
+            charge["ac_charge_energy_added"] = value
+        else:
+            charge["dc_charge_energy_added"] = value
+        if value is not None:
+            charge["charge_energy_added"] = value
+            data["last_charge_energy_added"] = value
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field in {"ModuleTempMin", "ModuleTempMax"}:
+        target = "module_temp_min" if field == "ModuleTempMin" else "module_temp_max"
+        charge[target] = value
+        temp_min = _as_float(charge.get("module_temp_min"))
+        temp_max = _as_float(charge.get("module_temp_max"))
+        if temp_min is not None and temp_max is not None:
+            charge["battery_temp"] = (temp_min + temp_max) / 2
+        elif temp_min is not None:
+            charge["battery_temp"] = temp_min
+        elif temp_max is not None:
+            charge["battery_temp"] = temp_max
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field in {"PackVoltage", "PackCurrent"}:
+        target = "pack_voltage" if field == "PackVoltage" else "pack_current"
+        charge[target] = value
+        _fleet_telemetrie_packleistung_aktualisieren(data)
+        charge["timestamp"] = timestamp_ms
+        drive["timestamp"] = timestamp_ms
+        return True
+    if field == "ChargeCurrentRequest":
+        charge["charge_current_request"] = value
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "ChargeCurrentRequestMax":
+        charge["charge_current_request_max"] = value
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "ChargeEnableRequest":
+        charge["charge_enable_request"] = value
+        charge["user_charge_enable_request"] = value
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "ChargerPhases":
+        charge["charger_phases"] = value
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "ChargerVoltage":
+        charge["charger_voltage"] = value
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "ChargePortDoorOpen":
+        charge["charge_port_door_open"] = _fleet_telemetrie_wahr(value)
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "ChargePortColdWeatherMode":
+        charge["charge_port_cold_weather_mode"] = _fleet_telemetrie_wahr(value)
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "ChargePortLatch":
+        charge["charge_port_latch"] = _fleet_telemetrie_enum_suffix(
+            value,
+            "ChargePortLatch",
+        )
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "ChargePort":
+        charge_port_type = _fleet_telemetrie_enum_suffix(value, "ChargePort")
+        charge["charge_port_type"] = charge_port_type
+        config["charge_port_type"] = charge_port_type
+        charge["timestamp"] = timestamp_ms
+        config["timestamp"] = timestamp_ms
+        return True
+    if field == "FastChargerPresent":
+        charge["fast_charger_present"] = _fleet_telemetrie_wahr(value)
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "FastChargerType":
+        charge["fast_charger_type"] = _fleet_telemetrie_enum_suffix(value, "FastCharger")
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "ChargingCableType":
+        charge["conn_charge_cable"] = _fleet_telemetrie_enum_suffix(
+            value,
+            "ChargingCableType",
+        )
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "PreconditioningEnabled":
+        charge["preconditioning_enabled"] = _fleet_telemetrie_wahr(value)
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "NotEnoughPowerToHeat":
+        charge["not_enough_power_to_heat"] = _fleet_telemetrie_wahr(value)
+        climate["battery_heater_no_power"] = charge["not_enough_power_to_heat"]
+        charge["timestamp"] = timestamp_ms
+        climate["timestamp"] = timestamp_ms
+        return True
+    if field == "ScheduledChargingMode":
+        charge["scheduled_charging_mode"] = _fleet_telemetrie_enum_suffix(
+            value,
+            "ScheduledChargingMode",
+        )
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "ScheduledChargingPending":
+        charge["scheduled_charging_pending"] = _fleet_telemetrie_wahr(value)
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "ScheduledChargingStartTime":
+        charge["scheduled_charging_start_time"] = _fleet_telemetrie_zeitstempel_ms(value)
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "SuperchargerSessionTripPlanner":
+        charge["supercharger_session_trip_planner"] = _fleet_telemetrie_wahr(value)
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "BatteryHeaterOn":
+        charge["battery_heater_on"] = _fleet_telemetrie_wahr(value)
+        climate["battery_heater_on"] = charge["battery_heater_on"]
+        climate["battery_heater"] = charge["battery_heater_on"]
+        charge["timestamp"] = timestamp_ms
+        climate["timestamp"] = timestamp_ms
+        return True
+
+    if field == "Locked":
+        vehicle_state["locked"] = _fleet_telemetrie_wahr(value)
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "DoorState" and isinstance(value, dict):
+        mapping = {
+            "DriverFront": "df",
+            "PassengerFront": "pf",
+            "DriverRear": "dr",
+            "PassengerRear": "pr",
+            "TrunkFront": "ft",
+            "TrunkRear": "rt",
+        }
+        for source, target in mapping.items():
+            if source in value:
+                vehicle_state[target] = 1 if _fleet_telemetrie_wahr(value.get(source)) else 0
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field in {"FdWindow", "FpWindow", "RdWindow", "RpWindow"}:
+        owner_key = {
+            "FdWindow": "fd_window",
+            "FpWindow": "fp_window",
+            "RdWindow": "rd_window",
+            "RpWindow": "rp_window",
+        }[field]
+        vehicle_state[owner_key] = _fleet_telemetrie_fensterwert(value)
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "Odometer":
+        vehicle_state["odometer"] = value
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "VehicleName":
+        vehicle_state["vehicle_name"] = value
+        data["display_name"] = value
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "Version":
+        vehicle_state["car_version"] = value
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "ServiceMode":
+        vehicle_state["service_mode"] = _fleet_telemetrie_wahr(value)
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "ValetModeEnabled":
+        vehicle_state["valet_mode"] = _fleet_telemetrie_wahr(value)
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "DriverSeatOccupied":
+        vehicle_state["is_user_present"] = _fleet_telemetrie_wahr(value)
+        vehicle_state["driver_present"] = vehicle_state["is_user_present"]
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "BrakePedal":
+        vehicle_state["brake_pedal"] = _fleet_telemetrie_wahr(value)
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "BrakePedalPos":
+        vehicle_state["brake_pedal_pos"] = value
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "CenterDisplay":
+        vehicle_state["center_display_state"] = _fleet_telemetrie_enum_suffix(
+            value,
+            "DisplayState",
+        )
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "HomelinkDeviceCount":
+        vehicle_state["homelink_device_count"] = value
+        vehicle_state["homelink_nearby"] = bool(value)
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "HomelinkNearby":
+        vehicle_state["homelink_nearby"] = _fleet_telemetrie_wahr(value)
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "SentryMode":
+        vehicle_state["sentry_mode"] = _fleet_telemetrie_enum_suffix(
+            value,
+            "SentryModeState",
+        )
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "RemoteStartEnabled":
+        vehicle_state["remote_start_enabled"] = _fleet_telemetrie_wahr(value)
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "SpeedLimitMode":
+        speed_limit = vehicle_state.setdefault("speed_limit_mode", {})
+        speed_limit["active"] = _fleet_telemetrie_wahr(value)
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "CurrentLimitMph":
+        speed_limit = vehicle_state.setdefault("speed_limit_mode", {})
+        speed_limit["current_limit_mph"] = value
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "LightsHazardsActive":
+        vehicle_state["lights_hazards_active"] = _fleet_telemetrie_wahr(value)
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "LightsTurnSignal":
+        vehicle_state["lights_turn_signal"] = _fleet_telemetrie_enum_suffix(
+            value,
+            "TurnSignalState",
+        )
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "LightsHighBeams":
+        vehicle_state["lights_high_beams"] = _fleet_telemetrie_wahr(value)
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field.startswith("SoftwareUpdate"):
+        software = _fleet_telemetrie_setze_software_update(vehicle_state)
+        if field == "SoftwareUpdateDownloadPercentComplete":
+            software["download_perc"] = value
+        elif field == "SoftwareUpdateInstallationPercentComplete":
+            software["install_perc"] = value
+        elif field == "SoftwareUpdateExpectedDurationMinutes":
+            try:
+                software["expected_duration_sec"] = int(float(value) * 60)
+            except Exception:
+                software.pop("expected_duration_sec", None)
+        elif field == "SoftwareUpdateScheduledStartTime":
+            software["scheduled_time_ms"] = _fleet_telemetrie_zeitstempel_ms(value)
+        elif field == "SoftwareUpdateVersion":
+            software["version"] = "" if value is None else str(value)
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    tpms_pressure_map = {
+        "TpmsPressureFl": "tpms_pressure_fl",
+        "TpmsPressureFr": "tpms_pressure_fr",
+        "TpmsPressureRl": "tpms_pressure_rl",
+        "TpmsPressureRr": "tpms_pressure_rr",
+    }
+    if field in tpms_pressure_map:
+        vehicle_state[tpms_pressure_map[field]] = value
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    tpms_time_map = {
+        "TpmsLastSeenPressureTimeFl": "tpms_last_seen_pressure_time_fl",
+        "TpmsLastSeenPressureTimeFr": "tpms_last_seen_pressure_time_fr",
+        "TpmsLastSeenPressureTimeRl": "tpms_last_seen_pressure_time_rl",
+        "TpmsLastSeenPressureTimeRr": "tpms_last_seen_pressure_time_rr",
+    }
+    if field in tpms_time_map:
+        vehicle_state[tpms_time_map[field]] = _fleet_telemetrie_zeitstempel_ms(value)
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field in {"TpmsHardWarnings", "TpmsSoftWarnings"}:
+        prefix = "tpms_hard_warning" if field == "TpmsHardWarnings" else "tpms_soft_warning"
+        for reifen, aktiv in _fleet_telemetrie_tpms_warnungen(value).items():
+            vehicle_state[f"{prefix}_{reifen}"] = aktiv
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field.startswith("Media"):
+        media = vehicle_state.setdefault("media_info", {})
+        media_map = {
+            "MediaAudioVolume": "audio_volume",
+            "MediaAudioVolumeIncrement": "audio_volume_increment",
+            "MediaAudioVolumeMax": "audio_volume_max",
+            "MediaNowPlayingAlbum": "now_playing_album",
+            "MediaNowPlayingArtist": "now_playing_artist",
+            "MediaNowPlayingDuration": "now_playing_duration",
+            "MediaNowPlayingElapsed": "now_playing_elapsed",
+            "MediaNowPlayingStation": "now_playing_station",
+            "MediaNowPlayingTitle": "now_playing_title",
+            "MediaPlaybackSource": "now_playing_source",
+            "MediaPlaybackStatus": "media_playback_status",
+        }
+        target = media_map.get(field)
+        if target:
+            if field == "MediaPlaybackStatus":
+                value = _fleet_telemetrie_enum_suffix(value, "MediaStatus")
+            _fleet_telemetrie_setze_media(media, target, value)
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+
+    if field == "InsideTemp":
+        climate["inside_temp"] = value
+        climate["timestamp"] = timestamp_ms
+        return True
+    if field == "OutsideTemp":
+        climate["outside_temp"] = value
+        climate["timestamp"] = timestamp_ms
+        return True
+    if field == "HvacPower":
+        climate["is_climate_on"] = _fleet_telemetrie_hvac_aktiv(value)
+        climate["is_auto_conditioning_on"] = climate["is_climate_on"]
+        climate["is_preconditioning"] = _fleet_telemetrie_hvac_vorklimatisiert(value)
+        climate["timestamp"] = timestamp_ms
+        return True
+    if field in {"HvacFanSpeed", "HvacFanStatus"}:
+        climate["fan_status"] = value
+        climate["timestamp"] = timestamp_ms
+        return True
+    if field == "HvacAutoMode":
+        climate["hvac_auto_request"] = _fleet_telemetrie_enum_suffix(
+            value,
+            "HvacAutoModeState",
+        )
+        climate["timestamp"] = timestamp_ms
+        return True
+    if field == "HvacLeftTemperatureRequest":
+        climate["driver_temp_setting"] = value
+        climate["timestamp"] = timestamp_ms
+        return True
+    if field == "HvacRightTemperatureRequest":
+        climate["passenger_temp_setting"] = value
+        climate["timestamp"] = timestamp_ms
+        return True
+    if field == "ClimateKeeperMode":
+        climate["climate_keeper_mode"] = _fleet_telemetrie_klimawächtermodus(value)
+        climate["timestamp"] = timestamp_ms
+        return True
+    if field == "CabinOverheatProtectionMode":
+        climate["cabin_overheat_protection"] = _fleet_telemetrie_enum_suffix(
+            value,
+            "CabinOverheatProtectionModeState",
+        )
+        climate["timestamp"] = timestamp_ms
+        return True
+    if field == "CabinOverheatProtectionTemperatureLimit":
+        limit = _fleet_telemetrie_enum_suffix(
+            value,
+            "CabinOverheatProtectionTempLimit",
+        )
+        limit = _fleet_telemetrie_enum_suffix(
+            limit,
+            "ClimateOverheatProtectionTempLimit",
+        )
+        climate["cop_activation_temperature"] = limit
+        climate["timestamp"] = timestamp_ms
+        return True
+    if field == "DefrostMode":
+        defrost = _fleet_telemetrie_enum_suffix(value, "DefrostModeState")
+        climate["defrost_mode"] = defrost
+        climate["is_front_defroster_on"] = bool(defrost and str(defrost).lower() != "off")
+        climate["timestamp"] = timestamp_ms
+        return True
+    if field == "DefrostForPreconditioning":
+        climate["is_front_defroster_on"] = _fleet_telemetrie_wahr(value)
+        climate["timestamp"] = timestamp_ms
+        return True
+    if field == "RearDefrostEnabled":
+        climate["is_rear_defroster_on"] = _fleet_telemetrie_wahr(value)
+        climate["timestamp"] = timestamp_ms
+        return True
+    if field == "WiperHeatEnabled":
+        climate["wiper_blade_heater"] = _fleet_telemetrie_wahr(value)
+        climate["timestamp"] = timestamp_ms
+        return True
+    if field == "HvacSteeringWheelHeatLevel":
+        climate["steering_wheel_heat_level"] = value
+        try:
+            climate["steering_wheel_heater"] = float(value) > 0
+        except Exception:
+            climate["steering_wheel_heater"] = _fleet_telemetrie_wahr(value)
+        climate["timestamp"] = timestamp_ms
+        return True
+    if field == "HvacSteeringWheelHeatAuto":
+        climate["auto_steering_wheel_heat"] = _fleet_telemetrie_wahr(value)
+        climate["timestamp"] = timestamp_ms
+        return True
+    seat_heater_map = {
+        "SeatHeaterLeft": "seat_heater_left",
+        "SeatHeaterRight": "seat_heater_right",
+        "SeatHeaterRearLeft": "seat_heater_rear_left",
+        "SeatHeaterRearCenter": "seat_heater_rear_center",
+        "SeatHeaterRearRight": "seat_heater_rear_right",
+    }
+    if field in seat_heater_map:
+        climate[seat_heater_map[field]] = value
+        climate["timestamp"] = timestamp_ms
+        return True
+    seat_cooling_map = {
+        "ClimateSeatCoolingFrontLeft": "seat_fan_front_left",
+        "ClimateSeatCoolingFrontRight": "seat_fan_front_right",
+    }
+    if field in seat_cooling_map:
+        climate[seat_cooling_map[field]] = value
+        climate["timestamp"] = timestamp_ms
+        return True
+
+    if field == "CarType":
+        config["car_type"] = _fleet_telemetrie_enum_suffix(value, "CarType")
+        config["timestamp"] = timestamp_ms
+        return True
+    if field == "EfficiencyPackage":
+        config["efficiency_package"] = value
+        config["timestamp"] = timestamp_ms
+        return True
+    if field == "Trim":
+        config["trim_badging"] = value
+        config["timestamp"] = timestamp_ms
+        return True
+    if field == "ExteriorColor":
+        config["exterior_color"] = value
+        config["timestamp"] = timestamp_ms
+        return True
+    if field == "WheelType":
+        config["wheel_type"] = value
+        config["timestamp"] = timestamp_ms
+        return True
+    if field == "EuropeVehicle":
+        config["eu_vehicle"] = _fleet_telemetrie_wahr(value)
+        config["timestamp"] = timestamp_ms
+        return True
+    if field == "RearSeatHeaters":
+        config["rear_seat_heaters"] = value
+        config["timestamp"] = timestamp_ms
+        return True
+    if field == "RightHandDrive":
+        config["rhd"] = _fleet_telemetrie_wahr(value)
+        config["timestamp"] = timestamp_ms
+        return True
+    if field == "RoofColor":
+        config["roof_color"] = value
+        config["timestamp"] = timestamp_ms
+        return True
+    if field == "SunroofInstalled":
+        config["sun_roof_installed"] = _fleet_telemetrie_enum_suffix(
+            value,
+            "SunroofInstalledState",
+        )
+        config["timestamp"] = timestamp_ms
+        return True
+
+    if field == "Setting24HourTime":
+        gui["gui_24_hour_time"] = _fleet_telemetrie_wahr(value)
+        gui["timestamp"] = timestamp_ms
+        return True
+    if field == "SettingChargeUnit":
+        gui["gui_charge_rate_units"] = _fleet_telemetrie_enum_suffix(
+            value,
+            "ChargeUnitPreference",
+        )
+        gui["timestamp"] = timestamp_ms
+        return True
+    if field == "SettingDistanceUnit":
+        gui["gui_distance_units"] = _fleet_telemetrie_enum_suffix(
+            value,
+            "DistanceUnit",
+        )
+        gui["timestamp"] = timestamp_ms
+        return True
+    if field == "SettingTemperatureUnit":
+        gui["gui_temperature_units"] = _fleet_telemetrie_enum_suffix(
+            value,
+            "TemperatureUnit",
+        )
+        gui["timestamp"] = timestamp_ms
+        return True
+    if field == "SettingTirePressureUnit":
+        gui["gui_tirepressure_units"] = _fleet_telemetrie_enum_suffix(
+            value,
+            "PressureUnit",
+        )
+        gui["timestamp"] = timestamp_ms
+        return True
+
+    return True
+
+
+def _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data):
+    """Aktualisiere abgeleitete Dashboard-Daten für Telemetry-Ereignisse."""
+    if not isinstance(data, dict):
+        return data
+
+    try:
+        track_park_time(data)
+        data["park_start"] = park_start_ms
+        data["park_duration"] = park_duration_string(park_start_ms)
+    except Exception:
+        pass
+
+    try:
+        track_drive_path(data)
+        data["path"] = trip_path
+    except Exception:
+        pass
+
+    drive = data.get("drive_state")
+    if not isinstance(drive, dict):
+        return data
+    lat = drive.get("latitude")
+    lon = drive.get("longitude")
+    if lat is not None and lon is not None:
+        try:
+            entry = address_cache.get(cache_id)
+            now = time.time()
+            needs_update = (
+                entry is None
+                or now - entry.get("ts", 0) >= 5
+                or abs(entry.get("lat") - lat) > 1e-4
+                or abs(entry.get("lon") - lon) > 1e-4
+            )
+            if needs_update:
+                result = reverse_geocode(lat, lon, cache_id)
+                addr = result.get("address")
+                if addr:
+                    address_cache[cache_id] = {
+                        "lat": lat,
+                        "lon": lon,
+                        "address": addr,
+                        "ts": now,
+                    }
+            entry = address_cache.get(cache_id)
+            if entry and entry.get("address"):
+                data["location_address"] = entry["address"]
+            else:
+                data.pop("location_address", None)
+        except Exception:
+            pass
+    return data
+
+
+def _fleet_telemetrie_cache_aktualisieren(vin, field, value, timestamp_ms=None):
+    """Übernehme ein MQTT-Telemetry-Feld in Cache, Live-Daten und Streams."""
+    if timestamp_ms is None:
+        timestamp_ms = int(time.time() * 1000)
+    value = _fleet_telemetrie_wert(value)
+    aktualisierte_daten = []
+    with _fleet_telemetry_lock:
+        for cache_id in _fleet_telemetrie_cache_ids(vin):
+            data = latest_data.get(cache_id)
+            if not isinstance(data, dict):
+                data = _load_cached(cache_id) or {}
+            if _fleet_telemetrie_wert_unveraendert(data, field, value):
+                continue
+            data = _fleet_telemetrie_basisdaten(data, vin, cache_id, timestamp_ms)
+            if not _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
+                continue
+            data["state_checked_at"] = timestamp_ms
+            data["fleet_telemetry_last_field"] = field
+            data["preconditioning_display_allowed"] = (
+                _vorklimatisierung_im_stand_erlaubt(data)
+            )
+            data = _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data)
+            data["_live"] = True
+            data.pop("api_error", None)
+            latest_data[cache_id] = data
+            try:
+                cached_copy = dict(data)
+                cached_copy.pop("_live", None)
+                cached_copy.pop("state_checked_at", None)
+                _save_cached(cache_id, cached_copy)
+            except Exception:
+                pass
+            aktualisierte_daten.append((cache_id, data))
+    for cache_id, data in aktualisierte_daten:
+        for q in subscribers.get(cache_id, []):
+            q.put(data)
+    return bool(aktualisierte_daten)
+
+
+def _fleet_telemetrie_verbindungsstatus_state(status):
+    """Wandle Fleet-Telemetry-Connectivity-Status in Dashboard-State um."""
+    if status is None:
+        return None
+    status_text = str(status).strip().lower()
+    if status_text == "connected":
+        return "online"
+    if status_text == "disconnected":
+        return "disconnected"
+    return None
+
+
+def _fleet_telemetrie_verbindung_aktualisieren(vin, payload, timestamp_ms=None):
+    """Übernehme Fleet-Telemetry-Verbindungsereignisse in den Cache."""
+    if timestamp_ms is None:
+        timestamp_ms = int(time.time() * 1000)
+    status = None
+    if isinstance(payload, dict):
+        status = payload.get("Status") or payload.get("status")
+    state = _fleet_telemetrie_verbindungsstatus_state(status)
+    if state is None:
+        return False
+    aktualisierte_daten = []
+    with _fleet_telemetry_lock:
+        for cache_id in _fleet_telemetrie_cache_ids(vin):
+            data = latest_data.get(cache_id)
+            if not isinstance(data, dict):
+                data = _load_cached(cache_id) or {}
+            data = _fleet_telemetrie_basisdaten(data, vin, cache_id, timestamp_ms)
+            data["state"] = state
+            data["state_checked_at"] = timestamp_ms
+            data["fleet_telemetry_connectivity"] = payload
+            data["_live"] = True
+            latest_data[cache_id] = data
+            try:
+                cached_copy = dict(data)
+                cached_copy.pop("_live", None)
+                cached_copy.pop("state_checked_at", None)
+                _save_cached(cache_id, cached_copy)
+            except Exception:
+                pass
+            aktualisierte_daten.append((cache_id, data))
+    for cache_id, data in aktualisierte_daten:
+        for q in subscribers.get(cache_id, []):
+            q.put(data)
+    return bool(aktualisierte_daten)
+
+
+def _fleet_telemetrie_decode_payload(payload):
+    """Dekodiere MQTT-Nutzdaten aus Fleet Telemetry."""
+    if isinstance(payload, bytes):
+        payload = payload.decode("utf-8", errors="replace")
+    try:
+        return json.loads(payload)
+    except Exception:
+        return payload
+
+
+def _fleet_telemetrie_mqtt_message(topic, payload, cfg=None):
+    """Verarbeite eine einzelne MQTT-Nachricht aus Fleet Telemetry."""
+    if cfg is None:
+        cfg = _fleet_telemetrie_runtime_config()
+    topic_base = str(cfg.get("topic_base") or "tesla").strip("/")
+    parts = topic.split("/")
+    if len(parts) < 3 or parts[0] != topic_base:
+        return False
+    vin = parts[1]
+    typ = parts[2]
+    value = _fleet_telemetrie_decode_payload(payload)
+    if typ == "v" and len(parts) >= 4:
+        field = "/".join(parts[3:])
+        return _fleet_telemetrie_cache_aktualisieren(vin, field, value)
+    if typ == "connectivity":
+        return _fleet_telemetrie_verbindung_aktualisieren(vin, value)
+    return False
+
+
+def _fleet_telemetrie_listener_loop():
+    """Höre auf MQTT-Daten des Fleet-Telemetry-Servers."""
+    cfg = _fleet_telemetrie_runtime_config()
+    if not cfg.get("enabled"):
+        return
+    if paho_mqtt is None:
+        logging.warning("paho-mqtt fehlt; Fleet-Telemetry-Empfang ist deaktiviert")
+        return
+
+    topic_base = str(cfg.get("topic_base") or "tesla").strip("/")
+    mqtt_host = str(cfg.get("mqtt_host") or "127.0.0.1")
+    mqtt_port = int(cfg.get("mqtt_port") or 1884)
+    client_id_basis = str(cfg.get("client_id") or "tesla-dashboard-telemetry")
+    client_id = f"{client_id_basis}-{os.getpid()}"
+
+    def _on_connect(client, _userdata, _flags, reason_code, _properties=None):
+        try:
+            rc = int(reason_code)
+        except Exception:
+            rc = getattr(reason_code, "value", 0)
+        if str(reason_code).lower() == "success":
+            rc = 0
+        if rc == 0:
+            client.subscribe(f"{topic_base}/#", qos=0)
+            logging.info("Fleet-Telemetry-MQTT verbunden: %s:%s", mqtt_host, mqtt_port)
+        else:
+            logging.warning("Fleet-Telemetry-MQTT-Verbindung fehlgeschlagen: rc=%s", rc)
+
+    def _on_message(_client, _userdata, message):
+        try:
+            _fleet_telemetrie_mqtt_message(message.topic, message.payload, cfg)
+        except Exception:
+            logging.exception("Fleet-Telemetry-MQTT-Nachricht konnte nicht verarbeitet werden")
+
+    while _fleet_telemetrie_aktiv():
+        if hasattr(paho_mqtt, "CallbackAPIVersion"):
+            client = paho_mqtt.Client(
+                callback_api_version=paho_mqtt.CallbackAPIVersion.VERSION2,
+                client_id=client_id,
+            )
+        else:
+            client = paho_mqtt.Client(client_id=client_id)
+        client.on_connect = _on_connect
+        client.on_message = _on_message
+        try:
+            client.connect(mqtt_host, mqtt_port, keepalive=30)
+            client.loop_forever(retry_first_connection=True)
+        except Exception as exc:
+            logging.warning("Fleet-Telemetry-MQTT getrennt: %s", exc)
+            time.sleep(10)
+        finally:
+            try:
+                client.disconnect()
+            except Exception:
+                pass
+
+
+def _start_fleet_telemetry_listener():
+    """Starte den lokalen Fleet-Telemetry-MQTT-Listener."""
+    global _fleet_telemetry_thread
+    if not _fleet_telemetrie_aktiv():
+        return
+    if _fleet_telemetry_thread is not None and _fleet_telemetry_thread.is_alive():
+        return
+    _fleet_telemetry_thread = threading.Thread(
+        target=_fleet_telemetrie_listener_loop,
+        daemon=True,
+    )
+    _fleet_telemetry_thread.start()
+
+
+def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
+    """Gib Telemetry-Cache zurück, wenn er im Telemetry-Modus nutzbar ist."""
+    if not _fleet_telemetrie_aktiv():
+        return None
+    data = latest_data.get(cache_id)
+    if not isinstance(data, dict):
+        data = cached if isinstance(cached, dict) else _load_cached(cache_id)
+    if not isinstance(data, dict):
+        return None
+    updated_at = data.get("fleet_telemetry_updated_at")
+    if updated_at is not None:
+        try:
+            age = time.time() - (float(updated_at) / 1000.0)
+        except Exception:
+            age = None
+        if age is not None and age <= TESLA_FLEET_TELEMETRY_STALE_SECONDS:
+            data = dict(data)
+            _fleet_telemetrie_entferne_fremddaten(data)
+            data["_live"] = True
+            return data
+    if data:
+        data = dict(data)
+        _fleet_telemetrie_entferne_fremddaten(data)
+        data["_live"] = False
+        data.setdefault("api_error", "Noch keine aktuellen Fleet-Telemetry-Daten empfangen")
+        return data
+    return None
 
 
 def _last_energy_file(vehicle_id):
@@ -5263,6 +6610,24 @@ def default_vehicle_id():
     if vid:
         _default_vehicle_id = str(vid)
         return _default_vehicle_id
+    if _nur_fleet_telemetrie_datenquelle():
+        for vehicle in _fleet_telemetrie_fahrzeuge():
+            for key in ("id_s", "id", "vehicle_id"):
+                value = vehicle.get(key)
+                if value not in (None, ""):
+                    _default_vehicle_id = str(value)
+                    return _default_vehicle_id
+        cached = _load_cached("default")
+        if isinstance(cached, dict):
+            cached_id = (
+                cached.get("id_s")
+                or cached.get("vehicle_id")
+                or cached.get("id")
+            )
+            if cached_id not in (None, ""):
+                _default_vehicle_id = str(cached_id)
+                return _default_vehicle_id
+        return None
     tesla = get_tesla()
     if tesla is None:
         return None
@@ -5299,10 +6664,27 @@ def _refresh_state(vehicle, times=1):
     return state
 
 
+def _zustand_aus_cache(cached):
+    """Liefere einen plausiblen Fahrzeugzustand aus gecachten Daten."""
+    if not isinstance(cached, dict):
+        return None
+    state = cached.get("state")
+    if isinstance(state, str) and state.strip():
+        return state
+    return None
+
+
+def _setze_zustand_wenn_bekannt(data, state):
+    """Überschreibe einen Cachezustand nur mit bekannten API-Werten."""
+    if isinstance(data, dict) and state is not None:
+        data["state"] = state
+
+
 def get_vehicle_state(vehicle_id=None):
     """Return the current vehicle state without waking the car."""
     vid = str(vehicle_id or _default_vehicle_id or "default")
     state = last_vehicle_state.get(vid)
+    vorheriger_state = state
     now = time.time()
     cfg = load_config(vehicle_id)
     try:
@@ -5317,6 +6699,41 @@ def get_vehicle_state(vehicle_id=None):
         vs = cached.get("vehicle_state", {})
         service_mode = vs.get("service_mode")
         service_mode_plus = vs.get("service_mode_plus")
+    if _fleet_telemetrie_aktiv():
+        telemetry_data = _fleet_telemetrie_cache_fuer_dashboard(vid, cached)
+        telemetry_state = None
+        if isinstance(telemetry_data, dict):
+            telemetry_state = telemetry_data.get("state")
+            checked_at = telemetry_data.get(
+                "fleet_telemetry_updated_at",
+                telemetry_data.get("state_checked_at", int(now * 1000)),
+            )
+            if telemetry_state is not None:
+                log_vehicle_state(vid, telemetry_state)
+                return {
+                    "state": telemetry_state,
+                    "state_checked_at": checked_at,
+                    "service_mode": service_mode,
+                    "service_mode_plus": service_mode_plus,
+                }
+        cached_state = vorheriger_state or _zustand_aus_cache(cached)
+        return {
+            "error": "Noch keine Fleet-Telemetry-Daten empfangen",
+            "state": cached_state,
+            "state_checked_at": int(now * 1000),
+            "service_mode": service_mode,
+            "service_mode_plus": service_mode_plus,
+        }
+
+    if _nur_fleet_telemetrie_datenquelle():
+        cached_state = vorheriger_state or _zustand_aus_cache(cached)
+        return {
+            "error": "Fahrzeugstatus kommt ausschließlich aus Fleet Telemetry",
+            "state": cached_state,
+            "state_checked_at": int(now * 1000),
+            "service_mode": service_mode,
+            "service_mode_plus": service_mode_plus,
+        }
 
     last_refresh = _last_state_refresh_ts.get(vid)
     refresh_interval = max(1, api_interval)
@@ -5337,7 +6754,14 @@ def get_vehicle_state(vehicle_id=None):
     allow_refresh = state not in {"offline", "asleep"}
     vehicles = _cached_vehicle_list(tesla, allow_refresh=allow_refresh)
     if not vehicles:
-        return {"error": "No vehicles found"}
+        state = vorheriger_state or _zustand_aus_cache(cached)
+        return {
+            "error": "No vehicles found",
+            "state": state,
+            "state_checked_at": int(now * 1000),
+            "service_mode": service_mode,
+            "service_mode_plus": service_mode_plus,
+        }
 
     vehicle = None
     if vehicle_id is not None:
@@ -5357,209 +6781,22 @@ def get_vehicle_state(vehicle_id=None):
             "state_checked_at": int(now * 1000),
         }
 
+    if state is None:
+        state = vorheriger_state or _zustand_aus_cache(cached)
+        return {
+            "error": "Vehicle state unavailable",
+            "state": state,
+            "state_checked_at": int(now * 1000),
+            "service_mode": service_mode,
+            "service_mode_plus": service_mode_plus,
+        }
+
     return {
         "state": state,
         "state_checked_at": int(now * 1000),
         "service_mode": service_mode,
         "service_mode_plus": service_mode_plus,
     }
-
-
-def _extract_battery_temp(payload):
-    """Gibt die erste gefundene Batterietemperatur aus einem Payload zurück."""
-
-    schluessel = ("battery_temp", "battery_temperature", "module_temp_min", "module_temp_max")
-
-    if isinstance(payload, dict):
-        if "module_temp_min" in payload or "module_temp_max" in payload:
-            temp_min = payload.get("module_temp_min")
-            temp_max = payload.get("module_temp_max")
-            if temp_min is not None and temp_max is not None:
-                return (temp_min + temp_max) / 2
-            if temp_min is not None:
-                return temp_min
-            if temp_max is not None:
-                return temp_max
-        for key in schluessel:
-            if key in payload:
-                return payload.get(key)
-        for value in payload.values():
-            found = _extract_battery_temp(value)
-            if found is not None:
-                return found
-    elif isinstance(payload, list):
-        for item in payload:
-            found = _extract_battery_temp(item)
-            if found is not None:
-                return found
-    return None
-
-
-def _fleet_access_token(tesla):
-    """Return a bearer token preferring Fleet credentials when available."""
-
-    fleet_token = os.getenv("TESLA_FLEET_ACCESS_TOKEN")
-    if fleet_token:
-        return fleet_token
-
-    if teslapy is not None and tesla is not None:
-        fleet_token_data = getattr(tesla, "fleet_token", None)
-        if isinstance(fleet_token_data, dict):
-            access_token = fleet_token_data.get("access_token")
-            if access_token:
-                return access_token
-
-        for attr in ("token", "sso_token"):
-            token_data = getattr(tesla, attr, None)
-            if isinstance(token_data, dict):
-                access_token = token_data.get("access_token")
-                if access_token:
-                    return access_token
-
-    owner_token = os.getenv("TESLA_ACCESS_TOKEN")
-    if owner_token:
-        return owner_token
-
-    logging.info(
-        "No Fleet access token available; set TESLA_FLEET_ACCESS_TOKEN for Fleet API calls",
-    )
-    return None
-
-
-def _tessie_battery_temp(vin):
-    """Hole die Batterietemperatur über die Tessie-API."""
-
-    cfg = load_config()
-    token = cfg.get("tessie_api_token")
-    if not token:
-        return None
-    if vin is None:
-        return None
-
-    url = f"https://api.tessie.com/{vin}/battery"
-    headers = {"Authorization": f"Bearer {token}"}
-    with tessie_anfrage_lock:
-        jetzt = time.monotonic()
-        letzte_anfrage = letzte_anfrage_pro_vin.get(vin)
-        if letzte_anfrage is not None:
-            verbleibend = TESLA_TESSIE_MIN_INTERVAL - (jetzt - letzte_anfrage)
-            if verbleibend > 0:
-                logging.info(
-                    (
-                        "Tessie-Abfrage für VIN %s zu früh angefordert "
-                        "(noch %.1f Sekunden); nutze Cachewert."
-                    ),
-                    vin,
-                    verbleibend,
-                )
-                return letzte_batterie_temp_pro_vin.get(vin)
-        try:
-            resp = requests.get(url, headers=headers, timeout=TESLA_REQUEST_TIMEOUT)
-        finally:
-            letzte_anfrage_pro_vin[vin] = time.monotonic()
-    resp.raise_for_status()
-    payload = resp.json()
-    try:
-        log_api_data("tessie_battery", sanitize(payload), vehicle_id=vin)
-    except Exception:
-        pass
-    battery_temp = _extract_battery_temp(payload)
-    if battery_temp is None:
-        with tessie_anfrage_lock:
-            letzte_bekannte_temp = letzte_batterie_temp_pro_vin.get(vin)
-        if letzte_bekannte_temp is not None:
-            logging.info(
-                "Keine aktuelle Batterietemperatur im Tessie-Status; nutze letzten Wert."
-            )
-            return letzte_bekannte_temp
-        logging.info("Keine Batterietemperatur im Tessie-Status gefunden.")
-        return None
-    with tessie_anfrage_lock:
-        letzte_batterie_temp_pro_vin[vin] = battery_temp
-    return battery_temp
-
-
-def _fleet_battery_temp(tesla, vehicle, vid):
-    """Fetch battery temperature via Fleet API when configured."""
-
-    endpoint = os.getenv("TESLA_FLEET_CHARGE_STATE_URL")
-    if not endpoint:
-        return None
-
-    token = _fleet_access_token(tesla)
-    if not token:
-        logging.info("Skipping Fleet battery temperature lookup: no bearer token available")
-        return None
-
-    vehicle_identifier = os.getenv("TESLA_FLEET_VEHICLE_ID") or vid
-    if vehicle_identifier is None:
-        return None
-
-    headers = {"Authorization": f"Bearer {token}"}
-
-    url = endpoint.format(vehicle_id=vehicle_identifier)
-    resp = requests.get(url, headers=headers, timeout=TESLA_REQUEST_TIMEOUT)
-    resp.raise_for_status()
-    payload = resp.json()
-    try:
-        log_api_data("fleet_charge_state", sanitize(payload), vehicle_id=vehicle_identifier)
-    except Exception:
-        pass
-    return _extract_battery_temp(payload)
-
-
-def _owner_battery_temp(vehicle, vid):
-    """Fetch battery temperature via an additional Owner API call."""
-
-    charge_state = None
-    api_call = getattr(vehicle, "api", None)
-    if callable(api_call):
-        try:
-            charge_state = api_call("CHARGE_STATE")
-            log_api_data("charge_state", sanitize(charge_state), vehicle_id=vid)
-        except Exception:
-            charge_state = None
-
-    if charge_state is None:
-        data_request = getattr(vehicle, "data_request", None)
-        if callable(data_request):
-            try:
-                charge_state = data_request("charge_state")
-                log_api_data("charge_state", sanitize(charge_state), vehicle_id=vid)
-            except Exception:
-                charge_state = None
-
-    if isinstance(charge_state, dict):
-        return _extract_battery_temp(charge_state)
-    return None
-
-
-def _fetch_battery_temp(tesla, vehicle, vin):
-    """Ergänze charge_state nur über die Tessie-API um die Batterietemperatur."""
-
-    cfg = load_config()
-    token = cfg.get("tessie_api_token")
-    if not token:
-        logging.info(
-            "Kein Tessie-Token vorhanden; es wird keine alternative API für battery_temp genutzt."
-        )
-        return None
-    if vin is None:
-        logging.info("Keine VIN vorhanden; Tessie-Abfrage für battery_temp wird übersprungen.")
-        return None
-
-    try:
-        return _tessie_battery_temp(vin)
-    except Exception as exc:
-        _log_api_error(exc)
-        with tessie_anfrage_lock:
-            letzte_bekannte_temp = letzte_batterie_temp_pro_vin.get(vin)
-        if letzte_bekannte_temp is not None:
-            logging.info(
-                "Tessie-Abfrage fehlgeschlagen; nutze zuletzt bekannte Batterietemperatur."
-            )
-            return letzte_bekannte_temp
-    return None
 
 
 def _normalize_supercharger_sites(payload, drive_state):
@@ -5830,6 +7067,20 @@ def _formatierter_fahrzeugname(name, car_type, trim_badging):
 def get_vehicle_data(vehicle_id=None, state=None):
     """Fetch vehicle data for a given vehicle id."""
     vid = vehicle_id if vehicle_id is not None else _default_vehicle_id
+    cache_id = str(vid or "default")
+
+    if _nur_fleet_telemetrie_datenquelle():
+        telemetry_data = _fleet_telemetrie_cache_fuer_dashboard(cache_id)
+        if telemetry_data is not None:
+            return telemetry_data
+        payload = {
+            "error": "Fahrzeugdaten kommen ausschließlich aus Fleet Telemetry",
+            "state": state,
+            "_live": False,
+        }
+        if vid is not None:
+            payload["id_s"] = str(vid)
+        return payload
 
     if state is not None and state != "online":
         payload = {"state": state}
@@ -5910,8 +7161,6 @@ def get_vehicle_data(vehicle_id=None, state=None):
         if battery_temp is not None:
             _cache_battery_temp(vin, battery_temp)
         if battery_temp is None:
-            battery_temp = _fetch_battery_temp(tesla, vehicle, vin)
-        if battery_temp is None:
             battery_temp = _cached_battery_temp(vin)
             if battery_temp is not None:
                 logging.info(
@@ -5957,6 +7206,12 @@ def get_vehicle_data(vehicle_id=None, state=None):
 
 def get_vehicle_list():
     """Return a list of available vehicles without exposing VIN."""
+    fleet_vehicles = _fleet_telemetrie_fahrzeugliste(
+        telemetrie_aktiv_erforderlich=not _nur_fleet_telemetrie_datenquelle(),
+    )
+    if fleet_vehicles or _nur_fleet_telemetrie_datenquelle():
+        return fleet_vehicles
+
     tesla = get_tesla()
     if tesla is None:
         return []
@@ -5968,6 +7223,91 @@ def get_vehicle_list():
             name = f"Fahrzeug {idx}"
         sanitized.append({"id": v["id_s"], "display_name": name})
     return sanitized
+
+
+def _fleet_telemetrie_fahrzeugliste(telemetrie_aktiv_erforderlich=True):
+    """Erzeuge die Fahrzeugauswahl aus Fleet-Telemetry-Daten."""
+    global _default_vehicle_id
+
+    if telemetrie_aktiv_erforderlich and not _fleet_telemetrie_aktiv():
+        return []
+
+    vehicles = []
+    bekannte_ids = set()
+
+    def add_vehicle(vehicle_id, display_name=None, aliases=None):
+        vehicle_id = str(vehicle_id or "").strip()
+        alias_ids = []
+        for alias in aliases or []:
+            alias_id = str(alias or "").strip()
+            if alias_id:
+                alias_ids.append(alias_id)
+        if not vehicle_id or vehicle_id in bekannte_ids:
+            bekannte_ids.update(alias_ids)
+            return
+        if any(alias_id in bekannte_ids for alias_id in alias_ids):
+            bekannte_ids.add(vehicle_id)
+            bekannte_ids.update(alias_ids)
+            return
+        bekannte_ids.add(vehicle_id)
+        bekannte_ids.update(alias_ids)
+        name = str(display_name or "").strip() or f"Fahrzeug {len(vehicles) + 1}"
+        vehicles.append({"id": vehicle_id, "display_name": name})
+
+    for vehicle in _fleet_telemetrie_fahrzeuge():
+        vehicle_id = None
+        aliases = []
+        for key in ("id_s", "id", "vehicle_id"):
+            value = vehicle.get(key)
+            if value not in (None, ""):
+                aliases.append(value)
+                vehicle_id = value
+                break
+        for key in ("id_s", "id", "vehicle_id"):
+            value = vehicle.get(key)
+            if value not in (None, "") and value not in aliases:
+                aliases.append(value)
+        add_vehicle(vehicle_id, vehicle.get("display_name"), aliases)
+
+    for cache_id, data in list(latest_data.items()):
+        if not isinstance(data, dict):
+            continue
+        vehicle_state = data.get("vehicle_state")
+        if not isinstance(vehicle_state, dict):
+            vehicle_state = {}
+        vehicle_id = data.get("id_s")
+        if vehicle_id in (None, "") and cache_id != "default":
+            vehicle_id = cache_id
+        display_name = data.get("display_name") or vehicle_state.get("vehicle_name")
+        add_vehicle(
+            vehicle_id,
+            display_name,
+            [cache_id, data.get("id"), data.get("id_s"), data.get("vehicle_id")],
+        )
+
+    cached_default = _load_cached("default")
+    if isinstance(cached_default, dict):
+        vehicle_state = cached_default.get("vehicle_state")
+        if not isinstance(vehicle_state, dict):
+            vehicle_state = {}
+        display_name = (
+            cached_default.get("display_name")
+            or vehicle_state.get("vehicle_name")
+        )
+        add_vehicle(
+            cached_default.get("id_s"),
+            display_name,
+            [
+                cached_default.get("id"),
+                cached_default.get("id_s"),
+                cached_default.get("vehicle_id"),
+            ],
+        )
+
+    if vehicles and _default_vehicle_id is None:
+        _default_vehicle_id = vehicles[0]["id"]
+
+    return vehicles
 
 
 def reverse_geocode(lat, lon, vehicle_id=None):
@@ -6064,6 +7404,24 @@ def _fetch_data_once(vehicle_id="default"):
         cache_id = vehicle_id
 
     cached = _load_cached(cache_id)
+    telemetry_data = _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached)
+    if telemetry_data is not None:
+        latest_data[cache_id] = telemetry_data
+        return telemetry_data
+    if _nur_fleet_telemetrie_datenquelle():
+        data = cached if isinstance(cached, dict) else {}
+        data = dict(data)
+        data.setdefault("state", _zustand_aus_cache(cached))
+        data["api_error"] = "Noch keine Fleet-Telemetry-Daten empfangen"
+        data["state_checked_at"] = int(time.time() * 1000)
+        data["preconditioning_display_allowed"] = (
+            _vorklimatisierung_im_stand_erlaubt(data)
+        )
+        data["_live"] = False
+        latest_data[cache_id] = data
+        for q in subscribers.get(cache_id, []):
+            q.put(data)
+        return data
 
     vehicle_key = str(vid or cache_id)
     vorheriger_state = last_vehicle_state.get(vehicle_key)
@@ -6081,6 +7439,9 @@ def _fetch_data_once(vehicle_id="default"):
     state_checked_at = (
         state_info.get("state_checked_at") if isinstance(state_info, dict) else None
     )
+    api_error = state_info.get("error") if isinstance(state_info, dict) else None
+    if state is None:
+        state = vorheriger_state or _zustand_aus_cache(cached)
 
     data = None
     live = False
@@ -6109,6 +7470,8 @@ def _fetch_data_once(vehicle_id="default"):
         )
         if darf_live_abrufen:
             data = get_vehicle_data(vid, state=state)
+            if isinstance(data, dict) and data.get("error"):
+                api_error = data.get("error") or api_error
             if (
                 isinstance(data, dict)
                 and not data.get("error")
@@ -6119,24 +7482,21 @@ def _fetch_data_once(vehicle_id="default"):
                 cached = _load_cached(cache_id)
                 if cached is not None:
                     data = cached
-                    if isinstance(data, dict):
-                        data["state"] = state
+                    _setze_zustand_wenn_bekannt(data, state)
                 else:
                     data = {"state": state}
         else:
             cached = _load_cached(cache_id)
             if cached is not None:
                 data = cached
-                if isinstance(data, dict):
-                    data["state"] = state
+                _setze_zustand_wenn_bekannt(data, state)
             else:
                 data = {"state": state}
     else:
         cached = _load_cached(cache_id)
         if cached is not None:
             data = cached
-            if isinstance(data, dict):
-                data["state"] = state
+            _setze_zustand_wenn_bekannt(data, state)
         else:
             data = {"state": state}
 
@@ -6478,6 +7838,10 @@ def _fetch_data_once(vehicle_id="default"):
             _vorklimatisierung_im_stand_erlaubt(data)
         )
         data["_live"] = live
+        if live:
+            data.pop("api_error", None)
+        elif api_error:
+            data["api_error"] = api_error
     latest_data[cache_id] = data
     if isinstance(data, dict):
         try:
@@ -6532,7 +7896,14 @@ def _fetch_loop(vehicle_id, interval=3):
             idle_interval = max(1, int(cfg.get("api_interval_idle", idle_interval)))
         except Exception:
             pass
-        data = _fetch_data_once(vehicle_id)
+        try:
+            data = _fetch_data_once(vehicle_id)
+        except Exception as exc:
+            _log_api_error(exc)
+            logging.exception(
+                "Fahrzeugdaten-Abruf für %s fehlgeschlagen", vehicle_id
+            )
+            data = {"error": str(exc), "_live": False}
         if isinstance(data, dict) and data.get("_live"):
             try:
                 send_aprs(data)
@@ -6585,7 +7956,10 @@ def _fetch_loop(vehicle_id, interval=3):
 
 def _start_thread(vehicle_id):
     """Start background fetching thread for the given vehicle."""
-    if vehicle_id in threads:
+    if _fleet_telemetrie_aktiv():
+        return
+    vorhandener_thread = threads.get(vehicle_id)
+    if vorhandener_thread is not None and vorhandener_thread.is_alive():
         return
     t = threading.Thread(target=_fetch_loop, args=(vehicle_id,), daemon=True)
     threads[vehicle_id] = t
@@ -6598,7 +7972,7 @@ taximeter = Taximeter(TAXI_DB, _fetch_data_once, get_taximeter_tariff)
 
 @app.route("/")
 def index():
-    cfg = load_config()
+    cfg = _config_mit_telemetrie_only_regeln(load_config())
     return render_template(
         "index.html",
         version=__version__,
@@ -6613,6 +7987,19 @@ def index():
 def robots_txt():
     """Liefere robots.txt aus dem Static-Verzeichnis."""
     return send_from_directory("static", "robots.txt")
+
+
+@app.route("/.well-known/appspecific/com.tesla.3p.public-key.pem")
+def tesla_fleet_public_key():
+    """Liefere den öffentlichen Tesla-Fleet-Schlüssel aus."""
+    public_key_path = Path(TESLA_FLEET_PUBLIC_KEY_PATH)
+    if not public_key_path.is_file():
+        abort(404)
+    return send_from_directory(
+        public_key_path.parent,
+        public_key_path.name,
+        mimetype="application/x-pem-file",
+    )
 
 
 @app.route("/map")
@@ -6986,8 +8373,7 @@ def api_config():
         cfg["phone_number"] = True
     if "infobip_api_key" in cfg:
         cfg["infobip_api_key"] = True
-    if "tessie_api_token" in cfg:
-        cfg["tessie_api_token"] = True
+    cfg = _config_mit_telemetrie_only_regeln(cfg)
     cfg.pop("infobip_base_url", None)
     return jsonify(cfg)
 
@@ -7147,10 +8533,6 @@ def config_page():
         keep_infobip_api_key = infobip_api_key == SECRET_PLACEHOLDER
         if keep_infobip_api_key:
             infobip_api_key = ""
-        tessie_api_token = request.form.get("tessie_api_token", "").strip()
-        keep_tessie_api_token = tessie_api_token == SECRET_PLACEHOLDER
-        if keep_tessie_api_token:
-            tessie_api_token = ""
         infobip_base_url = request.form.get("infobip_base_url", "").strip()
         sms_sender_id = request.form.get("sms_sender_id", "").strip()
         sms_enabled = "sms_enabled" in request.form
@@ -7167,7 +8549,7 @@ def config_page():
         if selected_vehicle:
             selected_vehicle_id = selected_vehicle
         aprs_cfg = load_config(vehicle_id=selected_vehicle_id)
-        if "refresh_vehicle_list" in request.form:
+        if "refresh_vehicle_list" in request.form and not _nur_fleet_telemetrie_datenquelle():
             tesla = get_tesla()
             if tesla is not None:
                 _cached_vehicle_list(tesla, ttl=0)
@@ -7218,10 +8600,7 @@ def config_page():
             cfg["infobip_api_key"] = infobip_api_key
         elif not keep_infobip_api_key and "infobip_api_key" in cfg:
             cfg.pop("infobip_api_key")
-        if tessie_api_token:
-            cfg["tessie_api_token"] = tessie_api_token
-        elif not keep_tessie_api_token and "tessie_api_token" in cfg:
-            cfg.pop("tessie_api_token")
+        cfg.pop("tessie_api_token", None)
         if infobip_base_url:
             cfg["infobip_base_url"] = infobip_base_url
         elif "infobip_base_url" in cfg:
@@ -7284,7 +8663,7 @@ def config_page():
         save_config(aprs_cfg, vehicle_id=selected_vehicle_id)
     else:
         aprs_cfg = load_config(vehicle_id=selected_vehicle_id)
-    display_cfg = dict(cfg)
+    display_cfg = _config_mit_telemetrie_only_regeln(cfg)
     for key in ("aprs_callsign", "aprs_passcode", "aprs_wx_callsign", "aprs_wx_enabled", "aprs_comment"):
         if key in aprs_cfg:
             display_cfg[key] = aprs_cfg[key]
@@ -7292,14 +8671,14 @@ def config_page():
         display_cfg["aprs_passcode"] = SECRET_PLACEHOLDER
     if display_cfg.get("infobip_api_key"):
         display_cfg["infobip_api_key"] = SECRET_PLACEHOLDER
-    if display_cfg.get("tessie_api_token"):
-        display_cfg["tessie_api_token"] = SECRET_PLACEHOLDER
+    display_cfg.pop("tessie_api_token", None)
     return render_template(
         "config.html",
-        items=CONFIG_ITEMS,
+        items=_config_items_fuer_anzeige(),
         config=display_cfg,
         vehicles=vehicles,
         selected_vehicle_id=selected_vehicle_id,
+        fleet_only=_nur_fleet_telemetrie_datenquelle(),
     )
 
 

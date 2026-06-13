@@ -746,6 +746,7 @@ select {
 #nav-bar table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 #v2l-infos th,
@@ -763,6 +764,7 @@ select {
   border: 1px solid #444;
   padding: 6px 8px;
   text-align: left;
+  overflow-wrap: anywhere;
 }
 
 #v2l-infos th,
@@ -838,6 +840,7 @@ select {
 #media-player table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 #media-player th,
@@ -845,6 +848,7 @@ select {
   border: 1px solid #444;
   padding: 6px 8px;
   text-align: left;
+  overflow-wrap: anywhere;
 }
 
 #media-player th {
@@ -1041,6 +1045,89 @@ select {
   font-weight: bold;
 }
 
+.turn-indicator {
+  display: grid;
+  grid-template-columns: 1fr 34px 1fr;
+  gap: 8px;
+  width: 140px;
+  height: 24px;
+  align-items: center;
+  justify-items: center;
+  margin: 0 auto 2px;
+}
+
+.turn-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 24px;
+  color: #335533;
+  font-size: 24px;
+  line-height: 1;
+  text-shadow: none;
+  opacity: 0.45;
+}
+
+.turn-arrow.is-active {
+  color: #00e676;
+  opacity: 1;
+  text-shadow: 0 0 8px rgba(0, 230, 118, 0.9);
+  animation: blinker-puls 0.9s steps(2, start) infinite;
+}
+
+.high-beam-indicator {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 24px;
+  color: #294466;
+  opacity: 0.45;
+}
+
+.high-beam-indicator::before {
+  content: '';
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  width: 10px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-left: 0;
+  border-radius: 0 12px 12px 0;
+  box-sizing: border-box;
+}
+
+.high-beam-indicator::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 5px;
+  width: 22px;
+  height: 14px;
+  background: repeating-linear-gradient(
+    to bottom,
+    currentColor 0,
+    currentColor 2px,
+    transparent 2px,
+    transparent 5px
+  );
+  clip-path: polygon(0 0, 100% 15%, 100% 85%, 0 100%);
+}
+
+.high-beam-indicator.is-active {
+  color: #42a5ff;
+  opacity: 1;
+  filter: drop-shadow(0 0 6px rgba(66, 165, 255, 0.95));
+}
+
+@keyframes blinker-puls {
+  50% {
+    opacity: 0.25;
+    text-shadow: none;
+  }
+}
+
 #speedometer svg {
   display: block;
 }
@@ -1162,6 +1249,14 @@ select {
   }
   #heater-indicator {
     flex-direction: column;
+  }
+  #v2l-infos th,
+  #charging-info th,
+  #ladeplanung-info th,
+  #preconditioning-info th,
+  #media-player th,
+  #nav-bar th {
+    white-space: normal;
   }
   #map {
     height: 50vh !important;
@@ -1325,6 +1420,24 @@ select {
   fill: #555;
 }
 
+#openings-indicator .brake-lights {
+  pointer-events: none;
+}
+
+#openings-indicator .brake-light {
+  fill: #4b1212;
+  stroke: #260707;
+  stroke-width: 1px;
+  opacity: 0.7;
+}
+
+#openings-indicator .brake-lights.is-active .brake-light {
+  fill: #ff1744;
+  stroke: #ffcdd2;
+  opacity: 1;
+  filter: drop-shadow(0 0 5px rgba(255, 23, 68, 0.95));
+}
+
 #openings-indicator .blue-highlight {
   fill: blue;
 }
@@ -1340,10 +1453,89 @@ select {
   dominant-baseline: central;
 }
 
+.tpms-summary {
+  box-sizing: border-box;
+  min-height: 32px;
+  max-width: 150px;
+  margin: 6px auto 0;
+  padding: 4px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.18);
+  color: #ddd;
+  font-size: 0.78rem;
+  font-weight: bold;
+  line-height: 1.25;
+}
+
+.tpms-summary.tpms-ok {
+  border-color: rgba(76, 175, 80, 0.65);
+  color: #7bdc7f;
+}
+
+.tpms-summary.tpms-warnung {
+  border-color: rgba(255, 152, 0, 0.8);
+  color: #ffb74d;
+}
+
+.tpms-summary.tpms-kritisch {
+  border-color: rgba(211, 47, 47, 0.9);
+  color: #ff6b6b;
+}
+
+.tpms-summary.tpms-unbekannt {
+  color: #aaa;
+}
+
 #openings-indicator .car-body {
   fill: #333;
   stroke: #777;
   stroke-width: 2px;
+}
+
+.tpms-tire.tpms-ok circle {
+  fill: rgba(76, 175, 80, 0.18);
+}
+
+.tpms-tire.tpms-warnung circle {
+  fill: rgba(255, 152, 0, 0.28);
+}
+
+.tpms-tire.tpms-kritisch circle {
+  fill: rgba(211, 47, 47, 0.35);
+}
+
+.tpms-tire.tpms-unbekannt circle {
+  fill: rgba(85, 85, 85, 0.3);
+}
+
+.tpms-status {
+  display: inline-block;
+  min-width: 5.5em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-align: center;
+  font-weight: bold;
+}
+
+.tpms-status-ok {
+  background: rgba(76, 175, 80, 0.2);
+  color: #7bdc7f;
+}
+
+.tpms-status-warnung {
+  background: rgba(255, 152, 0, 0.24);
+  color: #ffb74d;
+}
+
+.tpms-status-kritisch {
+  background: rgba(211, 47, 47, 0.28);
+  color: #ff6b6b;
+}
+
+.tpms-status-unbekannt {
+  background: rgba(117, 117, 117, 0.22);
+  color: #bbb;
 }
 
 /* animated doors */
