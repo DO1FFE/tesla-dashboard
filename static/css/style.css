@@ -1297,20 +1297,20 @@ select {
 #pedal-position-needle-outline {
   stroke: #111;
   stroke-linecap: round;
-  stroke-width: 8;
-  opacity: 0.75;
+  stroke-width: 5;
+  opacity: 0.25;
 }
 
 #pedal-position-needle {
   stroke: #00e5ff;
   stroke-linecap: round;
-  stroke-width: 5;
-  opacity: 0.75;
+  stroke-width: 3;
+  opacity: 0.5;
 }
 
 #pedal-position-needle.is-active {
-  opacity: 1;
-  filter: drop-shadow(0 0 6px rgba(0, 229, 255, 1));
+  opacity: 0.5;
+  filter: drop-shadow(0 0 3px rgba(0, 229, 255, 0.35));
 }
 
 #speedometer .power {

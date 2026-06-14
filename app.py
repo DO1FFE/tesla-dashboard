@@ -47,7 +47,6 @@ import requests
 from functools import wraps
 from dotenv import load_dotenv
 from version import get_version
-from logo import LOGO_DATA_URI
 import qrcode
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -285,12 +284,6 @@ def socketio_client_script() -> str:
 def inject_ga_id():
     """Add Google Analytics tracking ID to all templates."""
     return {"ga_id": GA_TRACKING_ID}
-
-
-@app.context_processor
-def inject_splash_logo():
-    """Stellt das Splashscreen-Logo als Data-URI bereit."""
-    return {"splash_logo_data_uri": LOGO_DATA_URI}
 
 
 @app.before_request
@@ -1615,8 +1608,103 @@ _aggregation_lock = threading.Lock()
 _aggregation_initialized = False
 _aggregation_thread = None
 _fleet_telemetry_thread = None
+_fleet_telemetry_worker_thread = None
+_fleet_telemetry_cache_thread = None
 _fleet_telemetry_lock = threading.Lock()
+_fleet_telemetry_start_lock = threading.Lock()
 _fleet_telemetry_vehicle_cache = {"mtime": None, "vehicles": []}
+FLEET_TELEMETRY_MQTT_QUEUE_MAX = max(
+    1000, int(os.getenv("TESLA_FLEET_TELEMETRY_MQTT_QUEUE_MAX", "20000"))
+)
+FLEET_TELEMETRY_MQTT_BATCH_MAX = max(
+    10, int(os.getenv("TESLA_FLEET_TELEMETRY_MQTT_BATCH_MAX", "250"))
+)
+FLEET_TELEMETRY_MQTT_BATCH_SECONDS = max(
+    0.01, float(os.getenv("TESLA_FLEET_TELEMETRY_MQTT_BATCH_SECONDS", "0.05"))
+)
+FLEET_TELEMETRY_CACHE_WRITE_SECONDS = max(
+    0.2, float(os.getenv("TESLA_FLEET_TELEMETRY_CACHE_WRITE_SECONDS", "1.0"))
+)
+FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX = max(
+    1, int(os.getenv("TESLA_FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX", "3"))
+)
+_fleet_telemetry_message_queue = queue.Queue(maxsize=FLEET_TELEMETRY_MQTT_QUEUE_MAX)
+_fleet_telemetry_cache_pending = {}
+_fleet_telemetry_cache_schreib_lock = threading.Lock()
+_fleet_telemetry_queue_verworfen = 0
+_fleet_telemetry_queue_warnung = 0.0
+_aprs_sendewarteschlange = queue.Queue(
+    maxsize=max(1, int(os.getenv("APRS_QUEUE_MAX", "1")))
+)
+_aprs_sender_thread = None
+_aprs_sender_lock = threading.Lock()
+
+
+def _subscriber_daten_senden(cache_id, data):
+    """Sende nur den neuesten Stand an Live-Streams."""
+
+    for ziel_queue in list(subscribers.get(cache_id, [])):
+        try:
+            if getattr(ziel_queue, "maxsize", 0) > 0:
+                while ziel_queue.qsize() >= ziel_queue.maxsize:
+                    ziel_queue.get_nowait()
+            if hasattr(ziel_queue, "put_nowait"):
+                ziel_queue.put_nowait(data)
+            else:
+                ziel_queue.put(data)
+        except queue.Full:
+            try:
+                ziel_queue.get_nowait()
+                if hasattr(ziel_queue, "put_nowait"):
+                    ziel_queue.put_nowait(data)
+                else:
+                    ziel_queue.put(data)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+
+def _fleet_telemetrie_cache_kopie(data):
+    """Erzeuge eine cachefähige Kopie ohne Live-Metadaten."""
+
+    cached_copy = dict(data)
+    cached_copy.pop("_live", None)
+    cached_copy.pop("state_checked_at", None)
+    try:
+        return json.loads(json.dumps(cached_copy))
+    except Exception:
+        return cached_copy
+
+
+def _fleet_telemetrie_cache_spaeter_speichern(cache_id, data):
+    """Merke den letzten Cache-Stand für gebündeltes Schreiben vor."""
+
+    try:
+        cached_copy = _fleet_telemetrie_cache_kopie(data)
+    except Exception:
+        return
+    with _fleet_telemetry_cache_schreib_lock:
+        _fleet_telemetry_cache_pending[cache_id] = cached_copy
+
+
+def _fleet_telemetrie_cache_pending_schreiben():
+    """Schreibe vorgemerkte Telemetry-Caches gesammelt auf die Platte."""
+
+    with _fleet_telemetry_cache_schreib_lock:
+        pending = dict(_fleet_telemetry_cache_pending)
+        _fleet_telemetry_cache_pending.clear()
+    for cache_id, data in pending.items():
+        _save_cached(cache_id, data)
+
+
+def _fleet_telemetrie_cache_schreiber_loop():
+    """Schreibe Telemetry-Caches mit begrenzter Frequenz."""
+
+    while _fleet_telemetrie_aktiv():
+        time.sleep(FLEET_TELEMETRY_CACHE_WRITE_SECONDS)
+        _fleet_telemetrie_cache_pending_schreiben()
+    _fleet_telemetrie_cache_pending_schreiben()
 
 
 def _force_statistics_rebuild_on_start():
@@ -3523,6 +3611,33 @@ def _fleet_telemetrie_entferne_fremddaten(data):
     return data
 
 
+FLEET_TELEMETRIE_TPMS_DRUCKFELDER = {
+    "TpmsPressureFl": "tpms_pressure_fl",
+    "TpmsPressureFr": "tpms_pressure_fr",
+    "TpmsPressureRl": "tpms_pressure_rl",
+    "TpmsPressureRr": "tpms_pressure_rr",
+}
+
+FLEET_TELEMETRIE_TPMS_ZEITFELDER = {
+    "TpmsLastSeenPressureTimeFl": "tpms_last_seen_pressure_time_fl",
+    "TpmsLastSeenPressureTimeFr": "tpms_last_seen_pressure_time_fr",
+    "TpmsLastSeenPressureTimeRl": "tpms_last_seen_pressure_time_rl",
+    "TpmsLastSeenPressureTimeRr": "tpms_last_seen_pressure_time_rr",
+}
+
+
+def _fleet_telemetrie_tpms_druckwert(vehicle_state, rohwerte, field, target, value):
+    """Erhalte den letzten gültigen Reifendruck bei ungültigen Live-Werten."""
+
+    druck = _as_float(value)
+    if druck is not None:
+        return druck
+    druck = _as_float(vehicle_state.get(target))
+    if druck is not None:
+        return druck
+    return _as_float(rohwerte.get(field))
+
+
 def _fleet_telemetrie_setze_media(media, key, value):
     """Schreibe ein Media-Feld und entferne ungültige Werte."""
     if value is None:
@@ -3551,22 +3666,10 @@ def _fleet_telemetrie_rohdaten_anreichern(data):
     vehicle_state = data.setdefault("vehicle_state", {})
     charge = data.setdefault("charge_state", {})
     climate = data.setdefault("climate_state", {})
-    tpms_pressure_map = {
-        "TpmsPressureFl": "tpms_pressure_fl",
-        "TpmsPressureFr": "tpms_pressure_fr",
-        "TpmsPressureRl": "tpms_pressure_rl",
-        "TpmsPressureRr": "tpms_pressure_rr",
-    }
-    for source, target in tpms_pressure_map.items():
+    for source, target in FLEET_TELEMETRIE_TPMS_DRUCKFELDER.items():
         if source in raw and vehicle_state.get(target) is None:
             vehicle_state[target] = _fleet_telemetrie_wert(raw.get(source))
-    tpms_time_map = {
-        "TpmsLastSeenPressureTimeFl": "tpms_last_seen_pressure_time_fl",
-        "TpmsLastSeenPressureTimeFr": "tpms_last_seen_pressure_time_fr",
-        "TpmsLastSeenPressureTimeRl": "tpms_last_seen_pressure_time_rl",
-        "TpmsLastSeenPressureTimeRr": "tpms_last_seen_pressure_time_rr",
-    }
-    for source, target in tpms_time_map.items():
+    for source, target in FLEET_TELEMETRIE_TPMS_ZEITFELDER.items():
         if source in raw and vehicle_state.get(target) is None:
             vehicle_state[target] = _fleet_telemetrie_zeitstempel_ms(raw.get(source))
     if "RearDefrostEnabled" in raw and climate.get("side_mirror_heaters") is None:
@@ -3766,13 +3869,15 @@ def _fleet_telemetrie_basisdaten(data, vin, cache_id, timestamp_ms):
 def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
     """Schreibe ein einzelnes Fleet-Telemetry-Feld in die Dashboard-Struktur."""
     value = _fleet_telemetrie_wert(value)
-    data.setdefault("fleet_telemetry_raw", {})[field] = value
+    rohwerte = data.setdefault("fleet_telemetry_raw", {})
     drive = data.setdefault("drive_state", {})
     charge = data.setdefault("charge_state", {})
     vehicle_state = data.setdefault("vehicle_state", {})
     climate = data.setdefault("climate_state", {})
     config = data.setdefault("vehicle_config", {})
     gui = data.setdefault("gui_settings", {})
+    if field not in FLEET_TELEMETRIE_TPMS_DRUCKFELDER:
+        rohwerte[field] = value
 
     if field == "Location":
         if isinstance(value, dict):
@@ -4167,24 +4272,18 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
             software["version"] = "" if value is None else str(value)
         vehicle_state["timestamp"] = timestamp_ms
         return True
-    tpms_pressure_map = {
-        "TpmsPressureFl": "tpms_pressure_fl",
-        "TpmsPressureFr": "tpms_pressure_fr",
-        "TpmsPressureRl": "tpms_pressure_rl",
-        "TpmsPressureRr": "tpms_pressure_rr",
-    }
-    if field in tpms_pressure_map:
-        vehicle_state[tpms_pressure_map[field]] = value
+    if field in FLEET_TELEMETRIE_TPMS_DRUCKFELDER:
+        target = FLEET_TELEMETRIE_TPMS_DRUCKFELDER[field]
+        value = _fleet_telemetrie_tpms_druckwert(
+            vehicle_state, rohwerte, field, target, value
+        )
+        rohwerte[field] = value
+        vehicle_state[target] = value
         vehicle_state["timestamp"] = timestamp_ms
         return True
-    tpms_time_map = {
-        "TpmsLastSeenPressureTimeFl": "tpms_last_seen_pressure_time_fl",
-        "TpmsLastSeenPressureTimeFr": "tpms_last_seen_pressure_time_fr",
-        "TpmsLastSeenPressureTimeRl": "tpms_last_seen_pressure_time_rl",
-        "TpmsLastSeenPressureTimeRr": "tpms_last_seen_pressure_time_rr",
-    }
-    if field in tpms_time_map:
-        vehicle_state[tpms_time_map[field]] = _fleet_telemetrie_zeitstempel_ms(value)
+    if field in FLEET_TELEMETRIE_TPMS_ZEITFELDER:
+        target = FLEET_TELEMETRIE_TPMS_ZEITFELDER[field]
+        vehicle_state[target] = _fleet_telemetrie_zeitstempel_ms(value)
         vehicle_state["timestamp"] = timestamp_ms
         return True
     if field in {"TpmsHardWarnings", "TpmsSoftWarnings"}:
@@ -4510,24 +4609,40 @@ def _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, data, vehicle_id=None):
         pass
 
 
-def _fleet_telemetrie_cache_aktualisieren(vin, field, value, timestamp_ms=None):
-    """Übernehme ein MQTT-Telemetry-Feld in Cache, Live-Daten und Streams."""
-    if timestamp_ms is None:
-        timestamp_ms = int(time.time() * 1000)
-    value = _fleet_telemetrie_wert(value)
+def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
+    """Übernehme mehrere Fahrzeug-Telemetry-Felder als ein Live-Update."""
+
+    if not feldwerte:
+        return False
     aktualisierte_daten = []
     with _fleet_telemetry_lock:
         for cache_id in _fleet_telemetrie_cache_ids(vin):
             data = latest_data.get(cache_id)
             if not isinstance(data, dict):
                 data = _load_cached(cache_id) or {}
-            if _fleet_telemetrie_wert_unveraendert(data, field, value):
+            geändert = False
+            letzter_zeitstempel = None
+            letztes_feld = None
+            for field, value, timestamp_ms in feldwerte:
+                if timestamp_ms is None:
+                    timestamp_ms = int(time.time() * 1000)
+                value = _fleet_telemetrie_wert(value)
+                if _fleet_telemetrie_wert_unveraendert(data, field, value):
+                    continue
+                data = _fleet_telemetrie_basisdaten(
+                    data, vin, cache_id, timestamp_ms
+                )
+                if not _fleet_telemetrie_setze_feld(
+                    data, field, value, timestamp_ms
+                ):
+                    continue
+                geändert = True
+                letzter_zeitstempel = timestamp_ms
+                letztes_feld = field
+            if not geändert:
                 continue
-            data = _fleet_telemetrie_basisdaten(data, vin, cache_id, timestamp_ms)
-            if not _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
-                continue
-            data["state_checked_at"] = timestamp_ms
-            data["fleet_telemetry_last_field"] = field
+            data["state_checked_at"] = letzter_zeitstempel
+            data["fleet_telemetry_last_field"] = letztes_feld
             data["preconditioning_display_allowed"] = (
                 _vorklimatisierung_im_stand_erlaubt(data)
             )
@@ -4536,18 +4651,22 @@ def _fleet_telemetrie_cache_aktualisieren(vin, field, value, timestamp_ms=None):
             data["_live"] = True
             data.pop("api_error", None)
             latest_data[cache_id] = data
-            try:
-                cached_copy = dict(data)
-                cached_copy.pop("_live", None)
-                cached_copy.pop("state_checked_at", None)
-                _save_cached(cache_id, cached_copy)
-            except Exception:
-                pass
+            _fleet_telemetrie_cache_spaeter_speichern(cache_id, data)
             aktualisierte_daten.append((cache_id, data))
     for cache_id, data in aktualisierte_daten:
-        for q in subscribers.get(cache_id, []):
-            q.put(data)
+        _subscriber_daten_senden(cache_id, data)
+        _aprs_spaeter_senden(data)
     return bool(aktualisierte_daten)
+
+
+def _fleet_telemetrie_cache_aktualisieren(vin, field, value, timestamp_ms=None):
+    """Übernehme ein MQTT-Telemetry-Feld in Cache, Live-Daten und Streams."""
+
+    if timestamp_ms is None:
+        timestamp_ms = int(time.time() * 1000)
+    return _fleet_telemetrie_v_felder_aktualisieren(
+        vin, [(field, value, timestamp_ms)]
+    )
 
 
 def _fleet_telemetrie_verbindungsstatus_state(status):
@@ -4638,17 +4757,10 @@ def _fleet_telemetrie_verbindung_aktualisieren(vin, payload, timestamp_ms=None):
             _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, data)
             data["_live"] = True
             latest_data[cache_id] = data
-            try:
-                cached_copy = dict(data)
-                cached_copy.pop("_live", None)
-                cached_copy.pop("state_checked_at", None)
-                _save_cached(cache_id, cached_copy)
-            except Exception:
-                pass
+            _fleet_telemetrie_cache_spaeter_speichern(cache_id, data)
             aktualisierte_daten.append((cache_id, data))
     for cache_id, data in aktualisierte_daten:
-        for q in subscribers.get(cache_id, []):
-            q.put(data)
+        _subscriber_daten_senden(cache_id, data)
     return bool(aktualisierte_daten)
 
 
@@ -4662,23 +4774,187 @@ def _fleet_telemetrie_decode_payload(payload):
         return payload
 
 
-def _fleet_telemetrie_mqtt_message(topic, payload, cfg=None):
-    """Verarbeite eine einzelne MQTT-Nachricht aus Fleet Telemetry."""
+def _fleet_telemetrie_mqtt_event(topic, payload, cfg=None, timestamp_ms=None):
+    """Lese Topic und Nutzdaten einer MQTT-Nachricht."""
+
     if cfg is None:
         cfg = _fleet_telemetrie_runtime_config()
+    if timestamp_ms is None:
+        timestamp_ms = int(time.time() * 1000)
     topic_base = str(cfg.get("topic_base") or "tesla").strip("/")
     parts = topic.split("/")
     if len(parts) < 3 or parts[0] != topic_base:
-        return False
+        return None
     vin = parts[1]
     typ = parts[2]
     value = _fleet_telemetrie_decode_payload(payload)
     if typ == "v" and len(parts) >= 4:
         field = "/".join(parts[3:])
-        return _fleet_telemetrie_cache_aktualisieren(vin, field, value)
+        return {
+            "typ": "v",
+            "vin": vin,
+            "field": field,
+            "value": value,
+            "timestamp_ms": timestamp_ms,
+        }
     if typ == "connectivity":
-        return _fleet_telemetrie_verbindung_aktualisieren(vin, value)
+        return {
+            "typ": "connectivity",
+            "vin": vin,
+            "value": value,
+            "timestamp_ms": timestamp_ms,
+        }
+    return None
+
+
+def _fleet_telemetrie_event_verarbeiten(event):
+    """Verarbeite ein vorbereitetes Fleet-Telemetry-Ereignis."""
+
+    if not isinstance(event, dict):
+        return False
+    typ = event.get("typ")
+    if typ == "v":
+        return _fleet_telemetrie_v_felder_aktualisieren(
+            event.get("vin"),
+            [
+                (
+                    event.get("field"),
+                    event.get("value"),
+                    event.get("timestamp_ms"),
+                )
+            ],
+        )
+    if typ == "connectivity":
+        return _fleet_telemetrie_verbindung_aktualisieren(
+            event.get("vin"), event.get("value"), event.get("timestamp_ms")
+        )
     return False
+
+
+def _fleet_telemetrie_mqtt_message(topic, payload, cfg=None, timestamp_ms=None):
+    """Verarbeite eine einzelne MQTT-Nachricht aus Fleet Telemetry."""
+
+    event = _fleet_telemetrie_mqtt_event(topic, payload, cfg, timestamp_ms)
+    aktualisiert = _fleet_telemetrie_event_verarbeiten(event)
+    if aktualisiert:
+        _fleet_telemetrie_cache_pending_schreiben()
+    return aktualisiert
+
+
+def _fleet_telemetrie_mqtt_events_verarbeiten(events):
+    """Verarbeite MQTT-Ereignisse in kleinen Gruppen."""
+
+    hat_aktualisiert = False
+    aktueller_vin = None
+    feldwerte = []
+
+    def _felder_senden():
+        nonlocal hat_aktualisiert, aktueller_vin, feldwerte
+        if feldwerte:
+            hat_aktualisiert = (
+                _fleet_telemetrie_v_felder_aktualisieren(aktueller_vin, feldwerte)
+                or hat_aktualisiert
+            )
+        aktueller_vin = None
+        feldwerte = []
+
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        if event.get("typ") == "v":
+            vin = event.get("vin")
+            if feldwerte and vin != aktueller_vin:
+                _felder_senden()
+            aktueller_vin = vin
+            feldwerte.append(
+                (
+                    event.get("field"),
+                    event.get("value"),
+                    event.get("timestamp_ms"),
+                )
+            )
+            continue
+        _felder_senden()
+        hat_aktualisiert = (
+            _fleet_telemetrie_event_verarbeiten(event) or hat_aktualisiert
+        )
+
+    _felder_senden()
+    return hat_aktualisiert
+
+
+def _fleet_telemetrie_mqtt_messages_verarbeiten(nachrichten, cfg=None):
+    """Dekodiere und verarbeite eine Gruppe MQTT-Nachrichten."""
+
+    if cfg is None:
+        cfg = _fleet_telemetrie_runtime_config()
+    events = []
+    for topic, payload, timestamp_ms in nachrichten:
+        event = _fleet_telemetrie_mqtt_event(topic, payload, cfg, timestamp_ms)
+        if event is not None:
+            events.append(event)
+    if not events:
+        return False
+    return _fleet_telemetrie_mqtt_events_verarbeiten(events)
+
+
+def _fleet_telemetrie_mqtt_einreihen(topic, payload, timestamp_ms):
+    """Lege MQTT-Nachrichten ohne Blockieren in die Verarbeitungsqueue."""
+
+    global _fleet_telemetry_queue_verworfen, _fleet_telemetry_queue_warnung
+
+    if isinstance(payload, bytearray):
+        payload = bytes(payload)
+    eintrag = (topic, payload, timestamp_ms)
+    try:
+        _fleet_telemetry_message_queue.put_nowait(eintrag)
+        return
+    except queue.Full:
+        pass
+
+    try:
+        _fleet_telemetry_message_queue.get_nowait()
+    except queue.Empty:
+        pass
+    try:
+        _fleet_telemetry_message_queue.put_nowait(eintrag)
+    except queue.Full:
+        _fleet_telemetry_queue_verworfen += 1
+    now = time.time()
+    if now - _fleet_telemetry_queue_warnung >= 60:
+        _fleet_telemetry_queue_warnung = now
+        logging.warning(
+            "Fleet-Telemetry-MQTT-Queue war voll; verworfene Nachrichten: %s",
+            _fleet_telemetry_queue_verworfen,
+        )
+
+
+def _fleet_telemetrie_worker_loop():
+    """Verarbeite MQTT-Nachrichten außerhalb des Paho-Netzwerkthreads."""
+
+    while _fleet_telemetrie_aktiv():
+        try:
+            erste_nachricht = _fleet_telemetry_message_queue.get(timeout=1)
+        except queue.Empty:
+            continue
+        nachrichten = [erste_nachricht]
+        deadline = time.monotonic() + FLEET_TELEMETRY_MQTT_BATCH_SECONDS
+        while len(nachrichten) < FLEET_TELEMETRY_MQTT_BATCH_MAX:
+            rest = deadline - time.monotonic()
+            if rest <= 0:
+                break
+            try:
+                nachrichten.append(
+                    _fleet_telemetry_message_queue.get(timeout=min(0.01, rest))
+                )
+            except queue.Empty:
+                break
+        try:
+            _fleet_telemetrie_mqtt_messages_verarbeiten(nachrichten)
+        except Exception:
+            logging.exception(
+                "Fleet-Telemetry-MQTT-Gruppe konnte nicht verarbeitet werden"
+            )
 
 
 def _fleet_telemetrie_listener_loop():
@@ -4705,15 +4981,33 @@ def _fleet_telemetrie_listener_loop():
             rc = 0
         if rc == 0:
             client.subscribe(f"{topic_base}/#", qos=0)
-            logging.info("Fleet-Telemetry-MQTT verbunden: %s:%s", mqtt_host, mqtt_port)
+            logging.info(
+                "Fleet-Telemetry-MQTT verbunden: %s:%s", mqtt_host, mqtt_port
+            )
         else:
             logging.warning("Fleet-Telemetry-MQTT-Verbindung fehlgeschlagen: rc=%s", rc)
 
     def _on_message(_client, _userdata, message):
         try:
-            _fleet_telemetrie_mqtt_message(message.topic, message.payload, cfg)
+            _fleet_telemetrie_mqtt_einreihen(
+                message.topic,
+                bytes(message.payload),
+                int(time.time() * 1000),
+            )
         except Exception:
-            logging.exception("Fleet-Telemetry-MQTT-Nachricht konnte nicht verarbeitet werden")
+            logging.exception(
+                "Fleet-Telemetry-MQTT-Nachricht konnte nicht eingereiht werden"
+            )
+
+    def _on_disconnect(_client, _userdata, *args):
+        reason_code = args[-2] if len(args) >= 2 else (args[-1] if args else None)
+        if reason_code in (0, None):
+            logging.info("Fleet-Telemetry-MQTT getrennt")
+        else:
+            logging.warning(
+                "Fleet-Telemetry-MQTT getrennt, Reconnect läuft: rc=%s",
+                reason_code,
+            )
 
     while _fleet_telemetrie_aktiv():
         if hasattr(paho_mqtt, "CallbackAPIVersion"):
@@ -4724,32 +5018,64 @@ def _fleet_telemetrie_listener_loop():
         else:
             client = paho_mqtt.Client(client_id=client_id)
         client.on_connect = _on_connect
+        client.on_disconnect = _on_disconnect
         client.on_message = _on_message
         try:
-            client.connect(mqtt_host, mqtt_port, keepalive=30)
+            client.reconnect_delay_set(min_delay=1, max_delay=10)
+        except Exception:
+            pass
+        try:
+            client.connect(mqtt_host, mqtt_port, keepalive=60)
             client.loop_forever(retry_first_connection=True)
         except Exception as exc:
             logging.warning("Fleet-Telemetry-MQTT getrennt: %s", exc)
             time.sleep(10)
         finally:
-            try:
-                client.disconnect()
-            except Exception:
-                pass
+            if not _fleet_telemetrie_aktiv():
+                try:
+                    client.disconnect()
+                except Exception:
+                    pass
+        if _fleet_telemetrie_aktiv():
+            logging.warning("Fleet-Telemetry-MQTT-Loop beendet; Neustart")
+            time.sleep(2)
 
 
 def _start_fleet_telemetry_listener():
     """Starte den lokalen Fleet-Telemetry-MQTT-Listener."""
-    global _fleet_telemetry_thread
+    global _fleet_telemetry_thread, _fleet_telemetry_worker_thread
+    global _fleet_telemetry_cache_thread
     if not _fleet_telemetrie_aktiv():
         return
-    if _fleet_telemetry_thread is not None and _fleet_telemetry_thread.is_alive():
-        return
-    _fleet_telemetry_thread = threading.Thread(
-        target=_fleet_telemetrie_listener_loop,
-        daemon=True,
-    )
-    _fleet_telemetry_thread.start()
+    with _fleet_telemetry_start_lock:
+        if (
+            _fleet_telemetry_worker_thread is None
+            or not _fleet_telemetry_worker_thread.is_alive()
+        ):
+            _fleet_telemetry_worker_thread = threading.Thread(
+                target=_fleet_telemetrie_worker_loop,
+                daemon=True,
+            )
+            _fleet_telemetry_worker_thread.start()
+        if (
+            _fleet_telemetry_cache_thread is None
+            or not _fleet_telemetry_cache_thread.is_alive()
+        ):
+            _fleet_telemetry_cache_thread = threading.Thread(
+                target=_fleet_telemetrie_cache_schreiber_loop,
+                daemon=True,
+            )
+            _fleet_telemetry_cache_thread.start()
+        if (
+            _fleet_telemetry_thread is not None
+            and _fleet_telemetry_thread.is_alive()
+        ):
+            return
+        _fleet_telemetry_thread = threading.Thread(
+            target=_fleet_telemetrie_listener_loop,
+            daemon=True,
+        )
+        _fleet_telemetry_thread.start()
 
 
 def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
@@ -5472,6 +5798,68 @@ def send_aprs(vehicle_data):
 
     except Exception as exc:
         _log_api_error(exc)
+
+
+def _aprs_sender_loop():
+    """Sende APRS-Pakete aus der Warteschlange im Hintergrund."""
+
+    while True:
+        data = _aprs_sendewarteschlange.get()
+        try:
+            send_aprs(data)
+        except Exception:
+            logging.exception("APRS-Sendung fehlgeschlagen")
+        finally:
+            try:
+                _aprs_sendewarteschlange.task_done()
+            except Exception:
+                pass
+
+
+def _start_aprs_sender():
+    """Starte den APRS-Hintergrundsender bei Bedarf."""
+
+    global _aprs_sender_thread
+
+    if aprslib is None:
+        return
+    with _aprs_sender_lock:
+        if _aprs_sender_thread is not None and _aprs_sender_thread.is_alive():
+            return
+        _aprs_sender_thread = threading.Thread(
+            target=_aprs_sender_loop,
+            daemon=True,
+        )
+        _aprs_sender_thread.start()
+
+
+def _aprs_spaeter_senden(vehicle_data):
+    """Merke den neuesten APRS-Stand vor, ohne den Live-Datenpfad zu blockieren."""
+
+    if aprslib is None or not isinstance(vehicle_data, dict):
+        return
+    drive = vehicle_data.get("drive_state", {})
+    if not isinstance(drive, dict):
+        return
+    if drive.get("latitude") is None or drive.get("longitude") is None:
+        return
+    try:
+        sendekopie = json.loads(json.dumps(vehicle_data))
+    except Exception:
+        sendekopie = dict(vehicle_data)
+    _start_aprs_sender()
+    while _aprs_sendewarteschlange.full():
+        try:
+            _aprs_sendewarteschlange.get_nowait()
+            _aprs_sendewarteschlange.task_done()
+        except queue.Empty:
+            break
+        except Exception:
+            break
+    try:
+        _aprs_sendewarteschlange.put_nowait(sendekopie)
+    except queue.Full:
+        pass
 
 
 def _get_trip_files(vehicle_id=None):
@@ -7823,8 +8211,7 @@ def _fetch_data_once(vehicle_id="default"):
         )
         data["_live"] = False
         latest_data[cache_id] = data
-        for q in subscribers.get(cache_id, []):
-            q.put(data)
+        _subscriber_daten_senden(cache_id, data)
         return data
 
     vehicle_key = str(vid or cache_id)
@@ -8281,8 +8668,7 @@ def _fetch_data_once(vehicle_id="default"):
             _save_cached(cache_id, cached_copy)
         except Exception:
             pass
-        for q in subscribers.get(cache_id, []):
-            q.put(data)
+        _subscriber_daten_senden(cache_id, data)
     return data
 
 
@@ -8297,8 +8683,7 @@ def _vorklimatisierungsanzeige_aktualisieren(vehicle_id=None):
         data["preconditioning_display_allowed"] = (
             _vorklimatisierung_im_stand_erlaubt(data)
         )
-        for q in subscribers.get(cache_id, []):
-            q.put(data)
+        _subscriber_daten_senden(cache_id, data)
 
 
 def _sleep_idle(seconds):
@@ -8624,7 +9009,7 @@ def stream_vehicle(vehicle_id="default"):
     ip = _client_ip()
 
     def gen():
-        q = queue.Queue()
+        q = queue.Queue(maxsize=FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX)
         subscribers.setdefault(vehicle_id, []).append(q)
         last_path_len = 0
         try:

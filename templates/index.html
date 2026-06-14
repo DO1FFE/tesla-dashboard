@@ -29,7 +29,7 @@
     {% if splashscreen_anzeigen %}
     <div id="splashscreen" role="status" aria-live="polite" aria-label="Splashscreen wird angezeigt">
         <div class="splash-inhalt">
-            <img class="splash-logo" src="{{ splash_logo_data_uri }}" alt="Tesla-Dashboard Splashscreen" loading="eager" decoding="async">
+            <img class="splash-logo" src="/static/images/tesla-dashboard-logo.webp" alt="Tesla-Dashboard Splashscreen" loading="eager" decoding="async">
             <div class="splash-fahrspur" aria-hidden="true">
                 <div class="splash-fahrzeug">
                     <img class="splash-rad splash-rad-hinten" src="/static/images/tesla-model-s-90d-deep-blue-wheel-hinten.webp" alt="" loading="eager" decoding="async">
@@ -43,7 +43,7 @@
     </div>
     {% endif %}
     <a href="#dashboard-content" class="skip-link">Zum Inhalt springen</a>
-    <h2><img class="header-logo" src="{{ splash_logo_data_uri }}" alt="" aria-hidden="true">Tesla-Dashboard V{{ version }}
+    <h2><img class="header-logo" src="/static/images/tesla-dashboard-logo.webp" alt="" aria-hidden="true">Tesla-Dashboard V{{ version }}
         <span id="header-right">
             <span id="vehicle-info"></span>&nbsp;&nbsp;&nbsp;<span id="vehicle-status"></span>
         </span>
@@ -141,9 +141,9 @@
         </div>
             <div id="speedometer">
                 <div id="turn-indicator" class="turn-indicator" role="img" aria-label="Blinker aus">
-                    <span id="turn-left" class="turn-arrow" aria-hidden="true">◀</span>
+                    <span id="turn-left" class="turn-arrow" role="img" aria-label="Blinker links" title="Blinker links">◀</span>
                     <span id="high-beam-indicator" class="high-beam-indicator" role="img" aria-label="Fernlicht aus" title="Fernlicht aus"></span>
-                    <span id="turn-right" class="turn-arrow" aria-hidden="true">▶</span>
+                    <span id="turn-right" class="turn-arrow" role="img" aria-label="Blinker rechts" title="Blinker rechts">▶</span>
                 </div>
                 <svg width="140" height="70" viewBox="0 -5 120 60">
                     <path d="M10,50 A50,50 0 0,1 110,50" stroke="#ccc" stroke-width="12" fill="none"/>

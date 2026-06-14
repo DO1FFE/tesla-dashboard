@@ -69,6 +69,17 @@ def test_live_zoom_nutzt_drive_speed_immer_als_mph():
     assert "gui_distance_units" not in zoombereich
 
 
+def test_karte_filtert_gps_drift_im_geparkten_zustand():
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+
+    assert "PARKED_MAP_JITTER_METERS" in js
+    assert "function entfernungMeter" in js
+    assert "function fahrzeugIstGeparktFuerKarte" in js
+    assert "positionIstNeu(mapLat, mapLng, karteGeparkt)" in js
+    assert "entfernung < PARKED_MAP_JITTER_METERS" in js
+    assert "if (coordsNeu || !letzteKartenPosition)" in js
+
+
 def test_fahrzeugsymbole_sind_in_ui_eingebunden():
     html = pathlib.Path("templates/index.html").read_text(encoding="utf-8")
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
@@ -122,13 +133,22 @@ def test_routeline_wird_in_der_livekarte_verwendet():
     assert "color: '#00e5ff'" in js
 
 
-def test_disconnected_state_zaehlt_seit_dauer_hoch():
+def test_livepfad_wird_per_delta_an_leaflet_angehaengt():
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+
+    assert "lastPathDelta.push(pt)" in js
+    assert "function neuerPfadNurAngehängt(data)" in js
+    assert "polyline.addLatLng(pt)" in js
+
+
+def test_online_und_disconnected_state_zaehlen_seit_dauer_hoch():
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
 
     assert "lastStateSinceTimestamp" in js
     assert "function formatiereHochzaehlendeDauer(seitMillis)" in js
     assert "State: ' + lastVehicleState" in js
     assert "lastVehicleState === 'disconnected'" in js
+    assert "lastVehicleState === 'online'" in js
     assert "text += ' (seit ' + formatiereHochzaehlendeDauer" in js
 
 

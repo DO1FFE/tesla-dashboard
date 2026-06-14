@@ -70,6 +70,31 @@ def test_fleet_telemetrie_mqtt_aktualisiert_dashboard_cache(monkeypatch):
     assert gespeicherte_daten["veh-1"]["fleet_telemetry_updated_at"]
 
 
+def test_fleet_telemetrie_stoesst_aprs_aus_live_daten_an(monkeypatch):
+    aprs_daten = []
+
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
+    monkeypatch.setattr(app, "_load_cached", lambda vehicle_id: {})
+    monkeypatch.setattr(app, "_save_cached", lambda vehicle_id, data: None)
+    monkeypatch.setattr(app, "latest_data", {})
+    monkeypatch.setattr(app, "subscribers", {})
+    monkeypatch.setattr(
+        app,
+        "_aprs_spaeter_senden",
+        lambda data: aprs_daten.append(data),
+    )
+
+    assert app._fleet_telemetrie_mqtt_message(
+        "tesla/TESTVIN/v/Location",
+        b'{"latitude": 51.0, "longitude": 7.0}',
+        {"topic_base": "tesla"},
+    )
+
+    assert len(aprs_daten) == 1
+    assert aprs_daten[0]["drive_state"]["latitude"] == 51.0
+    assert aprs_daten[0]["drive_state"]["longitude"] == 7.0
+
+
 def test_fleet_telemetrie_mqtt_zeichnet_parkstatus_auf(monkeypatch):
     parking_aufrufe = []
 
@@ -372,6 +397,40 @@ def test_fleet_telemetrie_reichert_tpms_und_spiegel_aus_rohdaten_an():
     assert daten["vehicle_state"]["tpms_pressure_fl"] == 2.95
     assert daten["vehicle_state"]["tpms_last_seen_pressure_time_fl"] == 1781412111000
     assert daten["climate_state"]["side_mirror_heaters"] is True
+
+
+def test_fleet_telemetrie_erhaelt_tpms_druck_bei_ungueltigem_update(monkeypatch):
+    gespeicherte_daten = []
+
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
+    monkeypatch.setattr(app, "_load_cached", lambda vehicle_id: {})
+    monkeypatch.setattr(
+        app,
+        "_save_cached",
+        lambda vehicle_id, data: gespeicherte_daten.append((vehicle_id, data)),
+    )
+    monkeypatch.setattr(app, "subscribers", {})
+    monkeypatch.setattr(
+        app,
+        "latest_data",
+        {
+            "veh-1": {
+                "fleet_telemetry_raw": {"TpmsPressureFl": 2.9},
+                "vehicle_state": {"tpms_pressure_fl": 2.9},
+            }
+        },
+    )
+
+    assert app._fleet_telemetrie_mqtt_message(
+        "tesla/TESTVIN/v/TpmsPressureFl",
+        b"null",
+        {"topic_base": "tesla"},
+    )
+
+    daten = app.latest_data["veh-1"]
+    assert daten["vehicle_state"]["tpms_pressure_fl"] == 2.9
+    assert daten["fleet_telemetry_raw"]["TpmsPressureFl"] == 2.9
+    assert gespeicherte_daten[-1][1]["vehicle_state"]["tpms_pressure_fl"] == 2.9
 
 
 @pytest.mark.parametrize(

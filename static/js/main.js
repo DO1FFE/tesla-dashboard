@@ -13,6 +13,7 @@ var parkStartTime = null;
 var currentGear = null;
 var THERMOMETER_IDS = ['thermometer-inside', 'thermometer-outside', 'thermometer-battery'];
 var PARK_GRACE_MS = 5 * 60 * 1000;
+var PARKED_MAP_JITTER_METERS = 25;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 18;
@@ -23,6 +24,27 @@ var letzteKartenRichtung = null;
 var letzteZielSignatur = null;
 var letztePfadSignatur = null;
 var privacyCircle = null;
+var letzterReifendruckStatus = {};
+var REIFENDRUCK_CACHE_FELDER = [
+    'tpms_pressure_fl',
+    'tpms_pressure_fr',
+    'tpms_pressure_rl',
+    'tpms_pressure_rr',
+    'tpms_last_seen_pressure_time_fl',
+    'tpms_last_seen_pressure_time_fr',
+    'tpms_last_seen_pressure_time_rl',
+    'tpms_last_seen_pressure_time_rr',
+    'tpms_rcp_front_value',
+    'tpms_rcp_rear_value',
+    'tpms_soft_warning_fl',
+    'tpms_soft_warning_fr',
+    'tpms_soft_warning_rl',
+    'tpms_soft_warning_rr',
+    'tpms_hard_warning_fl',
+    'tpms_hard_warning_fr',
+    'tpms_hard_warning_rl',
+    'tpms_hard_warning_rr'
+];
 
 function normalizeShiftState(shift) {
     if (shift === null || shift === undefined) {
@@ -357,6 +379,7 @@ var installedVersion = null;
 var CONFIG = {};
 var HIGHLIGHT_BLUE = false;
 var currentPath = [];
+var lastPathDelta = [];
 var OFFLINE_TEXT = 'Das Fahrzeug ist offline und schläft - Bitte nicht wecken! - Die Daten sind die zuletzt bekannten und somit nicht aktuell!';
 var DISCONNECTED_TEXT = 'Die Fleet-Telemetry-Verbindung zum Fahrzeug ist getrennt. Es werden die zuletzt bekannten Daten angezeigt.';
 var SERVICE_MODE_TEXT = 'Fahrzeug befindet sich im Service Mode.';
@@ -447,12 +470,52 @@ function istOfflineOderSchlaeft(status) {
     return st === 'offline' || st === 'asleep';
 }
 
-function positionIstNeu(lat, lng) {
+function entfernungMeter(lat1, lng1, lat2, lng2) {
+    if (!isFinite(lat1) || !isFinite(lng1) || !isFinite(lat2) || !isFinite(lng2)) {
+        return null;
+    }
+    var radius = 6371000;
+    var toRad = Math.PI / 180;
+    var dLat = (Number(lat2) - Number(lat1)) * toRad;
+    var dLng = (Number(lng2) - Number(lng1)) * toRad;
+    var rLat1 = Number(lat1) * toRad;
+    var rLat2 = Number(lat2) * toRad;
+    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(rLat1) * Math.cos(rLat2) *
+            Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return radius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function fahrzeugIstGeparktFuerKarte(data, drive, speedKmh) {
+    drive = drive || {};
+    var gang = normalizeShiftState(drive.shift_state);
+    if (gang && gang !== 'P') {
+        return false;
+    }
+    if (speedKmh != null && isFinite(speedKmh) && Math.abs(Number(speedKmh)) > 1) {
+        return false;
+    }
+    var status = getStatus(data || {});
+    return status === 'Geparkt' || status === 'Ladevorgang' || gang === 'P';
+}
+
+function positionIstNeu(lat, lng, geparkt) {
     if (!isFinite(lat) || !isFinite(lng)) {
         return false;
     }
     if (!letzteKartenPosition) {
         return true;
+    }
+    if (geparkt) {
+        var entfernung = entfernungMeter(
+            letzteKartenPosition[0],
+            letzteKartenPosition[1],
+            lat,
+            lng
+        );
+        if (entfernung != null && entfernung < PARKED_MAP_JITTER_METERS) {
+            return false;
+        }
     }
     var diffLat = Math.abs(lat - letzteKartenPosition[0]);
     var diffLng = Math.abs(lng - letzteKartenPosition[1]);
@@ -678,6 +741,7 @@ marker.on('moveend', function() {
 var eventSource = null;
 
 function updatePathPoints(data) {
+    lastPathDelta = [];
     if (data && data.path_reset) {
         if (Array.isArray(data.path)) {
             currentPath = data.path.slice();
@@ -698,10 +762,22 @@ function updatePathPoints(data) {
             var last = currentPath[currentPath.length - 1];
             if (!last || last[0] !== pt[0] || last[1] !== pt[1]) {
                 currentPath.push(pt);
+                lastPathDelta.push(pt);
             }
         });
     }
     return Array.isArray(currentPath) ? currentPath : [];
+}
+
+function neuerPfadNurAngehängt(data) {
+    return Boolean(
+        data &&
+        !data.path_reset &&
+        !Array.isArray(data.path) &&
+        Array.isArray(lastPathDelta) &&
+        lastPathDelta.length &&
+        polyline
+    );
 }
 
 function clearSuperchargerMarkers() {
@@ -933,12 +1009,13 @@ function handleData(data) {
     var slide = false;
     var offline = istOfflineOderSchlaeft(data.state);
     if (isFinite(mapLat) && isFinite(mapLng)) {
-        var coordsNeu = positionIstNeu(mapLat, mapLng);
+        var speedVal = parseFloat(drive.speed);
+        var speedKmh = isNaN(speedVal) ? 0 : speedVal * MILES_TO_KM;
+        var karteGeparkt = fahrzeugIstGeparktFuerKarte(data, drive, speedKmh);
+        var coordsNeu = positionIstNeu(mapLat, mapLng, karteGeparkt);
         if (coordsNeu) {
             marker.setLatLng([mapLat, mapLng]);
         }
-        var speedVal = parseFloat(drive.speed);
-        var speedKmh = isNaN(speedVal) ? 0 : speedVal * MILES_TO_KM;
         var zoom = computeZoomForSpeed(speedKmh);
         if (privacyModeAktiv) {
             zoom = zoomFuerPrivatsphaereRadius(privacyRadius, zoom);
@@ -951,7 +1028,7 @@ function handleData(data) {
             map.setView([mapLat, mapLng], zoom, {animate: false});
             updateZoomDisplay();
         }
-        if (typeof drive.heading === 'number') {
+        if (typeof drive.heading === 'number' && (!karteGeparkt || letzteKartenRichtung == null)) {
             var displayHeading = adjustHeadingForReverse(drive.heading, drive.shift_state);
             if (
                 letzteKartenRichtung == null ||
@@ -961,7 +1038,9 @@ function handleData(data) {
                 letzteKartenRichtung = displayHeading;
             }
         }
-        letzteKartenPosition = [mapLat, mapLng];
+        if (coordsNeu || !letzteKartenPosition) {
+            letzteKartenPosition = [mapLat, mapLng];
+        }
     } else if (!letzteKartenPosition && !offline) {
         // Auf Standardposition zurücksetzen, wenn keine Koordinaten vorliegen
         var zoom = DEFAULT_ZOOM;
@@ -1056,6 +1135,10 @@ function handleData(data) {
         if (pfadSignatur !== letztePfadSignatur) {
             if (!polyline) {
                 polyline = L.polyline(sichtbarePathPoints, { color: 'blue' }).addTo(map);
+            } else if (neuerPfadNurAngehängt(data)) {
+                privatisiereKartenPunkte(lastPathDelta).forEach(function(pt) {
+                    polyline.addLatLng(pt);
+                });
             } else if (slide) {
                 pendingPath = sichtbarePathPoints.slice();
             } else {
@@ -1155,8 +1238,14 @@ function updateTurnSignalIndicator(turnSignal, hazardsActive) {
     }
     var leftActive = hazards || signal === 'left' || signal === 'both';
     var rightActive = hazards || signal === 'right' || signal === 'both';
-    $left.toggleClass('is-active', leftActive);
-    $right.toggleClass('is-active', rightActive);
+    $left
+        .toggleClass('is-active', leftActive)
+        .attr('title', 'Blinker links')
+        .attr('aria-label', 'Blinker links');
+    $right
+        .toggleClass('is-active', rightActive)
+        .attr('title', 'Blinker rechts')
+        .attr('aria-label', 'Blinker rechts');
     var title = 'Blinker aus';
     if (hazards || signal === 'both') {
         title = 'Warnblinker an';
@@ -1543,8 +1632,26 @@ function reifendruckHinweis(eintrag, status) {
     return hinweise.join(', ') || status.text;
 }
 
+function reifendruckMitLetztenWerten(vehicle) {
+    var ergebnis = Object.assign({}, vehicle || {});
+    REIFENDRUCK_CACHE_FELDER.forEach(function(feld) {
+        var wert = ergebnis[feld];
+        var istDruckfeld = feld.indexOf('tpms_pressure_') === 0 ||
+            feld.indexOf('tpms_rcp_') === 0;
+        var hatWert = istDruckfeld ? parseNumber(wert) != null : wert != null;
+        if (hatWert) {
+            letzterReifendruckStatus[feld] = wert;
+            return;
+        }
+        if (Object.prototype.hasOwnProperty.call(letzterReifendruckStatus, feld)) {
+            ergebnis[feld] = letzterReifendruckStatus[feld];
+        }
+    });
+    return ergebnis;
+}
+
 function reifendruckReifen(vehicle) {
-    vehicle = vehicle || {};
+    vehicle = reifendruckMitLetztenWerten(vehicle);
     var vorneSoll = vehicle.tpms_rcp_front_value;
     var hintenSoll = vehicle.tpms_rcp_rear_value;
     return [
@@ -3024,7 +3131,9 @@ function zeichneVehicleState() {
         return;
     }
     var text = 'State: ' + lastVehicleState;
-    if (lastVehicleState === 'disconnected' && lastStateSinceTimestamp) {
+    var zustandMitDauer = lastVehicleState === 'disconnected' ||
+        lastVehicleState === 'online';
+    if (zustandMitDauer && lastStateSinceTimestamp) {
         text += ' (seit ' + formatiereHochzaehlendeDauer(lastStateSinceTimestamp) + ')';
     }
     $state.text(text);
