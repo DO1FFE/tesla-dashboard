@@ -1,5 +1,6 @@
 import pathlib
 import sys
+from datetime import datetime, timezone
 
 import pytest
 
@@ -146,6 +147,14 @@ def test_fleet_telemetrie_mqtt_ignoriert_unveraenderte_rohwerte(monkeypatch):
 
 def test_fleet_telemetrie_connectivity_unterscheidet_connected_und_disconnected(monkeypatch):
     gespeicherte_daten = []
+    connected_at = "2026-06-14T14:00:00Z"
+    disconnected_at = "2026-06-14T14:47:59Z"
+    connected_ms = int(
+        datetime(2026, 6, 14, 14, 0, 0, tzinfo=timezone.utc).timestamp() * 1000
+    )
+    disconnected_ms = int(
+        datetime(2026, 6, 14, 14, 47, 59, tzinfo=timezone.utc).timestamp() * 1000
+    )
 
     class Sammler:
         def __init__(self):
@@ -167,19 +176,24 @@ def test_fleet_telemetrie_connectivity_unterscheidet_connected_und_disconnected(
 
     assert app._fleet_telemetrie_mqtt_message(
         "tesla/TESTVIN/connectivity",
-        b'{"Status": "CONNECTED"}',
+        f'{{"Status": "CONNECTED", "CreatedAt": "{connected_at}"}}'.encode("utf-8"),
         {"topic_base": "tesla"},
     )
     assert app.latest_data["veh-1"]["state"] == "online"
+    assert app.latest_data["veh-1"]["state_since_ms"] == connected_ms
 
     assert app._fleet_telemetrie_mqtt_message(
         "tesla/TESTVIN/connectivity",
-        b'{"Status": "DISCONNECTED"}',
+        f'{{"Status": "DISCONNECTED", "CreatedAt": "{disconnected_at}"}}'.encode("utf-8"),
         {"topic_base": "tesla"},
     )
     assert app.latest_data["veh-1"]["state"] == "disconnected"
+    assert app.latest_data["veh-1"]["state_since_ms"] == disconnected_ms
+    assert app.latest_data["veh-1"]["state_since_at"] == disconnected_at
     assert gespeicherte_daten[-1][1]["state"] == "disconnected"
+    assert gespeicherte_daten[-1][1]["state_since_ms"] == disconnected_ms
     assert sammler.daten[-1]["state"] == "disconnected"
+    assert sammler.daten[-1]["state_since_ms"] == disconnected_ms
 
 
 def test_fleet_telemetrie_mqtt_normalisiert_oeffnungen(monkeypatch):
@@ -254,6 +268,7 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
         "MilesToArrival": b"12.5",
         "MinutesToArrival": b"18",
         "RouteTrafficMinutesDelay": b"3",
+        "RouteLine": b'"abcdef"',
         "GpsState": b'"GpsStateActive"',
         "DCChargingEnergyIn": b"7.5",
         "DCChargingPower": b"11",
@@ -274,6 +289,7 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
         "DriverSeatOccupied": b"true",
         "BrakePedal": b"true",
         "BrakePedalPos": b"3.4",
+        "PedalPosition": b"12.5",
         "CenterDisplay": b'"DisplayStateOn"',
         "SpeedLimitMode": b'"SpeedLimitModeStateOn"',
         "CurrentLimitMph": b"56",
@@ -300,6 +316,7 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
     assert daten["drive_state"]["active_route_latitude"] == 51.1
     assert daten["drive_state"]["active_route_energy_at_arrival"] == 42
     assert daten["drive_state"]["active_route_miles_to_arrival"] == 12.5
+    assert daten["drive_state"]["active_route_line"] == "abcdef"
     assert daten["drive_state"]["gps_state"] == "GpsStateActive"
     assert daten["charge_state"]["charge_energy_added"] == 7.5
     assert daten["charge_state"]["charger_power"] == 11
@@ -323,6 +340,7 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
     assert daten["vehicle_state"]["is_user_present"] is True
     assert daten["vehicle_state"]["brake_pedal"] is True
     assert daten["vehicle_state"]["brake_pedal_pos"] == 3.4
+    assert daten["vehicle_state"]["pedal_position"] == 12.5
     assert daten["vehicle_state"]["center_display_state"] == "On"
     assert daten["vehicle_state"]["speed_limit_mode"]["active"] is True
     assert daten["vehicle_state"]["speed_limit_mode"]["current_limit_mph"] == 56
@@ -354,6 +372,77 @@ def test_fleet_telemetrie_reichert_tpms_und_spiegel_aus_rohdaten_an():
     assert daten["vehicle_state"]["tpms_pressure_fl"] == 2.95
     assert daten["vehicle_state"]["tpms_last_seen_pressure_time_fl"] == 1781412111000
     assert daten["climate_state"]["side_mirror_heaters"] is True
+
+
+@pytest.mark.parametrize(
+    ("wert", "stufe", "aktiv"),
+    [
+        (0, 0, False),
+        (2, 2, True),
+        ("HvacSteeringWheelHeatLevelOff", 0, False),
+        ("HvacSteeringWheelHeatLevelLow", 1, True),
+        ("HvacSteeringWheelHeatLevelMedium", 2, True),
+        ("HvacSteeringWheelHeatLevelHigh", 3, True),
+        ("On", 1, True),
+    ],
+)
+def test_fleet_telemetrie_normalisiert_lenkradheizung(wert, stufe, aktiv):
+    daten = {}
+
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "HvacSteeringWheelHeatLevel",
+        wert,
+        1781412111000,
+    )
+
+    assert daten["climate_state"]["steering_wheel_heat_level"] == stufe
+    assert daten["climate_state"]["steering_wheel_heater"] is aktiv
+
+
+def test_fleet_telemetrie_reichert_lenkradheizung_aus_rohdaten_an():
+    daten = {
+        "fleet_telemetry_raw": {
+            "HvacSteeringWheelHeatLevel": "HvacSteeringWheelHeatLevelHigh",
+            "HvacSteeringWheelHeatAuto": True,
+        },
+        "climate_state": {},
+    }
+
+    app._fleet_telemetrie_rohdaten_anreichern(daten)
+
+    assert daten["climate_state"]["steering_wheel_heat_level"] == 3
+    assert daten["climate_state"]["steering_wheel_heater"] is True
+    assert daten["climate_state"]["auto_steering_wheel_heat"] is True
+
+
+def test_fleet_telemetrie_batterieheizung_null_bleibt_unbekannt():
+    daten = {}
+
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "BatteryHeaterOn",
+        None,
+        1781412111000,
+    )
+
+    assert daten["charge_state"]["battery_heater_on"] is None
+    assert daten["climate_state"]["battery_heater"] is None
+
+
+def test_fleet_telemetrie_reichert_unbekannte_batterieheizung_aus_rohdaten_an():
+    daten = {
+        "fleet_telemetry_raw": {
+            "BatteryHeaterOn": None,
+        },
+        "charge_state": {"battery_heater_on": False},
+        "climate_state": {"battery_heater": False},
+    }
+
+    app._fleet_telemetrie_rohdaten_anreichern(daten)
+
+    assert daten["charge_state"]["battery_heater_on"] is None
+    assert daten["climate_state"]["battery_heater"] is None
 
 
 def test_fetch_data_once_nutzt_telemetrie_cache_ohne_owner_api(monkeypatch):

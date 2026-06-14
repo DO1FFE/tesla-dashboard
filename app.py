@@ -3314,6 +3314,56 @@ def _fleet_telemetrie_wahr(value):
     return bool(value)
 
 
+def _fleet_telemetrie_optional_wahr(value):
+    """Wandle Telemetry-Werte in Bool um und erhalte nicht verfügbare Werte."""
+
+    value = _fleet_telemetrie_wert(value)
+    if value is None:
+        return None
+    return _fleet_telemetrie_wahr(value)
+
+
+def _fleet_telemetrie_heizstufe(value):
+    """Normalisiere Heizstufen aus Fleet-Telemetry-Zahlen und Enum-Texten."""
+
+    value = _fleet_telemetrie_wert(value)
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, (int, float)):
+        return max(0, int(round(float(value))))
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        for prefix in (
+            "HvacSteeringWheelHeatLevel",
+            "SteeringWheelHeatLevel",
+            "SteeringWheelHeat",
+            "HeatLevel",
+            "Level",
+        ):
+            if text.startswith(prefix):
+                text = text[len(prefix):]
+                break
+        norm = text.strip().lower().replace("_", "").replace("-", "").replace(" ", "")
+        if not norm:
+            return None
+        zahl = _as_float(norm)
+        if zahl is not None:
+            return max(0, int(round(zahl)))
+        if norm in {"0", "false", "off", "none", "null", "unknown"}:
+            return 0
+        if norm in {"1", "true", "on", "active", "enabled", "low"}:
+            return 1
+        if norm in {"2", "medium", "mid", "med"}:
+            return 2
+        if norm in {"3", "high", "max", "maximum"}:
+            return 3
+    return 1 if _fleet_telemetrie_wahr(value) else 0
+
+
 def _fleet_telemetrie_norm_text(value):
     """Normalisiere Enum-Texte aus Fleet Telemetry."""
     if value is None:
@@ -3499,6 +3549,7 @@ def _fleet_telemetrie_rohdaten_anreichern(data):
     if not isinstance(raw, dict):
         return
     vehicle_state = data.setdefault("vehicle_state", {})
+    charge = data.setdefault("charge_state", {})
     climate = data.setdefault("climate_state", {})
     tpms_pressure_map = {
         "TpmsPressureFl": "tpms_pressure_fl",
@@ -3521,6 +3572,19 @@ def _fleet_telemetrie_rohdaten_anreichern(data):
     if "RearDefrostEnabled" in raw and climate.get("side_mirror_heaters") is None:
         climate["side_mirror_heaters"] = _fleet_telemetrie_wahr(
             raw.get("RearDefrostEnabled")
+        )
+    if "BatteryHeaterOn" in raw:
+        batterieheizung = _fleet_telemetrie_optional_wahr(raw.get("BatteryHeaterOn"))
+        charge["battery_heater_on"] = batterieheizung
+        climate["battery_heater_on"] = batterieheizung
+        climate["battery_heater"] = batterieheizung
+    if "HvacSteeringWheelHeatLevel" in raw:
+        stufe = _fleet_telemetrie_heizstufe(raw.get("HvacSteeringWheelHeatLevel"))
+        climate["steering_wheel_heat_level"] = stufe
+        climate["steering_wheel_heater"] = bool(stufe and stufe > 0)
+    if "HvacSteeringWheelHeatAuto" in raw:
+        climate["auto_steering_wheel_heat"] = _fleet_telemetrie_wahr(
+            raw.get("HvacSteeringWheelHeatAuto")
         )
 
 
@@ -3555,6 +3619,18 @@ def _fleet_telemetrie_zeitstempel_ms(value):
     try:
         numeric = float(value)
     except Exception:
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                if text.endswith("Z"):
+                    text = text[:-1] + "+00:00"
+                try:
+                    parsed = datetime.fromisoformat(text)
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=timezone.utc)
+                    return int(parsed.timestamp() * 1000)
+                except Exception:
+                    pass
         return value
     if numeric and numeric < 1e12:
         numeric *= 1000
@@ -3662,8 +3738,11 @@ def _fleet_telemetrie_basisdaten(data, vin, cache_id, timestamp_ms):
     if not isinstance(data, dict):
         data = {}
     _fleet_telemetrie_entferne_fremddaten(data)
-    data.setdefault("state", "online")
+    vorheriger_state = data.get("state")
     data["state"] = "online"
+    if vorheriger_state != "online" or data.get("state_since_ms") is None:
+        data["state_since_ms"] = timestamp_ms
+        data["state_since_at"] = timestamp_ms
     if vin:
         data.setdefault("vin", vin)
     canonical_id = cache_id if cache_id != "default" else _default_vehicle_id
@@ -3745,6 +3824,13 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         return True
     if field == "RouteTrafficMinutesDelay":
         drive["active_route_traffic_minutes_delay"] = value
+        drive["timestamp"] = timestamp_ms
+        return True
+    if field == "RouteLine":
+        if value is None:
+            drive.pop("active_route_line", None)
+        else:
+            drive["active_route_line"] = value
         drive["timestamp"] = timestamp_ms
         return True
     if field == "GpsHeading":
@@ -3938,9 +4024,10 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         charge["timestamp"] = timestamp_ms
         return True
     if field == "BatteryHeaterOn":
-        charge["battery_heater_on"] = _fleet_telemetrie_wahr(value)
-        climate["battery_heater_on"] = charge["battery_heater_on"]
-        climate["battery_heater"] = charge["battery_heater_on"]
+        batterieheizung = _fleet_telemetrie_optional_wahr(value)
+        charge["battery_heater_on"] = batterieheizung
+        climate["battery_heater_on"] = batterieheizung
+        climate["battery_heater"] = batterieheizung
         charge["timestamp"] = timestamp_ms
         climate["timestamp"] = timestamp_ms
         return True
@@ -4005,6 +4092,10 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         return True
     if field == "BrakePedalPos":
         vehicle_state["brake_pedal_pos"] = value
+        vehicle_state["timestamp"] = timestamp_ms
+        return True
+    if field == "PedalPosition":
+        vehicle_state["pedal_position"] = value
         vehicle_state["timestamp"] = timestamp_ms
         return True
     if field == "CenterDisplay":
@@ -4201,11 +4292,9 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         climate["timestamp"] = timestamp_ms
         return True
     if field == "HvacSteeringWheelHeatLevel":
-        climate["steering_wheel_heat_level"] = value
-        try:
-            climate["steering_wheel_heater"] = float(value) > 0
-        except Exception:
-            climate["steering_wheel_heater"] = _fleet_telemetrie_wahr(value)
+        stufe = _fleet_telemetrie_heizstufe(value)
+        climate["steering_wheel_heat_level"] = stufe
+        climate["steering_wheel_heater"] = bool(stufe and stufe > 0)
         climate["timestamp"] = timestamp_ms
         return True
     if field == "HvacSteeringWheelHeatAuto":
@@ -4473,6 +4562,40 @@ def _fleet_telemetrie_verbindungsstatus_state(status):
     return None
 
 
+def _fleet_telemetrie_statusbeginn_ms(payload, fallback_ms):
+    """Lese den Beginn eines Fleet-Telemetry-Verbindungsstatus."""
+    if not isinstance(payload, dict):
+        return fallback_ms
+    for key in ("CreatedAt", "created_at", "Timestamp", "timestamp"):
+        if key not in payload:
+            continue
+        millis = _fleet_telemetrie_zeitstempel_ms(payload.get(key))
+        if isinstance(millis, (int, float)):
+            return int(millis)
+    return fallback_ms
+
+
+def _fleet_telemetrie_statusbeginn_ergänzen(data, fallback_ms=None):
+    """Ergänze fehlende State-Beginn-Daten aus dem Connectivity-Event."""
+    if not isinstance(data, dict) or data.get("state_since_ms") is not None:
+        return
+    verbindung = data.get("fleet_telemetry_connectivity")
+    state_since_ms = _fleet_telemetrie_statusbeginn_ms(verbindung, fallback_ms)
+    if not isinstance(state_since_ms, (int, float)):
+        return
+    data["state_since_ms"] = int(state_since_ms)
+    if isinstance(verbindung, dict):
+        data["state_since_at"] = (
+            verbindung.get("CreatedAt")
+            or verbindung.get("created_at")
+            or verbindung.get("Timestamp")
+            or verbindung.get("timestamp")
+            or int(state_since_ms)
+        )
+    else:
+        data["state_since_at"] = int(state_since_ms)
+
+
 def _fleet_telemetrie_verbindung_aktualisieren(vin, payload, timestamp_ms=None):
     """Übernehme Fleet-Telemetry-Verbindungsereignisse in den Cache."""
     if timestamp_ms is None:
@@ -4489,9 +4612,28 @@ def _fleet_telemetrie_verbindung_aktualisieren(vin, payload, timestamp_ms=None):
             data = latest_data.get(cache_id)
             if not isinstance(data, dict):
                 data = _load_cached(cache_id) or {}
+            vorheriger_state = data.get("state")
+            fallback_since_ms = timestamp_ms
+            if vorheriger_state == state and data.get("state_since_ms") is not None:
+                fallback_since_ms = data.get("state_since_ms")
+            state_since_ms = _fleet_telemetrie_statusbeginn_ms(
+                payload,
+                fallback_since_ms,
+            )
             data = _fleet_telemetrie_basisdaten(data, vin, cache_id, timestamp_ms)
             data["state"] = state
             data["state_checked_at"] = timestamp_ms
+            data["state_since_ms"] = state_since_ms
+            if isinstance(payload, dict):
+                data["state_since_at"] = (
+                    payload.get("CreatedAt")
+                    or payload.get("created_at")
+                    or payload.get("Timestamp")
+                    or payload.get("timestamp")
+                    or state_since_ms
+                )
+            else:
+                data["state_since_at"] = state_since_ms
             data["fleet_telemetry_connectivity"] = payload
             _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, data)
             data["_live"] = True
@@ -4629,12 +4771,14 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
             data = dict(data)
             _fleet_telemetrie_entferne_fremddaten(data)
             _fleet_telemetrie_rohdaten_anreichern(data)
+            _fleet_telemetrie_statusbeginn_ergänzen(data)
             data["_live"] = True
             return data
     if data:
         data = dict(data)
         _fleet_telemetrie_entferne_fremddaten(data)
         _fleet_telemetrie_rohdaten_anreichern(data)
+        _fleet_telemetrie_statusbeginn_ergänzen(data)
         data["_live"] = False
         data.setdefault("api_error", "Noch keine aktuellen Fleet-Telemetry-Daten empfangen")
         return data
@@ -6954,6 +7098,7 @@ def get_vehicle_state(vehicle_id=None):
         telemetry_data = _fleet_telemetrie_cache_fuer_dashboard(vid, cached)
         telemetry_state = None
         if isinstance(telemetry_data, dict):
+            _fleet_telemetrie_statusbeginn_ergänzen(telemetry_data)
             telemetry_state = telemetry_data.get("state")
             checked_at = telemetry_data.get(
                 "fleet_telemetry_updated_at",
@@ -6961,12 +7106,16 @@ def get_vehicle_state(vehicle_id=None):
             )
             if telemetry_state is not None:
                 log_vehicle_state(vid, telemetry_state)
-                return {
+                antwort = {
                     "state": telemetry_state,
                     "state_checked_at": checked_at,
                     "service_mode": service_mode,
                     "service_mode_plus": service_mode_plus,
                 }
+                for key in ("state_since_ms", "state_since_at"):
+                    if telemetry_data.get(key) is not None:
+                        antwort[key] = telemetry_data.get(key)
+                return antwort
         cached_state = vorheriger_state or _zustand_aus_cache(cached)
         return {
             "error": "Noch keine Fleet-Telemetry-Daten empfangen",

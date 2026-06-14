@@ -59,6 +59,16 @@ def test_stream_fehlerpfad_setzt_karte_nicht_auf_default():
     assert "map.setView(DEFAULT_POS" not in fehlerpfad
 
 
+def test_live_zoom_nutzt_drive_speed_immer_als_mph():
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+    start = js.index("var speedVal = parseFloat(drive.speed);")
+    ende = js.index("var zoom = computeZoomForSpeed(speedKmh);", start)
+    zoombereich = js[start:ende]
+
+    assert "speedVal * MILES_TO_KM" in zoombereich
+    assert "gui_distance_units" not in zoombereich
+
+
 def test_fahrzeugsymbole_sind_in_ui_eingebunden():
     html = pathlib.Path("templates/index.html").read_text(encoding="utf-8")
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
@@ -81,6 +91,45 @@ def test_technische_packdetails_sind_in_ui_eingebunden():
     assert "charge.pack_voltage" in js
     assert "charge.pack_current" in js
     assert "charge.pack_power" in js
+
+
+def test_pedalposition_ist_unter_dem_tacho_eingebunden():
+    html = pathlib.Path("templates/index.html").read_text(encoding="utf-8")
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+    css = pathlib.Path("static/css/style.css").read_text(encoding="utf-8")
+
+    assert 'id="pedal-position-needle"' in html
+    assert 'id="pedal-position-needle-outline"' in html
+    assert 'id="pedal-position-value"' not in html
+    assert html.index('id="speedometer-needle"') < html.index('id="pedal-position-needle"')
+    assert "updatePedalPosition(vehicle.pedal_position)" in js
+    assert "function updatePedalPosition(value)" in js
+    assert "prozent / 100 * 180 - 90" in js
+    assert "#pedal-position-needle" in css
+    assert "#pedal-position-needle-outline" in css
+    assert "#speedometer .pedal-position" not in css
+
+
+def test_routeline_wird_in_der_livekarte_verwendet():
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+
+    assert "function dekodierePolyline(polyline, praezision)" in js
+    assert "function routeLineZuKartenPunkte(routeLine)" in js
+    assert "dekodierePolyline(kodiertePolyline, 6)" in js
+    assert "privacyModeAktiv ? [] : routeLineZuKartenPunkte(drive.active_route_line)" in js
+    assert "nutztRouteLine ? routenPunkte : [[mapLat, mapLng], [dLat, dLng]]" in js
+    assert "nutztRouteLine ? kartenPunkteSignatur(routenPunkte) : 'luftlinie'" in js
+    assert "color: '#00e5ff'" in js
+
+
+def test_disconnected_state_zaehlt_seit_dauer_hoch():
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+
+    assert "lastStateSinceTimestamp" in js
+    assert "function formatiereHochzaehlendeDauer(seitMillis)" in js
+    assert "State: ' + lastVehicleState" in js
+    assert "lastVehicleState === 'disconnected'" in js
+    assert "text += ' (seit ' + formatiereHochzaehlendeDauer" in js
 
 
 def test_history_nutzt_trotz_privatmodus_reale_punkte(monkeypatch):

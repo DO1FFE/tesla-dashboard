@@ -987,10 +987,29 @@ select {
 }
 #heater-indicator div {
   font-size: 20px;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, auto) 2.4em;
+  column-gap: 0.25em;
+  align-items: center;
+  justify-content: end;
+  white-space: nowrap;
+  width: 100%;
+}
+#heater-indicator .heater-label {
+  min-width: 0;
+  text-align: right;
+}
+#heater-indicator .heater-symbol {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  white-space: nowrap;
+  min-width: 2.4em;
+  line-height: 1;
+  text-align: center;
+}
+#heater-indicator .heater-symbol.is-unknown {
+  font-family: 'Roboto', Arial, sans-serif;
+  font-weight: 700;
 }
 #heater-indicator hr {
   width: 100%;
@@ -1273,6 +1292,25 @@ select {
 
 #speedometer svg {
   display: block;
+}
+
+#pedal-position-needle-outline {
+  stroke: #111;
+  stroke-linecap: round;
+  stroke-width: 8;
+  opacity: 0.75;
+}
+
+#pedal-position-needle {
+  stroke: #00e5ff;
+  stroke-linecap: round;
+  stroke-width: 5;
+  opacity: 0.75;
+}
+
+#pedal-position-needle.is-active {
+  opacity: 1;
+  filter: drop-shadow(0 0 6px rgba(0, 229, 255, 1));
 }
 
 #speedometer .power {

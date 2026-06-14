@@ -282,6 +282,63 @@ function zoomFuerPrivatsphaereRadius(radius, fallbackZoom) {
     return fallbackZoom;
 }
 
+function dekodierePolyline(polyline, praezision) {
+    if (typeof polyline !== 'string' || !polyline) {
+        return [];
+    }
+    var faktor = Math.pow(10, praezision || 5);
+    var index = 0;
+    var lat = 0;
+    var lng = 0;
+    var punkte = [];
+
+    function dekodiereWert() {
+        var ergebnis = 0;
+        var verschiebung = 0;
+        var byteWert = 0;
+        do {
+            if (index >= polyline.length) {
+                return null;
+            }
+            byteWert = polyline.charCodeAt(index++) - 63;
+            ergebnis |= (byteWert & 0x1f) << verschiebung;
+            verschiebung += 5;
+        } while (byteWert >= 0x20);
+        return ergebnis & 1 ? ~(ergebnis >> 1) : ergebnis >> 1;
+    }
+
+    while (index < polyline.length) {
+        var deltaLat = dekodiereWert();
+        var deltaLng = dekodiereWert();
+        if (deltaLat == null || deltaLng == null) {
+            return [];
+        }
+        lat += deltaLat;
+        lng += deltaLng;
+        punkte.push([lat / faktor, lng / faktor]);
+    }
+
+    return punkte;
+}
+
+function routeLineZuKartenPunkte(routeLine) {
+    if (typeof routeLine !== 'string' || !routeLine.trim()) {
+        return [];
+    }
+    var kodiertePolyline = routeLine.trim();
+    if (typeof atob === 'function') {
+        try {
+            kodiertePolyline = atob(kodiertePolyline);
+        } catch (err) {}
+    }
+    return dekodierePolyline(kodiertePolyline, 6).filter(function(point) {
+        return Array.isArray(point) &&
+            point.length >= 2 &&
+            isFinite(point[0]) &&
+            isFinite(point[1]);
+    });
+}
+
 map.on('zoomend', function() {
     if (zoomSetByApp) {
         zoomSetByApp = false;
@@ -294,6 +351,7 @@ var polyline = null;
 var pendingPath = null;
 var lastDataTimestamp = null;
 var lastStateTimestamp = null;
+var lastStateSinceTimestamp = null;
 var lastVehicleState = null;
 var installedVersion = null;
 var CONFIG = {};
@@ -797,7 +855,7 @@ function handleData(data) {
     hideLoading();
     updateHeader(data);
     updateUI(data);
-    updateVehicleState(data.state, data.state_checked_at);
+    updateVehicleState(data.state, data.state_checked_at, data);
     var vehicle = data.vehicle_state || {};
     updateOfflineInfo(data.state, vehicle.service_mode, vehicle.service_mode_plus);
     updateSoftwareUpdate(vehicle.software_update);
@@ -818,6 +876,7 @@ function handleData(data) {
         displayPower = charge.charger_power;
     }
     updateSpeedometer(drive.speed, displayPower, charge.charging_state);
+    updatePedalPosition(vehicle.pedal_position);
     updateOdometer(vehicle.odometer);
     var rangeMiles = charge.ideal_battery_range;
     if (rangeMiles == null) {
@@ -844,6 +903,8 @@ function handleData(data) {
         climate.is_front_defroster_on,
         climate.is_rear_defroster_on,
         climate.steering_wheel_heater,
+        climate.steering_wheel_heat_level,
+        climate.auto_steering_wheel_heat,
         climate.wiper_blade_heater,
         climate.side_mirror_heaters,
         charge.battery_heater_on,
@@ -877,9 +938,7 @@ function handleData(data) {
             marker.setLatLng([mapLat, mapLng]);
         }
         var speedVal = parseFloat(drive.speed);
-        var units = data.gui_settings && data.gui_settings.gui_distance_units;
-        var mph = !units || units.indexOf('km') === -1;
-        var speedKmh = isNaN(speedVal) ? 0 : (mph ? speedVal * MILES_TO_KM : speedVal);
+        var speedKmh = isNaN(speedVal) ? 0 : speedVal * MILES_TO_KM;
         var zoom = computeZoomForSpeed(speedKmh);
         if (privacyModeAktiv) {
             zoom = zoomFuerPrivatsphaereRadius(privacyRadius, zoom);
@@ -945,12 +1004,25 @@ function handleData(data) {
         isFinite(dLat) &&
         isFinite(dLng)
     ) {
+        var routenPunkte = privacyModeAktiv ? [] : routeLineZuKartenPunkte(drive.active_route_line);
+        var nutztRouteLine = routenPunkte.length > 1;
+        var linienPunkte = nutztRouteLine ? routenPunkte : [[mapLat, mapLng], [dLat, dLng]];
+        var linienOptionen = nutztRouteLine ? {
+            color: '#00e5ff',
+            opacity: 0.9,
+            weight: 4
+        } : {
+            color: 'red',
+            dashArray: '5, 5',
+            weight: 2
+        };
         var zielSignatur = [
             drive.active_route_destination,
             mapLat,
             mapLng,
             dLat,
-            dLng
+            dLng,
+            nutztRouteLine ? kartenPunkteSignatur(routenPunkte) : 'luftlinie'
         ].join('|');
         if (zielSignatur !== letzteZielSignatur) {
             if (!destMarker) {
@@ -959,9 +1031,10 @@ function handleData(data) {
                 destMarker.setLatLng([dLat, dLng]);
             }
             if (!destLine) {
-                destLine = L.polyline([[mapLat, mapLng], [dLat, dLng]], { color: 'red', dashArray: '5, 5', weight: 2 }).addTo(map);
+                destLine = L.polyline(linienPunkte, linienOptionen).addTo(map);
             } else {
-                destLine.setLatLngs([[mapLat, mapLng], [dLat, dLng]]);
+                destLine.setLatLngs(linienPunkte);
+                destLine.setStyle(linienOptionen);
             }
             letzteZielSignatur = zielSignatur;
         }
@@ -1206,33 +1279,89 @@ function updateDesiredTemp(temp) {
         .attr('aria-label', 'Wunschtemperatur ' + temp.toFixed(1) + ' \u00B0C');
 }
 
-function updateHeaterIndicator(front, rear, steering, wiper,
+function updateHeaterIndicator(front, rear, steering, steeringLevel, steeringAuto, wiper,
                                mirror, battery,
                                seatL, seatR, seatRL, seatRC, seatRR) {
+    function heaterHtml(name, symbol, symbolClass) {
+        var klasse = 'heater-symbol';
+        if (symbolClass) {
+            klasse += ' ' + symbolClass;
+        }
+        return '<span class="heater-label">' + name + ':</span>' +
+               '<span class="' + klasse + '">' + symbol + '</span>';
+    }
     function set(id, val, name) {
         if (val == null) {
             $('#' + id)
-                .html(name + ': \uD83D\uDEAB')
+                .html(heaterHtml(name, '?', 'is-unknown'))
                 .attr('title', name + ' unbekannt')
                 .attr('aria-label', name + ' unbekannt');
             return;
         }
-        var active = false;
-        if (typeof val === 'string') {
-            var norm = val.toLowerCase();
-            active = norm === 'true' || norm === '1';
-        } else {
-            active = !!val;
-        }
+        var active = istAktiv(val);
         $('#' + id)
-            .html(name + ': ' + (active ? '\uD83D\uDD25' : '\uD83D\uDEAB'))
+            .html(heaterHtml(name, active ? '\uD83D\uDD25' : '\uD83D\uDEAB'))
             .attr('title', name + (active ? ' an' : ' aus'))
             .attr('aria-label', name + (active ? ' an' : ' aus'));
+    }
+    function heaterLevel(val) {
+        if (val == null || val === '') {
+            return null;
+        }
+        var numeric = parseNumber(val);
+        if (numeric != null) {
+            return Math.max(0, Math.round(numeric));
+        }
+        if (typeof val !== 'string') {
+            return null;
+        }
+        var norm = val.trim()
+            .replace(/^HvacSteeringWheelHeatLevel/, '')
+            .replace(/^SteeringWheelHeatLevel/, '')
+            .replace(/^SteeringWheelHeat/, '')
+            .replace(/^HeatLevel/, '')
+            .replace(/^Level/, '')
+            .toLowerCase()
+            .replace(/[_\-\s]/g, '');
+        if (!norm || ['false', 'off', 'none', 'null', 'unknown'].indexOf(norm) !== -1) {
+            return 0;
+        }
+        if (['true', 'on', 'active', 'enabled', 'low'].indexOf(norm) !== -1) {
+            return 1;
+        }
+        if (['medium', 'mid', 'med'].indexOf(norm) !== -1) {
+            return 2;
+        }
+        if (['high', 'max', 'maximum'].indexOf(norm) !== -1) {
+            return 3;
+        }
+        return null;
+    }
+    function setSteering(id, val, levelVal, autoVal, name) {
+        var level = heaterLevel(levelVal);
+        var autoActive = istAktiv(autoVal);
+        var active = level != null ? level > 0 : istAktiv(val);
+        if (!active && autoActive) {
+            active = true;
+        }
+        var suffix = active ? '\uD83D\uDD25' : '\uD83D\uDEAB';
+        var title = name + (active ? ' an' : ' aus');
+        if (active && level != null && level > 0) {
+            suffix += level;
+            title = name + ' Stufe ' + level;
+        } else if (active && autoActive) {
+            suffix += ' A';
+            title = name + ' Automatik';
+        }
+        $('#' + id)
+            .html(heaterHtml(name, suffix))
+            .attr('title', title)
+            .attr('aria-label', title);
     }
     function setLevel(id, val, name) {
         if (val == null || isNaN(val)) {
             $('#' + id)
-                .html(name + ': \uD83D\uDEAB')
+                .html(heaterHtml(name, '?', 'is-unknown'))
                 .attr('title', name + ' unbekannt')
                 .attr('aria-label', name + ' unbekannt');
             return;
@@ -1240,12 +1369,12 @@ function updateHeaterIndicator(front, rear, steering, wiper,
         var level = Number(val);
         if (level <= 0) {
             $('#' + id)
-                .html(name + ': \uD83D\uDEAB')
+                .html(heaterHtml(name, '\uD83D\uDEAB'))
                 .attr('title', name + ' aus')
                 .attr('aria-label', name + ' aus');
         } else {
             $('#' + id)
-                .html(name + ': \uD83D\uDD25' + level)
+                .html(heaterHtml(name, '\uD83D\uDD25' + level))
                 .attr('title', name + ' Stufe ' + level)
                 .attr('aria-label', name + ' Stufe ' + level);
         }
@@ -1253,7 +1382,7 @@ function updateHeaterIndicator(front, rear, steering, wiper,
 
     set('front-defrost', front, 'Frontscheibenheizung');
     set('rear-defrost', rear, 'Heckscheibenheizung');
-    set('steering-heater', steering, 'Lenkradheizung');
+    setSteering('steering-heater', steering, steeringLevel, steeringAuto, 'Lenkradheizung');
     set('wiper-heater', wiper, 'Scheibenwischerheizung');
     set('mirror-heater', mirror, 'Seitenspiegelheizung');
     set('battery-heater', battery, 'Batterieheizung');
@@ -1743,6 +1872,32 @@ function updateSpeedometer(speed, power, chargingState) {
         text += ' (Rekuperation)';
     }
     $('#power-value').text(text);
+}
+
+function updatePedalPosition(value) {
+    var $needle = $('#pedal-position-needle');
+    var $outline = $('#pedal-position-needle-outline');
+    if (!$needle.length && !$outline.length) {
+        return;
+    }
+    var position = parseNumber(value);
+    if (position == null) {
+        $outline.attr('transform', 'rotate(-90 60 50)').removeClass('is-active');
+        $needle
+            .attr('transform', 'rotate(-90 60 50)')
+            .removeClass('is-active');
+        $needle.find('title').text('Pedalposition nicht verfügbar');
+        return;
+    }
+    var prozent = Math.min(Math.max(position, 0), 100);
+    var winkel = prozent / 100 * 180 - 90;
+    $outline
+        .attr('transform', 'rotate(' + winkel + ' 60 50)')
+        .addClass('is-active');
+    $needle
+        .attr('transform', 'rotate(' + winkel + ' 60 50)')
+        .addClass('is-active');
+    $needle.find('title').text('Pedalposition ' + prozent.toFixed(1) + ' %');
 }
 
 function updateOdometer(value) {
@@ -2820,13 +2975,59 @@ function formatiereKurzesAlter(millis) {
     return stunden + ' h ' + restMinuten + ' min';
 }
 
+function stateSeitZeitstempelAusDaten(data) {
+    if (!data || typeof data !== 'object') {
+        return null;
+    }
+    var kandidaten = [
+        data.state_since_ms,
+        data.state_since_at,
+        data.state_since
+    ];
+    var verbindung = data.fleet_telemetry_connectivity || {};
+    if (verbindung && typeof verbindung === 'object') {
+        kandidaten.push(
+            verbindung.CreatedAt,
+            verbindung.created_at,
+            verbindung.Timestamp,
+            verbindung.timestamp
+        );
+    }
+    for (var i = 0; i < kandidaten.length; i++) {
+        var millis = leseZeitstempelMillis(kandidaten[i]);
+        if (millis != null) {
+            return millis;
+        }
+    }
+    return null;
+}
+
+function zweistellig(wert) {
+    wert = Math.floor(Math.max(0, wert));
+    return wert < 10 ? '0' + wert : String(wert);
+}
+
+function formatiereHochzaehlendeDauer(seitMillis) {
+    var sekunden = Math.floor(Math.max(0, Date.now() - seitMillis) / 1000);
+    var stunden = Math.floor(sekunden / 3600);
+    var minuten = Math.floor((sekunden % 3600) / 60);
+    var restSekunden = sekunden % 60;
+    return zweistellig(stunden) + ':' +
+        zweistellig(minuten) + ':' +
+        zweistellig(restSekunden);
+}
+
 function zeichneVehicleState() {
     var $state = $('#vehicle-state');
     if (typeof lastVehicleState !== 'string' || lastVehicleState.length === 0) {
         $state.text('');
         return;
     }
-    $state.text('State: ' + lastVehicleState);
+    var text = 'State: ' + lastVehicleState;
+    if (lastVehicleState === 'disconnected' && lastStateSinceTimestamp) {
+        text += ' (seit ' + formatiereHochzaehlendeDauer(lastStateSinceTimestamp) + ')';
+    }
+    $state.text(text);
 }
 
 function updateParkTime(ts) {
@@ -2874,16 +3075,26 @@ function displayParkTime() {
     updateSmsForm();
 }
 
-function updateVehicleState(state, stateCheckedAt) {
+function updateVehicleState(state, stateCheckedAt, stateData) {
+    var vorherigerState = lastVehicleState;
     if (typeof state === 'string' && state.length > 0) {
         lastVehicleState = state;
     } else if (arguments.length > 0) {
         lastVehicleState = null;
+        lastStateSinceTimestamp = null;
     }
     if (typeof stateCheckedAt !== 'undefined' && stateCheckedAt !== null) {
         var millis = leseZeitstempelMillis(stateCheckedAt);
         if (millis && (!lastStateTimestamp || millis >= lastStateTimestamp)) {
             lastStateTimestamp = millis;
+        }
+    }
+    if (lastVehicleState) {
+        var seitMillis = stateSeitZeitstempelAusDaten(stateData);
+        if (seitMillis != null) {
+            lastStateSinceTimestamp = seitMillis;
+        } else if (vorherigerState !== lastVehicleState || !lastStateSinceTimestamp) {
+            lastStateSinceTimestamp = leseZeitstempelMillis(stateCheckedAt) || Date.now();
         }
     }
     zeichneVehicleState();
@@ -3244,7 +3455,7 @@ function startStream() {
         if (!currentVehicle) return;
         $.getJSON('/api/state/' + currentVehicle, function(resp) {
             var st = resp.state;
-            updateVehicleState(st, resp.state_checked_at);
+            updateVehicleState(st, resp.state_checked_at, resp);
             updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
             updateSoftwareUpdate(resp.software_update);
             if (istOfflineOderSchlaeft(st)) {
@@ -3280,7 +3491,7 @@ function startStreamIfOnline() {
     }
     $.getJSON('/api/state/' + currentVehicle, function(resp) {
         var st = resp.state;
-        updateVehicleState(st, resp.state_checked_at);
+        updateVehicleState(st, resp.state_checked_at, resp);
         updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
         updateSoftwareUpdate(resp.software_update);
         if (istOfflineOderSchlaeft(st)) {
