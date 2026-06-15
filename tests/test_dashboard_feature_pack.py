@@ -89,6 +89,20 @@ def test_fahrzeugsymbole_sind_in_ui_eingebunden():
     assert 'id="center-display-symbol"' in html
     assert 'id="software-update-symbol"' in html
     assert "updateVehicleSymbols(vehicle, data.gui_settings || {})" in js
+
+
+def test_footer_zeigt_telemetrie_profile():
+    html = pathlib.Path("templates/index.html").read_text(encoding="utf-8")
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+
+    assert 'id="telemetry-profile"' in html
+    assert "updateTelemetryProfile(" in js
+    assert "data.telemetry_profile," in js
+    assert "data.telemetry_profile_target_since" in js
+    assert "data.telemetry_profile_park_delay_seconds" in js
+    assert "function zeichneTelemetryProfile" in js
+    assert "telemetryProfileParkCountdownSekunden" in js
+    assert "Telemetry: " in js
     assert "sun_roof_status_available" in js
     assert "part-unknown" in js
 

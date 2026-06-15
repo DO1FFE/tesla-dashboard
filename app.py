@@ -12,6 +12,7 @@ import os
 import csv
 import json
 import queue
+import copy
 from collections import deque
 import threading
 import time
@@ -45,7 +46,7 @@ from flask_wtf import CSRFProtect
 from taximeter import Taximeter
 import requests
 from functools import wraps
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 from version import get_version
 import qrcode
 from datetime import datetime, timedelta, timezone
@@ -673,6 +674,7 @@ def block_ip_clients():
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
+ENV_FILE = os.getenv("TESLA_DASHBOARD_ENV_FILE", os.path.join(BASE_DIR, ".env"))
 TESLA_FLEET_KEY_DIR = os.path.join(DATA_DIR, "tesla_fleet")
 TESLA_FLEET_PUBLIC_KEY_PATH = os.getenv(
     "TESLA_FLEET_PUBLIC_KEY_PATH",
@@ -683,8 +685,28 @@ TESLA_FLEET_TELEMETRY_RUNTIME_FILE = os.path.join(
     "telemetry_runtime.json",
 )
 TESLA_FLEET_VEHICLES_FILE = os.path.join(TESLA_FLEET_KEY_DIR, "vehicles.json")
+TESLA_FLEET_TELEMETRY_CONFIG_REQUEST_FILE = os.path.join(
+    TESLA_FLEET_KEY_DIR,
+    "vehicle_telemetry_config_request.json",
+)
+TESLA_FLEET_TELEMETRY_ACTIVE_CONFIG_FILE = os.path.join(
+    TESLA_FLEET_KEY_DIR,
+    "vehicle_telemetry_config_active.json",
+)
+TESLA_FLEET_TELEMETRY_PROFILE_STATUS_FILE = os.path.join(
+    TESLA_FLEET_KEY_DIR,
+    "telemetry_profile_status.json",
+)
+TESLA_FLEET_OAUTH_TOKEN_FILE = os.path.join(
+    TESLA_FLEET_KEY_DIR,
+    "oauth_tokens.json",
+)
 TESLA_FLEET_TELEMETRY_STALE_SECONDS = float(
     os.getenv("TESLA_FLEET_TELEMETRY_STALE_SECONDS", "300")
+)
+TESLA_FLEET_VEHICLE_COMMAND_URL = os.getenv(
+    "TESLA_FLEET_VEHICLE_COMMAND_URL",
+    "https://127.0.0.1:4443",
 )
 WARTUNGSMODUS_DATEI = os.path.join(DATA_DIR, "wartungsmodus_aktiv")
 
@@ -1610,8 +1632,10 @@ _aggregation_thread = None
 _fleet_telemetry_thread = None
 _fleet_telemetry_worker_thread = None
 _fleet_telemetry_cache_thread = None
+_fleet_telemetry_profile_thread = None
 _fleet_telemetry_lock = threading.Lock()
 _fleet_telemetry_start_lock = threading.Lock()
+_fleet_telemetry_profile_lock = threading.Lock()
 _fleet_telemetry_vehicle_cache = {"mtime": None, "vehicles": []}
 FLEET_TELEMETRY_MQTT_QUEUE_MAX = max(
     1000, int(os.getenv("TESLA_FLEET_TELEMETRY_MQTT_QUEUE_MAX", "20000"))
@@ -1629,10 +1653,271 @@ FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX = max(
     1, int(os.getenv("TESLA_FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX", "3"))
 )
 _fleet_telemetry_message_queue = queue.Queue(maxsize=FLEET_TELEMETRY_MQTT_QUEUE_MAX)
+_fleet_telemetry_profile_queue = queue.Queue(maxsize=1)
 _fleet_telemetry_cache_pending = {}
 _fleet_telemetry_cache_schreib_lock = threading.Lock()
 _fleet_telemetry_queue_verworfen = 0
 _fleet_telemetry_queue_warnung = 0.0
+FLEET_TELEMETRIE_PROFILE = {"live", "parked", "charging"}
+FLEET_TELEMETRIE_PROFILE_STANDARD = "live"
+FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS = max(
+    0.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_PARK_PROFILE_DELAY_SECONDS", "300")),
+)
+FLEET_TELEMETRIE_PROFILE_SEND_COOLDOWN_SECONDS = max(
+    0.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_PROFILE_COOLDOWN_SECONDS", "120")),
+)
+FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT = max(
+    3.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_PROFILE_TIMEOUT", "15")),
+)
+FLEET_TELEMETRIE_PROFILE_SYNC_CHECK_INTERVAL_SECONDS = max(
+    10.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_SYNC_CHECK_INTERVAL_SECONDS", "60")),
+)
+FLEET_TELEMETRIE_PROFILE_PARKED_10S_FELDER = frozenset({
+    "BrakePedal",
+    "CenterDisplay",
+    "ChargePortDoorOpen",
+    "ChargePortLatch",
+    "ChargeState",
+    "DetailedChargeState",
+    "DoorState",
+    "DriverSeatOccupied",
+    "Gear",
+    "HvacPower",
+    "LightsHazardsActive",
+    "LightsTurnSignal",
+    "Locked",
+    "PedalPosition",
+    "VehicleSpeed",
+})
+FLEET_TELEMETRIE_PROFILE_PARKED_60S_FELDER = frozenset({
+    "BatteryHeaterOn",
+    "BatteryLevel",
+    "ChargeCurrentRequest",
+    "ChargeCurrentRequestMax",
+    "ChargeEnableRequest",
+    "ChargeLimitSoc",
+    "FastChargerPresent",
+    "DefrostForPreconditioning",
+    "DefrostMode",
+    "EstBatteryRange",
+    "FdWindow",
+    "FpWindow",
+    "HvacFanSpeed",
+    "HvacFanStatus",
+    "HvacSteeringWheelHeatAuto",
+    "HvacSteeringWheelHeatLevel",
+    "IdealBatteryRange",
+    "RatedRange",
+    "RdWindow",
+    "RearDefrostEnabled",
+    "RpWindow",
+    "SeatHeaterLeft",
+    "SeatHeaterRearCenter",
+    "SeatHeaterRearLeft",
+    "SeatHeaterRearRight",
+    "SeatHeaterRight",
+    "Soc",
+    "TpmsHardWarnings",
+    "TpmsPressureFl",
+    "TpmsPressureFr",
+    "TpmsPressureRl",
+    "TpmsPressureRr",
+    "TpmsSoftWarnings",
+    "WiperHeatEnabled",
+})
+FLEET_TELEMETRIE_PROFILE_PARKED_FELDER = (
+    FLEET_TELEMETRIE_PROFILE_PARKED_10S_FELDER
+    | FLEET_TELEMETRIE_PROFILE_PARKED_60S_FELDER
+)
+FLEET_TELEMETRIE_PROFILE_CHARGING_10S_FELDER = frozenset({
+    "ACChargingPower",
+    "BatteryHeaterOn",
+    "BatteryLevel",
+    "ChargeAmps",
+    "ChargeCurrentRequest",
+    "ChargeCurrentRequestMax",
+    "ChargeEnableRequest",
+    "ChargePortDoorOpen",
+    "ChargePortLatch",
+    "ChargeRateMilePerHour",
+    "ChargeState",
+    "ChargerPhases",
+    "ChargerVoltage",
+    "DCChargingPower",
+    "DetailedChargeState",
+    "EstimatedHoursToChargeTermination",
+    "FastChargerPresent",
+    "Gear",
+    "ModuleTempMax",
+    "ModuleTempMin",
+    "PackCurrent",
+    "PackVoltage",
+    "Soc",
+    "TimeToFullCharge",
+    "VehicleSpeed",
+})
+FLEET_TELEMETRIE_PROFILE_CHARGING_30S_FELDER = frozenset({
+    "ACChargingEnergyIn",
+    "BrakePedal",
+    "CenterDisplay",
+    "ClimateKeeperMode",
+    "DCChargingEnergyIn",
+    "DefrostForPreconditioning",
+    "DefrostMode",
+    "DoorState",
+    "DriverSeatOccupied",
+    "EstBatteryRange",
+    "FdWindow",
+    "FpWindow",
+    "HvacFanSpeed",
+    "HvacFanStatus",
+    "HvacPower",
+    "HvacSteeringWheelHeatAuto",
+    "HvacSteeringWheelHeatLevel",
+    "IdealBatteryRange",
+    "InsideTemp",
+    "Locked",
+    "OutsideTemp",
+    "PedalPosition",
+    "RatedRange",
+    "RdWindow",
+    "RearDefrostEnabled",
+    "RpWindow",
+    "SeatHeaterLeft",
+    "SeatHeaterRearCenter",
+    "SeatHeaterRearLeft",
+    "SeatHeaterRearRight",
+    "SeatHeaterRight",
+    "WiperHeatEnabled",
+})
+FLEET_TELEMETRIE_PROFILE_CHARGING_60S_FELDER = frozenset({
+    "ChargeLimitSoc",
+    "ChargingCableType",
+    "FastChargerType",
+    "GpsHeading",
+    "GpsState",
+    "Location",
+    "Odometer",
+    "TpmsHardWarnings",
+    "TpmsPressureFl",
+    "TpmsPressureFr",
+    "TpmsPressureRl",
+    "TpmsPressureRr",
+    "TpmsSoftWarnings",
+})
+FLEET_TELEMETRIE_PROFILE_MINDELTAS = {
+    "charging": {
+        "ACChargingEnergyIn": 0.1,
+        "ACChargingPower": 0.1,
+        "BatteryLevel": 0.1,
+        "DCChargingEnergyIn": 0.1,
+        "DCChargingPower": 0.1,
+        "EstBatteryRange": 0.2,
+        "GpsHeading": 2.0,
+        "IdealBatteryRange": 0.2,
+        "InsideTemp": 0.2,
+        "Location": 50,
+        "ModuleTempMax": 0.2,
+        "ModuleTempMin": 0.2,
+        "Odometer": 0.1,
+        "OutsideTemp": 0.2,
+        "PackCurrent": 0.5,
+        "PackVoltage": 1.0,
+        "RatedRange": 0.2,
+        "Soc": 0.1,
+        "TpmsPressureFl": 0.05,
+        "TpmsPressureFr": 0.05,
+        "TpmsPressureRl": 0.05,
+        "TpmsPressureRr": 0.05,
+        "VehicleSpeed": 1.0,
+    },
+    "parked": {
+        "BatteryLevel": 1.0,
+        "EstBatteryRange": 1.0,
+        "IdealBatteryRange": 1.0,
+        "RatedRange": 1.0,
+        "Soc": 1.0,
+        "TpmsPressureFl": 0.05,
+        "TpmsPressureFr": 0.05,
+        "TpmsPressureRl": 0.05,
+        "TpmsPressureRr": 0.05,
+        "VehicleSpeed": 1.0,
+    },
+}
+
+
+def _fleet_telemetrie_profile_status_standard():
+    """Erzeuge den Standardstatus für die Telemetry-Profilsteuerung."""
+
+    return {
+        "current": FLEET_TELEMETRIE_PROFILE_STANDARD,
+        "target": FLEET_TELEMETRIE_PROFILE_STANDARD,
+        "target_since": 0.0,
+        "last_sent": 0.0,
+        "last_sent_profile": None,
+        "last_error": None,
+        "config_synced": None,
+        "config_key_paired": None,
+        "config_sync_state": "unknown",
+        "config_sync_profile": None,
+        "config_sync_checked_at": 0.0,
+        "config_sync_updated_at": 0.0,
+        "config_sync_error": None,
+        "config_sync_details": [],
+        "updated_at": 0.0,
+    }
+
+
+def _fleet_telemetrie_profile_status_laden():
+    """Lade den letzten bekannten Telemetry-Profilstatus."""
+
+    status = _fleet_telemetrie_profile_status_standard()
+    try:
+        with open(TESLA_FLEET_TELEMETRY_PROFILE_STATUS_FILE, "r", encoding="utf-8") as f:
+            geladen = json.load(f)
+    except Exception:
+        return status
+    if not isinstance(geladen, dict):
+        return status
+    for key in ("current", "target"):
+        value = geladen.get(key)
+        if value in FLEET_TELEMETRIE_PROFILE:
+            status[key] = value
+    for key in ("target_since", "last_sent", "updated_at"):
+        try:
+            value = float(geladen.get(key))
+        except Exception:
+            continue
+        status[key] = value
+    if geladen.get("last_sent_profile") in FLEET_TELEMETRIE_PROFILE:
+        status["last_sent_profile"] = geladen.get("last_sent_profile")
+    status["last_error"] = geladen.get("last_error")
+    if isinstance(geladen.get("config_synced"), bool):
+        status["config_synced"] = geladen.get("config_synced")
+    if isinstance(geladen.get("config_key_paired"), bool):
+        status["config_key_paired"] = geladen.get("config_key_paired")
+    sync_state = str(geladen.get("config_sync_state") or "").strip().lower()
+    if sync_state in {"unknown", "pending", "active", "synced", "unpaired", "error"}:
+        status["config_sync_state"] = sync_state
+    if geladen.get("config_sync_profile") in FLEET_TELEMETRIE_PROFILE:
+        status["config_sync_profile"] = geladen.get("config_sync_profile")
+    for key in ("config_sync_checked_at", "config_sync_updated_at"):
+        try:
+            value = float(geladen.get(key))
+        except Exception:
+            continue
+        status[key] = value
+    status["config_sync_error"] = geladen.get("config_sync_error")
+    if isinstance(geladen.get("config_sync_details"), list):
+        status["config_sync_details"] = geladen.get("config_sync_details")
+    return status
+
+
+_fleet_telemetry_profile_status = _fleet_telemetrie_profile_status_laden()
 _aprs_sendewarteschlange = queue.Queue(
     maxsize=max(1, int(os.getenv("APRS_QUEUE_MAX", "1")))
 )
@@ -3817,6 +4102,707 @@ def _fleet_telemetrie_fahrzeuge():
     return list(vehicles)
 
 
+def _fleet_telemetrie_profile_aktiviert():
+    """Prüfe, ob automatische Telemetry-Profile gesendet werden dürfen."""
+
+    wert = os.getenv("TESLA_FLEET_TELEMETRY_DYNAMIC_PROFILE", "1")
+    return str(wert).strip().lower() not in {"", "0", "false", "no", "off"}
+
+
+def _fleet_telemetrie_profile_status_speichern():
+    """Schreibe den aktuellen Profilstatus atomar auf die Platte."""
+
+    try:
+        os.makedirs(TESLA_FLEET_KEY_DIR, exist_ok=True)
+        tmp = f"{TESLA_FLEET_TELEMETRY_PROFILE_STATUS_FILE}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(
+                _fleet_telemetry_profile_status,
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
+        os.replace(tmp, TESLA_FLEET_TELEMETRY_PROFILE_STATUS_FILE)
+    except Exception:
+        pass
+
+
+def _fleet_telemetrie_profile_status_kopie():
+    """Gib eine nebenläufig sichere Kopie des Profilstatus zurück."""
+
+    with _fleet_telemetry_profile_lock:
+        return dict(_fleet_telemetry_profile_status)
+
+
+def _fleet_telemetrie_profile_stream_nach_config_aktiv(data, status):
+    """Prüfe, ob seit dem letzten Config-Senden wieder Fahrzeugdaten ankamen."""
+
+    if not isinstance(data, dict) or not isinstance(status, dict):
+        return False
+    current = status.get("current")
+    sync_profile = status.get("config_sync_profile")
+    if current and sync_profile and current != sync_profile:
+        return False
+    letzter_versand = _as_float(status.get("last_sent"))
+    if letzter_versand is None or letzter_versand <= 0:
+        return False
+    aktualisiert = _as_float(data.get("fleet_telemetry_updated_at"))
+    if aktualisiert is None:
+        aktualisiert = _as_float(data.get("state_checked_at"))
+    if aktualisiert is None:
+        return False
+    if aktualisiert > 1e12:
+        aktualisiert /= 1000.0
+    return aktualisiert >= letzter_versand
+
+
+def _fleet_telemetrie_profile_status_an_daten(data):
+    """Ergänze Dashboard-Daten um das aktive Telemetry-Profil."""
+
+    if not isinstance(data, dict):
+        return data
+    status = _fleet_telemetrie_profile_status_kopie()
+    current = status.get("current") or FLEET_TELEMETRIE_PROFILE_STANDARD
+    target = status.get("target") or current
+    data["telemetry_profile"] = current
+    data["telemetry_profile_target"] = target
+    data["telemetry_profile_target_since"] = status.get("target_since")
+    data["telemetry_profile_park_delay_seconds"] = (
+        FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS
+    )
+    data["telemetry_profile_updated_at"] = status.get("updated_at")
+    data["telemetry_config_synced"] = status.get("config_synced")
+    data["telemetry_config_key_paired"] = status.get("config_key_paired")
+    sync_state = status.get("config_sync_state") or "unknown"
+    stream_aktiv = _fleet_telemetrie_profile_stream_nach_config_aktiv(data, status)
+    if sync_state == "pending" and stream_aktiv:
+        sync_state = "active"
+    data["telemetry_config_stream_active"] = stream_aktiv
+    data["telemetry_config_sync_state"] = sync_state
+    data["telemetry_config_sync_profile"] = status.get("config_sync_profile")
+    data["telemetry_config_sync_checked_at"] = status.get("config_sync_checked_at")
+    data["telemetry_config_sync_updated_at"] = status.get("config_sync_updated_at")
+    data["telemetry_config_sync_error"] = status.get("config_sync_error")
+    if status.get("last_error"):
+        data["telemetry_profile_error"] = status.get("last_error")
+    else:
+        data.pop("telemetry_profile_error", None)
+    return data
+
+
+def _fleet_telemetrie_profile_ladend(data):
+    """Erkenne einen aktiven oder angeschlossenen Ladevorgang."""
+
+    charge = data.get("charge_state") if isinstance(data, dict) else None
+    if not isinstance(charge, dict):
+        return False
+    status = str(charge.get("charging_state") or "").strip().lower()
+    if status in {"charging", "starting"}:
+        return True
+    charger_power = _as_float(charge.get("charger_power"))
+    if charger_power is not None and charger_power > 0:
+        return True
+    latch = str(charge.get("charge_port_latch") or "").strip().lower()
+    if latch in {"engaged", "latched", "connected"}:
+        return True
+    if _fleet_telemetrie_wahr(charge.get("fast_charger_present")):
+        return True
+    return False
+
+
+def _fleet_telemetrie_profile_fahrzeug_aktiv(data):
+    """Erkenne Aktivität, die ein Live-Profil rechtfertigt."""
+
+    if not isinstance(data, dict):
+        return False
+    drive = data.get("drive_state") if isinstance(data.get("drive_state"), dict) else {}
+    vehicle = (
+        data.get("vehicle_state")
+        if isinstance(data.get("vehicle_state"), dict)
+        else {}
+    )
+    climate = (
+        data.get("climate_state")
+        if isinstance(data.get("climate_state"), dict)
+        else {}
+    )
+    shift = str(drive.get("shift_state") or "").strip().upper()
+    if shift in {"D", "R", "N"}:
+        return True
+    speed = _as_float(drive.get("speed"))
+    if speed is not None and abs(speed) >= 0.5:
+        return True
+    if _fleet_telemetrie_wahr(vehicle.get("is_user_present")):
+        return True
+    if _fleet_telemetrie_wahr(vehicle.get("brake_pedal")):
+        return True
+    pedal = _as_float(vehicle.get("pedal_position"))
+    if pedal is not None and pedal > 1:
+        return True
+    if _fleet_telemetrie_wahr(climate.get("is_climate_on")):
+        return True
+    for key in ("df", "pf", "dr", "pr", "ft", "rt"):
+        if _fleet_telemetrie_wahr(vehicle.get(key)):
+            return True
+    for key in ("fd_window", "fp_window", "rd_window", "rp_window"):
+        fensterstand = _as_float(vehicle.get(key))
+        if fensterstand is not None and fensterstand > 0:
+            return True
+    display = str(vehicle.get("center_display_state") or "").strip().lower()
+    if display and display not in {"off", "unknown", "none"}:
+        return True
+    return False
+
+
+def _fleet_telemetrie_profile_ziel(data):
+    """Ermittle das passende Kostenprofil aus den letzten Fahrzeugdaten."""
+
+    if _fleet_telemetrie_profile_ladend(data):
+        return "charging"
+    if _fleet_telemetrie_profile_fahrzeug_aktiv(data):
+        return "live"
+    return "parked"
+
+
+def _fleet_telemetrie_profile_intervall(profil, feld):
+    """Gib das gewünschte Intervall für ein Profilfeld zurück."""
+
+    if profil == "live":
+        return None
+    if profil == "parked":
+        if feld in FLEET_TELEMETRIE_PROFILE_PARKED_10S_FELDER:
+            return 10
+        if feld in FLEET_TELEMETRIE_PROFILE_PARKED_60S_FELDER:
+            return 60
+        return None
+    if profil == "charging":
+        if feld in FLEET_TELEMETRIE_PROFILE_CHARGING_10S_FELDER:
+            return 10
+        if feld in FLEET_TELEMETRIE_PROFILE_CHARGING_30S_FELDER:
+            return 30
+        if feld in FLEET_TELEMETRIE_PROFILE_CHARGING_60S_FELDER:
+            return 60
+        return 300
+    return None
+
+
+def _fleet_telemetrie_profile_config_erstellen(request_data, profil):
+    """Erzeuge eine Tesla-Fleet-Telemetry-Konfiguration für ein Profil."""
+
+    if profil not in FLEET_TELEMETRIE_PROFILE:
+        raise ValueError(f"Unbekanntes Telemetry-Profil: {profil}")
+    config_request = copy.deepcopy(request_data)
+    if profil == "live":
+        return config_request
+    config = config_request.setdefault("config", {})
+    fields = config.setdefault("fields", {})
+    if not isinstance(fields, dict):
+        return config_request
+    if profil == "parked":
+        for feld in list(fields):
+            if feld not in FLEET_TELEMETRIE_PROFILE_PARKED_FELDER:
+                fields.pop(feld, None)
+    mindeltas = FLEET_TELEMETRIE_PROFILE_MINDELTAS.get(profil, {})
+    for feld, feld_config in fields.items():
+        if not isinstance(feld_config, dict):
+            continue
+        intervall = _fleet_telemetrie_profile_intervall(profil, feld)
+        if intervall is None:
+            continue
+        feld_config["interval_seconds"] = intervall
+        if feld in mindeltas:
+            feld_config["minimum_delta"] = mindeltas[feld]
+    return config_request
+
+
+def _fleet_telemetrie_profile_request_laden():
+    """Lade die lokale Basis-Konfiguration für Fleet Telemetry."""
+
+    with open(TESLA_FLEET_TELEMETRY_CONFIG_REQUEST_FILE, "r", encoding="utf-8") as f:
+        request_data = json.load(f)
+    if not isinstance(request_data, dict):
+        raise RuntimeError("Fleet-Telemetry-Konfiguration ist kein JSON-Objekt")
+    return request_data
+
+
+def _fleet_telemetrie_oauth_tokens_laden():
+    """Lade lokal gespeicherte OAuth-Tokens ohne Secrets zu protokollieren."""
+
+    try:
+        with open(TESLA_FLEET_OAUTH_TOKEN_FILE, "r", encoding="utf-8") as f:
+            tokens = json.load(f)
+        return tokens if isinstance(tokens, dict) else {}
+    except Exception:
+        return {}
+
+
+def _fleet_telemetrie_oauth_tokens_speichern(tokens):
+    """Speichere aktualisierte OAuth-Tokens atomar."""
+
+    try:
+        os.makedirs(TESLA_FLEET_KEY_DIR, exist_ok=True)
+        tmp = f"{TESLA_FLEET_OAUTH_TOKEN_FILE}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(tokens, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, TESLA_FLEET_OAUTH_TOKEN_FILE)
+    except Exception:
+        pass
+
+
+def _env_datei_wert_speichern(key, value):
+    """Speichere einen Wert in .env und aktualisiere die laufende Umgebung."""
+
+    if value is None:
+        return
+    try:
+        os.makedirs(os.path.dirname(ENV_FILE), exist_ok=True)
+        if not os.path.exists(ENV_FILE):
+            Path(ENV_FILE).touch(mode=0o600)
+        set_key(ENV_FILE, key, str(value), quote_mode="always")
+        os.environ[key] = str(value)
+    except Exception as exc:
+        logging.warning(".env konnte nicht aktualisiert werden: %s", exc)
+
+
+def _fleet_telemetrie_oauth_tokens_in_env_speichern(tokens):
+    """Speichere Fleet-OAuth-Tokens zusätzlich in .env."""
+
+    if not isinstance(tokens, dict):
+        return
+    mapping = {
+        "access_token": "TESLA_FLEET_ACCESS_TOKEN",
+        "refresh_token": "TESLA_FLEET_REFRESH_TOKEN",
+        "expires_at": "TESLA_FLEET_TOKEN_EXPIRES_AT",
+        "expires_in": "TESLA_FLEET_TOKEN_EXPIRES_IN",
+        "token_type": "TESLA_FLEET_TOKEN_TYPE",
+    }
+    for source, ziel in mapping.items():
+        if tokens.get(source) is not None:
+            _env_datei_wert_speichern(ziel, tokens.get(source))
+
+
+def _fleet_telemetrie_oauth_token_aus_env():
+    """Lies einen gültigen Fleet-Zugriffstoken aus Umgebungsvariablen."""
+
+    token = (
+        os.getenv("TESLA_FLEET_ACCESS_TOKEN")
+        or os.getenv("TESLA_ACCESS_TOKEN")
+        or None
+    )
+    if not token:
+        return None
+    expires_at = _as_float(os.getenv("TESLA_FLEET_TOKEN_EXPIRES_AT"))
+    if expires_at is not None and expires_at <= time.time() + 60:
+        return None
+    return token
+
+
+def _fleet_telemetrie_oauth_token_aktualisieren(tokens):
+    """Erneuere einen Fleet-Zugriffstoken, wenn Clientdaten vorhanden sind."""
+
+    client_id = os.getenv("TESLA_FLEET_CLIENT_ID") or os.getenv("TESLA_CLIENT_ID")
+    client_secret = (
+        os.getenv("TESLA_FLEET_CLIENT_SECRET")
+        or os.getenv("TESLA_CLIENT_SECRET")
+    )
+    refresh_token = (
+        os.getenv("TESLA_FLEET_REFRESH_TOKEN")
+        or tokens.get("refresh_token")
+        or os.getenv("TESLA_REFRESH_TOKEN")
+    )
+    if not client_id or not refresh_token:
+        return None
+    payload = {
+        "grant_type": "refresh_token",
+        "client_id": client_id,
+        "refresh_token": refresh_token,
+    }
+    if client_secret:
+        payload["client_secret"] = client_secret
+    response = requests.post(
+        "https://auth.tesla.com/oauth2/v3/token",
+        data=payload,
+        timeout=FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    aktualisierte_tokens = response.json()
+    if not isinstance(aktualisierte_tokens, dict):
+        return None
+    erstellt = int(time.time())
+    expires_in = int(aktualisierte_tokens.get("expires_in") or 0)
+    aktualisierte_tokens.setdefault("created_at", erstellt)
+    if expires_in > 0:
+        aktualisierte_tokens["expires_at"] = erstellt + expires_in
+    if "refresh_token" not in aktualisierte_tokens and refresh_token:
+        aktualisierte_tokens["refresh_token"] = refresh_token
+    _fleet_telemetrie_oauth_tokens_speichern(aktualisierte_tokens)
+    _fleet_telemetrie_oauth_tokens_in_env_speichern(aktualisierte_tokens)
+    return aktualisierte_tokens.get("access_token")
+
+
+def _fleet_telemetrie_oauth_token():
+    """Ermittle einen gültigen Zugriffstoken für die Fleet-Konfigurations-API."""
+
+    env_token = _fleet_telemetrie_oauth_token_aus_env()
+    if env_token:
+        return env_token
+    tokens = _fleet_telemetrie_oauth_tokens_laden()
+    expires_at = _as_float(tokens.get("expires_at"))
+    access_token = tokens.get("access_token")
+    if access_token and (expires_at is None or expires_at > time.time() + 60):
+        return access_token
+    return _fleet_telemetrie_oauth_token_aktualisieren(tokens)
+
+
+def _fleet_telemetrie_profile_config_vins(request_data=None):
+    """Ermittle VINs für die Prüfung der aktiven Fleet-Konfiguration."""
+
+    vins = []
+    for vehicle in _fleet_telemetrie_fahrzeuge():
+        vin = str(vehicle.get("vin") or "").strip()
+        if vin and vin not in vins:
+            vins.append(vin)
+    if vins:
+        return vins
+    if request_data is None:
+        try:
+            request_data = _fleet_telemetrie_profile_request_laden()
+        except Exception:
+            request_data = {}
+    for vin in request_data.get("vins") or []:
+        vin = str(vin or "").strip()
+        if vin and vin not in vins:
+            vins.append(vin)
+    return vins
+
+
+def _fleet_telemetrie_profile_sync_pruefen(token=None, request_data=None):
+    """Prüfe bei Tesla, ob die Fleet-Konfiguration am Fahrzeug angekommen ist."""
+
+    token = token or _fleet_telemetrie_oauth_token()
+    if not token:
+        raise RuntimeError("Kein gültiger Fleet-OAuth-Zugriffstoken verfügbar")
+    vins = _fleet_telemetrie_profile_config_vins(request_data)
+    if not vins:
+        raise RuntimeError("Keine VIN für Fleet-Telemetry-Syncprüfung verfügbar")
+    details = []
+    alle_synced = True
+    key_paired_werte = []
+    for vin in vins:
+        url = (
+            TESLA_FLEET_VEHICLE_COMMAND_URL.rstrip("/")
+            + f"/api/1/vehicles/{vin}/fleet_telemetry_config"
+        )
+        response = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT,
+            verify=False,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        antwort = payload.get("response") if isinstance(payload, dict) else None
+        if not isinstance(antwort, dict):
+            antwort = {}
+        synced = antwort.get("synced")
+        synced_bool = synced is True
+        key_paired = antwort.get("key_paired")
+        key_paired_bool = key_paired if isinstance(key_paired, bool) else None
+        if key_paired_bool is not None:
+            key_paired_werte.append(key_paired_bool)
+        details.append({
+            "vin": vin,
+            "synced": synced_bool,
+            "key_paired": key_paired_bool,
+            "limit_reached": antwort.get("limit_reached"),
+        })
+        if not synced_bool:
+            alle_synced = False
+    alle_key_paired = all(key_paired_werte) if key_paired_werte else None
+    if alle_synced:
+        state = "synced"
+    else:
+        state = "pending"
+    return {
+        "synced": alle_synced,
+        "key_paired": alle_key_paired,
+        "state": state,
+        "details": details,
+        "checked_at": time.time(),
+        "error": None,
+    }
+
+
+def _fleet_telemetrie_profile_sync_resultat_setzen(status, profil, ergebnis):
+    """Übernehme das Ergebnis der Tesla-Syncprüfung in den Profilstatus."""
+
+    jetzt = time.time()
+    if not isinstance(ergebnis, dict):
+        ergebnis = {}
+    state = str(ergebnis.get("state") or "").strip().lower()
+    if state not in {"pending", "active", "synced", "unpaired", "error", "unknown"}:
+        state = "unknown"
+    synced = ergebnis.get("synced")
+    status["config_synced"] = synced if isinstance(synced, bool) else None
+    key_paired = ergebnis.get("key_paired")
+    status["config_key_paired"] = (
+        key_paired if isinstance(key_paired, bool) else None
+    )
+    status["config_sync_state"] = state
+    status["config_sync_profile"] = profil
+    status["config_sync_checked_at"] = float(ergebnis.get("checked_at") or jetzt)
+    status["config_sync_updated_at"] = jetzt
+    status["config_sync_error"] = ergebnis.get("error")
+    details = ergebnis.get("details")
+    status["config_sync_details"] = details if isinstance(details, list) else []
+
+
+def _fleet_telemetrie_profile_sync_fehler(fehler):
+    """Erzeuge ein Syncprüfungs-Ergebnis für fehlgeschlagene API-Abfragen."""
+
+    return {
+        "synced": False,
+        "key_paired": None,
+        "state": "error",
+        "details": [],
+        "checked_at": time.time(),
+        "error": str(fehler),
+    }
+
+
+def _fleet_telemetrie_profile_config_speichern(config_request):
+    """Speichere die zuletzt gesendete Profil-Konfiguration zur Diagnose."""
+
+    try:
+        os.makedirs(TESLA_FLEET_KEY_DIR, exist_ok=True)
+        tmp = f"{TESLA_FLEET_TELEMETRY_ACTIVE_CONFIG_FILE}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(config_request, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, TESLA_FLEET_TELEMETRY_ACTIVE_CONFIG_FILE)
+    except Exception:
+        pass
+
+
+def _fleet_telemetrie_profile_anwenden(profil):
+    """Sende das gewünschte Profil an Teslas Fleet-Telemetry-Konfigurations-API."""
+
+    if profil not in FLEET_TELEMETRIE_PROFILE:
+        raise RuntimeError(f"Ungültiges Telemetry-Profil: {profil}")
+    token = _fleet_telemetrie_oauth_token()
+    if not token:
+        raise RuntimeError("Kein gültiger Fleet-OAuth-Zugriffstoken verfügbar")
+    basis_request = _fleet_telemetrie_profile_request_laden()
+    config_request = _fleet_telemetrie_profile_config_erstellen(basis_request, profil)
+    url = (
+        TESLA_FLEET_VEHICLE_COMMAND_URL.rstrip("/")
+        + "/api/1/vehicles/fleet_telemetry_config"
+    )
+    response = requests.post(
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        json=config_request,
+        timeout=FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT,
+        verify=False,
+    )
+    response.raise_for_status()
+    _fleet_telemetrie_profile_config_speichern(config_request)
+    try:
+        return _fleet_telemetrie_profile_sync_pruefen(token, config_request)
+    except Exception as exc:
+        return _fleet_telemetrie_profile_sync_fehler(exc)
+
+
+def _fleet_telemetrie_profile_fehler_setzen(profil, fehler):
+    """Merke fehlgeschlagene Profilwechsel ohne Live-Daten zu blockieren."""
+
+    with _fleet_telemetry_profile_lock:
+        _fleet_telemetry_profile_status["target"] = profil
+        _fleet_telemetry_profile_status["last_error"] = str(fehler)
+        _fleet_telemetry_profile_status["config_synced"] = False
+        _fleet_telemetry_profile_status["config_key_paired"] = None
+        _fleet_telemetry_profile_status["config_sync_state"] = "error"
+        _fleet_telemetry_profile_status["config_sync_profile"] = profil
+        _fleet_telemetry_profile_status["config_sync_error"] = str(fehler)
+        _fleet_telemetry_profile_status["config_sync_updated_at"] = time.time()
+        _fleet_telemetry_profile_status["updated_at"] = time.time()
+        _fleet_telemetrie_profile_status_speichern()
+
+
+def _fleet_telemetrie_profile_erfolg_setzen(profil, sync_ergebnis=None):
+    """Merke ein erfolgreich angewendetes Telemetry-Profil."""
+
+    with _fleet_telemetry_profile_lock:
+        _fleet_telemetry_profile_status["current"] = profil
+        _fleet_telemetry_profile_status["last_error"] = None
+        if sync_ergebnis is None:
+            sync_ergebnis = {
+                "synced": False,
+                "key_paired": None,
+                "state": "pending",
+                "details": [],
+                "checked_at": time.time(),
+                "error": None,
+            }
+        _fleet_telemetrie_profile_sync_resultat_setzen(
+            _fleet_telemetry_profile_status,
+            profil,
+            sync_ergebnis,
+        )
+        _fleet_telemetry_profile_status["updated_at"] = time.time()
+        _fleet_telemetrie_profile_status_speichern()
+
+
+def _fleet_telemetrie_profile_sync_erneut_pruefen():
+    """Prüfe ausstehende Fleet-Konfigurationen in ruhigen Abständen erneut."""
+
+    if not _fleet_telemetrie_profile_aktiviert():
+        return
+    jetzt = time.time()
+    with _fleet_telemetry_profile_lock:
+        status = _fleet_telemetry_profile_status
+        sync_state = str(status.get("config_sync_state") or "").lower()
+        if sync_state not in {"pending", "error"}:
+            return
+        letzter_check = float(status.get("config_sync_checked_at") or 0)
+        if jetzt - letzter_check < FLEET_TELEMETRIE_PROFILE_SYNC_CHECK_INTERVAL_SECONDS:
+            return
+        profil = status.get("config_sync_profile") or status.get("current")
+        if profil not in FLEET_TELEMETRIE_PROFILE:
+            return
+        status["config_sync_checked_at"] = jetzt
+        _fleet_telemetrie_profile_status_speichern()
+    try:
+        ergebnis = _fleet_telemetrie_profile_sync_pruefen()
+    except Exception as exc:
+        ergebnis = _fleet_telemetrie_profile_sync_fehler(exc)
+    with _fleet_telemetry_profile_lock:
+        if _fleet_telemetry_profile_status.get("config_sync_profile") != profil:
+            return
+        _fleet_telemetrie_profile_sync_resultat_setzen(
+            _fleet_telemetry_profile_status,
+            profil,
+            ergebnis,
+        )
+        _fleet_telemetry_profile_status["updated_at"] = time.time()
+        _fleet_telemetrie_profile_status_speichern()
+
+
+def _fleet_telemetrie_profile_worker_loop():
+    """Verarbeite Profilwechsel außerhalb des MQTT-Pfads."""
+
+    while _fleet_telemetrie_aktiv():
+        try:
+            profil = _fleet_telemetry_profile_queue.get(timeout=1)
+        except queue.Empty:
+            _fleet_telemetrie_profile_sync_erneut_pruefen()
+            continue
+        try:
+            sync_ergebnis = _fleet_telemetrie_profile_anwenden(profil)
+            _fleet_telemetrie_profile_erfolg_setzen(profil, sync_ergebnis)
+            logging.info("Fleet-Telemetry-Profil angewendet: %s", profil)
+        except Exception as exc:
+            _fleet_telemetrie_profile_fehler_setzen(profil, exc)
+            logging.warning(
+                "Fleet-Telemetry-Profil konnte nicht angewendet werden: %s",
+                exc,
+            )
+
+
+def _fleet_telemetrie_profile_spaeter_anwenden(profil):
+    """Lege den neuesten Profilwechsel in die Warteschlange."""
+
+    if not _fleet_telemetrie_profile_aktiviert():
+        return
+    try:
+        while True:
+            _fleet_telemetry_profile_queue.get_nowait()
+    except queue.Empty:
+        pass
+    try:
+        _fleet_telemetry_profile_queue.put_nowait(profil)
+    except queue.Full:
+        pass
+
+
+def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
+    """Aktualisiere das gewünschte Telemetry-Profil aus Live-Daten."""
+
+    del cache_id
+    if not _fleet_telemetrie_profile_aktiviert():
+        return _fleet_telemetrie_profile_status_an_daten(data)
+    ziel = _fleet_telemetrie_profile_ziel(data)
+    jetzt = time.time()
+    profil_anfordern = None
+    with _fleet_telemetry_profile_lock:
+        status = _fleet_telemetry_profile_status
+        status_geändert = False
+        if status.get("target") != ziel:
+            status["target"] = ziel
+            status["target_since"] = jetzt
+            status["updated_at"] = jetzt
+            status["last_error"] = None
+            status_geändert = True
+        target_since = float(status.get("target_since") or jetzt)
+        current = status.get("current") or FLEET_TELEMETRIE_PROFILE_STANDARD
+        aktivierbares_ziel = ziel
+        if (
+            ziel == "parked"
+            and jetzt - target_since < FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS
+        ):
+            aktivierbares_ziel = current
+        dringlich = aktivierbares_ziel in {"live", "charging"}
+        cooldown_abgelaufen = (
+            jetzt - float(status.get("last_sent") or 0)
+            >= FLEET_TELEMETRIE_PROFILE_SEND_COOLDOWN_SECONDS
+        )
+        anderes_profil_angefordert = (
+            status.get("last_sent_profile") != aktivierbares_ziel
+        )
+        darf_senden = cooldown_abgelaufen or (dringlich and anderes_profil_angefordert)
+        if aktivierbares_ziel != current and darf_senden:
+            profil_anfordern = aktivierbares_ziel
+            status["last_sent"] = jetzt
+            status["last_sent_profile"] = aktivierbares_ziel
+            status["updated_at"] = jetzt
+            status_geändert = True
+        status_kopie = dict(status)
+        if status_geändert:
+            _fleet_telemetrie_profile_status_speichern()
+    if profil_anfordern:
+        _fleet_telemetrie_profile_spaeter_anwenden(profil_anfordern)
+    data["telemetry_profile"] = status_kopie.get("current") or current
+    data["telemetry_profile_target"] = status_kopie.get("target") or ziel
+    data["telemetry_profile_target_since"] = status_kopie.get("target_since")
+    data["telemetry_profile_park_delay_seconds"] = (
+        FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS
+    )
+    data["telemetry_profile_updated_at"] = status_kopie.get("updated_at")
+    data["telemetry_config_synced"] = status_kopie.get("config_synced")
+    data["telemetry_config_key_paired"] = status_kopie.get("config_key_paired")
+    sync_state = status_kopie.get("config_sync_state") or "unknown"
+    stream_aktiv = _fleet_telemetrie_profile_stream_nach_config_aktiv(
+        data,
+        status_kopie,
+    )
+    if sync_state == "pending" and stream_aktiv:
+        sync_state = "active"
+    data["telemetry_config_stream_active"] = stream_aktiv
+    data["telemetry_config_sync_state"] = sync_state
+    data["telemetry_config_sync_profile"] = status_kopie.get("config_sync_profile")
+    data["telemetry_config_sync_checked_at"] = status_kopie.get(
+        "config_sync_checked_at"
+    )
+    data["telemetry_config_sync_updated_at"] = status_kopie.get(
+        "config_sync_updated_at"
+    )
+    data["telemetry_config_sync_error"] = status_kopie.get("config_sync_error")
+    if status_kopie.get("last_error"):
+        data["telemetry_profile_error"] = status_kopie.get("last_error")
+    else:
+        data.pop("telemetry_profile_error", None)
+    return data
+
+
 def _fleet_telemetrie_cache_ids(vin):
     """Ermittle alle Dashboard-Cache-IDs für eine Telemetry-VIN."""
     cache_ids = ["default"]
@@ -4647,6 +5633,7 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
                 _vorklimatisierung_im_stand_erlaubt(data)
             )
             data = _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data)
+            data = _fleet_telemetrie_profile_aktualisieren(cache_id, data)
             _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, data)
             data["_live"] = True
             data.pop("api_error", None)
@@ -4754,6 +5741,7 @@ def _fleet_telemetrie_verbindung_aktualisieren(vin, payload, timestamp_ms=None):
             else:
                 data["state_since_at"] = state_since_ms
             data["fleet_telemetry_connectivity"] = payload
+            data = _fleet_telemetrie_profile_status_an_daten(data)
             _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, data)
             data["_live"] = True
             latest_data[cache_id] = data
@@ -5045,6 +6033,7 @@ def _start_fleet_telemetry_listener():
     """Starte den lokalen Fleet-Telemetry-MQTT-Listener."""
     global _fleet_telemetry_thread, _fleet_telemetry_worker_thread
     global _fleet_telemetry_cache_thread
+    global _fleet_telemetry_profile_thread
     if not _fleet_telemetrie_aktiv():
         return
     with _fleet_telemetry_start_lock:
@@ -5066,6 +6055,15 @@ def _start_fleet_telemetry_listener():
                 daemon=True,
             )
             _fleet_telemetry_cache_thread.start()
+        if (
+            _fleet_telemetry_profile_thread is None
+            or not _fleet_telemetry_profile_thread.is_alive()
+        ):
+            _fleet_telemetry_profile_thread = threading.Thread(
+                target=_fleet_telemetrie_profile_worker_loop,
+                daemon=True,
+            )
+            _fleet_telemetry_profile_thread.start()
         if (
             _fleet_telemetry_thread is not None
             and _fleet_telemetry_thread.is_alive()
@@ -5098,6 +6096,7 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
             _fleet_telemetrie_entferne_fremddaten(data)
             _fleet_telemetrie_rohdaten_anreichern(data)
             _fleet_telemetrie_statusbeginn_ergänzen(data)
+            data = _fleet_telemetrie_profile_status_an_daten(data)
             data["_live"] = True
             return data
     if data:
@@ -5105,6 +6104,7 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
         _fleet_telemetrie_entferne_fremddaten(data)
         _fleet_telemetrie_rohdaten_anreichern(data)
         _fleet_telemetrie_statusbeginn_ergänzen(data)
+        data = _fleet_telemetrie_profile_status_an_daten(data)
         data["_live"] = False
         data.setdefault("api_error", "Noch keine aktuellen Fleet-Telemetry-Daten empfangen")
         return data

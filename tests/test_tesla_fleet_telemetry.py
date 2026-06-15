@@ -23,6 +23,37 @@ def keine_echten_parking_logs(monkeypatch):
         "_fleet_telemetrie_ladeinformationen_aktualisieren",
         lambda _cache_id, data, cached=None: data,
     )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_status_speichern",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda _profil: None,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        {
+            "current": app.FLEET_TELEMETRIE_PROFILE_STANDARD,
+            "target": app.FLEET_TELEMETRIE_PROFILE_STANDARD,
+            "target_since": 0.0,
+            "last_sent": 0.0,
+            "last_sent_profile": None,
+            "last_error": None,
+            "config_synced": None,
+            "config_key_paired": None,
+            "config_sync_state": "unknown",
+            "config_sync_profile": None,
+            "config_sync_checked_at": 0.0,
+            "config_sync_updated_at": 0.0,
+            "config_sync_error": None,
+            "config_sync_details": [],
+            "updated_at": 0.0,
+        },
+    )
 
 
 def test_fleet_telemetrie_mqtt_aktualisiert_dashboard_cache(monkeypatch):
@@ -794,3 +825,273 @@ def test_fahrzeugliste_dedupliziert_fleet_alias_ids(monkeypatch):
     fahrzeuge = app.get_vehicle_list()
 
     assert fahrzeuge == [{"id": "fleet-id", "display_name": "Testauto"}]
+
+
+def test_fleet_telemetrie_profile_erkennt_zielzustand():
+    assert app._fleet_telemetrie_profile_ziel({
+        "charge_state": {"charging_state": "Charging"},
+        "drive_state": {"shift_state": "P"},
+    }) == "charging"
+
+    assert app._fleet_telemetrie_profile_ziel({
+        "drive_state": {"shift_state": "D", "speed": 0},
+        "vehicle_state": {"is_user_present": False},
+    }) == "live"
+
+    assert app._fleet_telemetrie_profile_ziel({
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "vehicle_state": {"locked": True, "is_user_present": False},
+        "climate_state": {"is_climate_on": False},
+    }) == "parked"
+
+
+def test_fleet_telemetrie_profile_config_filtert_parkwerte():
+    basis = {
+        "vins": ["TESTVIN"],
+        "config": {
+            "fields": {
+                "InsideTemp": {"interval_seconds": 1, "minimum_delta": 0.1},
+                "Location": {"interval_seconds": 1, "minimum_delta": 0},
+                "MediaNowPlayingTitle": {"interval_seconds": 30},
+                "BatteryLevel": {"interval_seconds": 1, "minimum_delta": 0.1},
+                "ChargeState": {"interval_seconds": 1},
+                "VehicleSpeed": {"interval_seconds": 1, "minimum_delta": 0.1},
+            },
+        },
+    }
+
+    gedrosselt = app._fleet_telemetrie_profile_config_erstellen(basis, "parked")
+    fields = gedrosselt["config"]["fields"]
+
+    assert basis["config"]["fields"]["Location"]["interval_seconds"] == 1
+    assert "InsideTemp" not in fields
+    assert "Location" not in fields
+    assert "MediaNowPlayingTitle" not in fields
+    assert fields["BatteryLevel"]["interval_seconds"] == 60
+    assert fields["BatteryLevel"]["minimum_delta"] == 1.0
+    assert fields["ChargeState"]["interval_seconds"] == 10
+    assert fields["VehicleSpeed"]["interval_seconds"] == 10
+    assert fields["VehicleSpeed"]["minimum_delta"] == 1.0
+
+
+def test_fleet_telemetrie_profile_sync_pruefung_liefert_fahrzeugstatus(monkeypatch):
+    class Antwort:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "response": {
+                    "synced": True,
+                    "key_paired": True,
+                    "limit_reached": False,
+                },
+            }
+
+    abfragen = []
+
+    monkeypatch.setattr(app, "_fleet_telemetrie_fahrzeuge", lambda: [{
+        "vin": "TESTVIN",
+    }])
+    monkeypatch.setattr(app, "_fleet_telemetrie_oauth_token", lambda: "token-123")
+    monkeypatch.setattr(
+        app.requests,
+        "get",
+        lambda url, **kwargs: abfragen.append((url, kwargs)) or Antwort(),
+    )
+
+    ergebnis = app._fleet_telemetrie_profile_sync_pruefen()
+
+    assert ergebnis["synced"] is True
+    assert ergebnis["key_paired"] is True
+    assert ergebnis["state"] == "synced"
+    assert ergebnis["details"] == [{
+        "vin": "TESTVIN",
+        "synced": True,
+        "key_paired": True,
+        "limit_reached": False,
+    }]
+    assert abfragen[0][0].endswith(
+        "/api/1/vehicles/TESTVIN/fleet_telemetry_config"
+    )
+    assert abfragen[0][1]["headers"]["Authorization"] == "Bearer token-123"
+
+
+def test_fleet_telemetrie_profile_status_enthaelt_syncdaten(monkeypatch):
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+
+    app._fleet_telemetrie_profile_erfolg_setzen(
+        "parked",
+        {
+            "synced": True,
+            "key_paired": True,
+            "state": "synced",
+            "details": [{"vin": "TESTVIN", "synced": True}],
+            "checked_at": 1999.0,
+            "error": None,
+        },
+    )
+    daten = {}
+
+    app._fleet_telemetrie_profile_status_an_daten(daten)
+
+    assert daten["telemetry_config_synced"] is True
+    assert daten["telemetry_config_key_paired"] is True
+    assert daten["telemetry_config_sync_state"] == "synced"
+    assert daten["telemetry_config_sync_profile"] == "parked"
+    assert daten["telemetry_config_sync_checked_at"] == 1999.0
+    assert daten["telemetry_config_sync_error"] is None
+
+
+def test_fleet_telemetrie_profile_pending_wird_bei_datenstrom_aktiv(monkeypatch):
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        {
+            "current": "live",
+            "target": "live",
+            "target_since": 1500.0,
+            "last_sent": 1900.0,
+            "last_sent_profile": "live",
+            "last_error": None,
+            "config_synced": False,
+            "config_key_paired": False,
+            "config_sync_state": "pending",
+            "config_sync_profile": "live",
+            "config_sync_checked_at": 1950.0,
+            "config_sync_updated_at": 1950.0,
+            "config_sync_error": None,
+            "config_sync_details": [{
+                "vin": "TESTVIN",
+                "synced": False,
+                "key_paired": False,
+            }],
+            "updated_at": 1950.0,
+        },
+    )
+    daten = {"fleet_telemetry_updated_at": 1999_000}
+
+    app._fleet_telemetrie_profile_status_an_daten(daten)
+
+    assert daten["telemetry_config_synced"] is False
+    assert daten["telemetry_config_key_paired"] is False
+    assert daten["telemetry_config_stream_active"] is True
+    assert daten["telemetry_config_sync_state"] == "active"
+
+
+def test_fleet_telemetrie_profile_verzoegert_parkprofil(monkeypatch):
+    angefordert = []
+    jetzt = [1000.0]
+
+    monkeypatch.setattr(app.time, "time", lambda: jetzt[0])
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS", 300.0)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        {
+            "current": "live",
+            "target": "live",
+            "target_since": 0.0,
+            "last_sent": 0.0,
+            "last_sent_profile": None,
+            "last_error": None,
+            "updated_at": 0.0,
+        },
+    )
+    daten = {
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "vehicle_state": {"locked": True, "is_user_present": False},
+        "climate_state": {"is_climate_on": False},
+    }
+
+    app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    assert angefordert == []
+    assert daten["telemetry_profile"] == "live"
+    assert daten["telemetry_profile_target"] == "parked"
+    assert daten["telemetry_profile_target_since"] == 1000.0
+    assert daten["telemetry_profile_park_delay_seconds"] == 300.0
+
+    jetzt[0] = 1301.0
+    app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    assert angefordert == ["parked"]
+
+
+def test_fleet_telemetrie_profile_wiederholt_fehlversuch_nicht_sofort(monkeypatch):
+    angefordert = []
+
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_PROFILE_SEND_COOLDOWN_SECONDS", 120.0)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        {
+            "current": "parked",
+            "target": "parked",
+            "target_since": 1900.0,
+            "last_sent": 1990.0,
+            "last_sent_profile": "live",
+            "last_error": "Kein gültiger Fleet-OAuth-Zugriffstoken verfügbar",
+            "updated_at": 1990.0,
+        },
+    )
+    daten = {
+        "drive_state": {"shift_state": "D", "speed": 0},
+        "vehicle_state": {"is_user_present": True},
+    }
+
+    app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    assert angefordert == []
+    assert daten["telemetry_profile"] == "parked"
+    assert daten["telemetry_profile_target"] == "live"
+
+
+def test_fleet_telemetrie_speichert_oauth_tokens_in_env(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+
+    monkeypatch.setattr(app, "ENV_FILE", str(env_file))
+    monkeypatch.delenv("TESLA_FLEET_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("TESLA_FLEET_REFRESH_TOKEN", raising=False)
+    monkeypatch.delenv("TESLA_FLEET_TOKEN_EXPIRES_AT", raising=False)
+
+    app._fleet_telemetrie_oauth_tokens_in_env_speichern({
+        "access_token": "access-123",
+        "refresh_token": "refresh-456",
+        "expires_at": 2000,
+    })
+
+    inhalt = env_file.read_text(encoding="utf-8")
+
+    assert "TESLA_FLEET_ACCESS_TOKEN='access-123'" in inhalt
+    assert "TESLA_FLEET_REFRESH_TOKEN='refresh-456'" in inhalt
+    assert "TESLA_FLEET_TOKEN_EXPIRES_AT='2000'" in inhalt
+    assert app.os.environ["TESLA_FLEET_ACCESS_TOKEN"] == "access-123"
+
+
+def test_fleet_telemetrie_ignoriert_abgelaufenen_env_token(monkeypatch):
+    monkeypatch.setenv("TESLA_FLEET_ACCESS_TOKEN", "alter-token")
+    monkeypatch.setenv("TESLA_FLEET_TOKEN_EXPIRES_AT", "100")
+    monkeypatch.setattr(app.time, "time", lambda: 200.0)
+
+    assert app._fleet_telemetrie_oauth_token_aus_env() is None
+
+
+def test_fleet_telemetrie_nutzt_gueltigen_env_token(monkeypatch):
+    monkeypatch.setenv("TESLA_FLEET_ACCESS_TOKEN", "frischer-token")
+    monkeypatch.setenv("TESLA_FLEET_TOKEN_EXPIRES_AT", "1000")
+    monkeypatch.setattr(app.time, "time", lambda: 200.0)
+
+    assert app._fleet_telemetrie_oauth_token_aus_env() == "frischer-token"

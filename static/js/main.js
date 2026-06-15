@@ -375,6 +375,15 @@ var lastDataTimestamp = null;
 var lastStateTimestamp = null;
 var lastStateSinceTimestamp = null;
 var lastVehicleState = null;
+var lastTelemetryProfile = null;
+var lastTelemetryTarget = null;
+var lastTelemetryTargetSince = null;
+var telemetryParkDelaySeconds = null;
+var lastTelemetryConfigSynced = null;
+var lastTelemetryConfigKeyPaired = null;
+var lastTelemetryConfigSyncState = null;
+var lastTelemetryConfigSyncError = null;
+var lastTelemetryConfigSyncProfile = null;
 var installedVersion = null;
 var CONFIG = {};
 var HIGHLIGHT_BLUE = false;
@@ -932,6 +941,17 @@ function handleData(data) {
     updateHeader(data);
     updateUI(data);
     updateVehicleState(data.state, data.state_checked_at, data);
+    updateTelemetryProfile(
+        data.telemetry_profile,
+        data.telemetry_profile_target,
+        data.telemetry_profile_target_since,
+        data.telemetry_profile_park_delay_seconds,
+        data.telemetry_config_sync_state,
+        data.telemetry_config_synced,
+        data.telemetry_config_key_paired,
+        data.telemetry_config_sync_error,
+        data.telemetry_config_sync_profile
+    );
     var vehicle = data.vehicle_state || {};
     updateOfflineInfo(data.state, vehicle.service_mode, vehicle.service_mode_plus);
     updateSoftwareUpdate(vehicle.software_update);
@@ -3139,6 +3159,133 @@ function zeichneVehicleState() {
     $state.text(text);
 }
 
+function telemetryProfileParkCountdownSekunden() {
+    if (lastTelemetryProfile !== 'live' || lastTelemetryTarget !== 'parked') {
+        return null;
+    }
+    if (lastTelemetryTargetSince == null || telemetryParkDelaySeconds == null) {
+        return null;
+    }
+    var zielMillis = lastTelemetryTargetSince + telemetryParkDelaySeconds * 1000;
+    return Math.max(0, Math.ceil((zielMillis - Date.now()) / 1000));
+}
+
+function zeichneTelemetryProfile() {
+    var $profil = $('#telemetry-profile');
+    if (!lastTelemetryProfile) {
+        $profil.text('');
+        return;
+    }
+    var text = 'Telemetry: ' + lastTelemetryProfile;
+    if (lastTelemetryTarget && lastTelemetryTarget !== lastTelemetryProfile) {
+        text += ' -> ' + lastTelemetryTarget;
+        var rest = telemetryProfileParkCountdownSekunden();
+        if (rest != null) {
+            text += ' (in ' + rest + ' ' +
+                (rest === 1 ? 'Sekunde' : 'Sekunden') + ')';
+        }
+    }
+    $profil.html(escapeHtml(text) + telemetryConfigSyncHtml());
+}
+
+function telemetryConfigSyncHtml() {
+    var state = String(lastTelemetryConfigSyncState || 'unknown').toLowerCase();
+    var synced = lastTelemetryConfigSynced === true;
+    var klasse = 'telemetry-sync-unknown';
+    var statusMarke = 'unknown';
+    var titel = 'Fleet-Telemetry-Konfiguration: Status unbekannt';
+    if (synced || state === 'synced') {
+        klasse = 'telemetry-sync-synced';
+        statusMarke = 'synced';
+        titel = 'Fleet-Telemetry-Konfiguration ist am Fahrzeug angekommen';
+    } else if (state === 'active') {
+        klasse = 'telemetry-sync-active';
+        statusMarke = 'active';
+        titel = 'Fleet-Telemetry-Datenstrom nach Konfigurationswechsel aktiv; Tesla meldet noch keine Sync-Bestätigung';
+    } else if (state === 'pending') {
+        klasse = 'telemetry-sync-pending';
+        statusMarke = 'pending';
+        titel = 'Fleet-Telemetry-Konfiguration gesendet, wartet auf Fahrzeugbestätigung';
+    } else if (state === 'error') {
+        klasse = 'telemetry-sync-error';
+        statusMarke = 'error';
+        titel = 'Fleet-Telemetry-Konfiguration konnte nicht geprüft werden';
+        if (lastTelemetryConfigSyncError) {
+            titel += ': ' + lastTelemetryConfigSyncError;
+        }
+    }
+    if (lastTelemetryConfigSyncProfile) {
+        titel += ' (' + lastTelemetryConfigSyncProfile + ')';
+    }
+    if (lastTelemetryConfigKeyPaired === false) {
+        titel += ' · key_paired: false';
+    }
+    return ' <span class="telemetry-sync-icon ' + klasse + '" role="img" ' +
+        'aria-label="' + escapeHtml(titel) + '" title="' + escapeHtml(titel) + '">' +
+        telemetryConfigSyncSvgHtml(statusMarke) + '</span>';
+}
+
+function telemetryConfigSyncSvgHtml(statusMarke) {
+    var markierung;
+    if (statusMarke === 'synced' || statusMarke === 'active') {
+        markierung = '<path class="telemetry-sync-status-mark" d="M16.8 5.3l1.3 1.3 2.6-3.1" />';
+    } else if (statusMarke === 'pending') {
+        markierung = '<circle class="telemetry-sync-status-outline" cx="18.6" cy="5.2" r="2.6" />' +
+            '<path class="telemetry-sync-status-mark" d="M18.6 3.6v1.8l1.2.8" />';
+    } else if (statusMarke === 'error') {
+        markierung = '<path class="telemetry-sync-status-mark" d="M18.6 3.2v2.8" />' +
+            '<circle class="telemetry-sync-status-dot" cx="18.6" cy="7.4" r="0.45" />';
+    } else if (statusMarke === 'unpaired') {
+        markierung = '<path class="telemetry-sync-status-mark" d="M17.2 3.8l2.8 2.8M20 3.8l-2.8 2.8" />';
+    } else {
+        markierung = '<circle class="telemetry-sync-status-dot" cx="18.6" cy="5.2" r="0.8" />';
+    }
+    return '<svg class="telemetry-sync-svg" viewBox="0 0 22 16" aria-hidden="true" focusable="false">' +
+        '<path class="telemetry-sync-car" d="M2.6 9.2l1.9-4.5h10.1l2.6 4.5M3.6 9.2h14.2v4.1H3.6z" />' +
+        '<circle class="telemetry-sync-wheel" cx="6.1" cy="13.3" r="1.4" />' +
+        '<circle class="telemetry-sync-wheel" cx="15.3" cy="13.3" r="1.4" />' +
+        '<path class="telemetry-sync-window" d="M6.1 5.1h7.3l1.6 3H4.9z" />' +
+        markierung +
+        '</svg>';
+}
+
+function updateTelemetryProfile(
+    profile,
+    target,
+    targetSince,
+    parkDelaySeconds,
+    configSyncState,
+    configSynced,
+    configKeyPaired,
+    configSyncError,
+    configSyncProfile
+) {
+    if (!profile) {
+        lastTelemetryProfile = null;
+        lastTelemetryTarget = null;
+        lastTelemetryTargetSince = null;
+        telemetryParkDelaySeconds = null;
+        lastTelemetryConfigSynced = null;
+        lastTelemetryConfigKeyPaired = null;
+        lastTelemetryConfigSyncState = null;
+        lastTelemetryConfigSyncError = null;
+        lastTelemetryConfigSyncProfile = null;
+        zeichneTelemetryProfile();
+        return;
+    }
+    lastTelemetryProfile = profile;
+    lastTelemetryTarget = target || profile;
+    lastTelemetryTargetSince = leseZeitstempelMillis(targetSince);
+    telemetryParkDelaySeconds = parseNumber(parkDelaySeconds);
+    lastTelemetryConfigSyncState = configSyncState || 'unknown';
+    lastTelemetryConfigSynced = configSynced === true;
+    lastTelemetryConfigKeyPaired = configKeyPaired === false ? false :
+        (configKeyPaired === true ? true : null);
+    lastTelemetryConfigSyncError = configSyncError || null;
+    lastTelemetryConfigSyncProfile = configSyncProfile || null;
+    zeichneTelemetryProfile();
+}
+
 function updateParkTime(ts) {
     if (typeof ts !== 'undefined') {
         if (ts && ts < 1e12) {
@@ -3668,6 +3815,7 @@ setInterval(checkAppVersion, 60000);
 setInterval(function() {
     updateDataAge();
     zeichneVehicleState();
+    zeichneTelemetryProfile();
 }, 1000);
 setInterval(updateClientCount, 5000);
 setInterval(fetchAnnouncement, 15000);

@@ -1570,6 +1570,7 @@ select {
   }
   .app-version #vehicle-state,
   .app-version #client-count,
+  .app-version #telemetry-profile,
   .app-version #data-age {
     position: static;
     left: auto;
@@ -1856,35 +1857,107 @@ select {
 }
 
 .app-version {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, auto) minmax(260px, 1fr);
+  grid-template-areas:
+    "state clients update"
+    "profile version update";
+  gap: 4px 18px;
+  align-items: end;
   text-align: center;
   font-size: 0.8em;
   margin-top: 10px;
+  padding: 0 10px 4px;
   color: var(--text-color);
-  position: relative;
 }
 
 .app-version #data-age {
-  position: absolute;
-  right: 10px;
-  bottom: 0;
+  grid-area: update;
+  justify-self: end;
   color: var(--accent-color);
 }
 
 .app-version #vehicle-state {
-  position: absolute;
-  left: 10px;
-  bottom: 0;
+  grid-area: state;
+  justify-self: start;
   color: var(--accent-color);
 }
 
 .app-version #client-count {
-  position: absolute;
-  left: 270px;
-  bottom: 0;
+  grid-area: clients;
+  justify-self: center;
   color: var(--accent-color);
 }
 
-@media (max-width: 600px) {
+.app-version #telemetry-profile {
+  grid-area: profile;
+  justify-self: start;
+  color: var(--accent-color);
+}
+
+.telemetry-sync-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.35em;
+  line-height: 1;
+  vertical-align: -0.05em;
+}
+
+.telemetry-sync-svg {
+  width: 2.2em;
+  height: 1.5em;
+  overflow: visible;
+}
+
+.telemetry-sync-car,
+.telemetry-sync-window,
+.telemetry-sync-status-outline,
+.telemetry-sync-status-mark {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.45;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.telemetry-sync-window {
+  opacity: 0.65;
+}
+
+.telemetry-sync-wheel,
+.telemetry-sync-status-dot {
+  fill: currentColor;
+}
+
+.telemetry-sync-synced {
+  color: #5dff73;
+}
+
+.telemetry-sync-active {
+  color: #5dff73;
+}
+
+.telemetry-sync-pending {
+  color: #ffd54f;
+}
+
+.telemetry-sync-error {
+  color: #ff5252;
+  font-weight: 700;
+}
+
+.telemetry-sync-unknown {
+  color: #aaa;
+  opacity: 0.8;
+}
+
+.app-version span:last-child {
+  grid-area: version;
+  justify-self: center;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
   .app-version {
     display: flex;
     flex-direction: column;
@@ -1894,6 +1967,7 @@ select {
 
   .app-version #vehicle-state,
   .app-version #client-count,
+  .app-version #telemetry-profile,
   .app-version #data-age {
     position: static;
     width: 100%;
