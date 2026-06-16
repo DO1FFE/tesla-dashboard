@@ -428,7 +428,7 @@ def test_fleet_telemetrie_mqtt_batch_default_ist_200_und_stream_latest_only():
     assert "FLEET_TELEMETRY_STREAM_QUEUE_MAX = max(\n    1," in inhalt
     assert 'os.getenv("TESLA_FLEET_TELEMETRY_STREAM_QUEUE_MAX", "1")' in inhalt
     assert "FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS = max(" in inhalt
-    assert 'os.getenv("TESLA_FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS", "1.0")' in inhalt
+    assert 'os.getenv("TESLA_FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS", "0.5")' in inhalt
     assert "q = eventlet_queue.Queue(maxsize=FLEET_TELEMETRY_STREAM_QUEUE_MAX)" in inhalt
 
 
@@ -451,6 +451,24 @@ def test_stream_sendet_ungepuffert_und_unkomprimiert(monkeypatch):
         assert response.headers["Content-Encoding"] == "identity"
         assert response.headers["X-Accel-Buffering"] == "no"
         assert next(response.response).decode("utf-8") == ": verbunden\n\n"
+    finally:
+        response.close()
+
+
+def test_stream_sendet_sichtbaren_heartbeat(monkeypatch):
+    monkeypatch.setattr(app, "_start_thread", lambda vehicle_id: None)
+    monkeypatch.setattr(app, "latest_data", {})
+    monkeypatch.setattr(app, "subscribers", {})
+    monkeypatch.setattr(app, "FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS", 0.01)
+
+    response = app.app.test_client().get("/stream/veh-1", buffered=False)
+
+    try:
+        assert next(response.response).decode("utf-8") == ": verbunden\n\n"
+        heartbeat = next(response.response).decode("utf-8")
+        assert heartbeat.startswith("event: stream\ndata: ")
+        daten = json.loads(heartbeat.split("data: ", 1)[1].strip())
+        assert isinstance(daten["stream_heartbeat_at"], int)
     finally:
         response.close()
 

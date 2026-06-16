@@ -183,6 +183,16 @@ def test_live_update_alter_nutzt_telemetrie_empfangszeit():
     )
 
 
+def test_stream_heartbeat_wird_im_browser_als_signal_genutzt():
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+
+    assert "var lastStreamTimestamp = null" in js
+    assert "function aktualisiereStreamSignal(ts)" in js
+    assert "eventSource.addEventListener('stream'" in js
+    assert "data.stream_heartbeat_at" in js
+    assert "Letztes Signal vor " in js
+
+
 def test_online_und_disconnected_state_zaehlen_seit_dauer_hoch():
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
 

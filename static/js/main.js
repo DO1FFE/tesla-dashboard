@@ -398,6 +398,7 @@ map.on('zoomend', function() {
 var polyline = null;
 var pendingPath = null;
 var lastDataTimestamp = null;
+var lastStreamTimestamp = null;
 var lastStateTimestamp = null;
 var lastStateSinceTimestamp = null;
 var lastVehicleState = null;
@@ -3146,11 +3147,16 @@ function updateDataAge(ts) {
         lastDataTimestamp = ts || null;
     }
     var $el = $('#data-age');
-    if (!lastDataTimestamp) {
+    var anzeigeZeitstempel = lastDataTimestamp;
+    if (lastStreamTimestamp && (
+            !anzeigeZeitstempel || lastStreamTimestamp > anzeigeZeitstempel)) {
+        anzeigeZeitstempel = lastStreamTimestamp;
+    }
+    if (!anzeigeZeitstempel) {
         $el.text('');
         return;
     }
-    var diff = Math.round((Date.now() - lastDataTimestamp) / 1000);
+    var diff = Math.round((Date.now() - anzeigeZeitstempel) / 1000);
     if (diff < 0) diff = 0;
     var text;
     if (diff < 60) {
@@ -3165,13 +3171,24 @@ function updateDataAge(ts) {
         var s = diff % 60;
         text = h + ' h ' + m + ' min ' + s + ' s';
     }
-    var timeStr = new Date(lastDataTimestamp).toLocaleTimeString('de-DE', {
+    var timeStr = new Date(anzeigeZeitstempel).toLocaleTimeString('de-DE', {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
         timeZone: 'Europe/Berlin'
     });
-    $el.text('Letztes Update vor ' + text + ' (' + timeStr + ')');
+    $el.text('Letztes Signal vor ' + text + ' (' + timeStr + ')');
+}
+
+function aktualisiereStreamSignal(ts) {
+    var millis = leseZeitstempelMillis(ts);
+    if (millis == null) {
+        millis = Date.now();
+    }
+    if (!lastStreamTimestamp || millis >= lastStreamTimestamp) {
+        lastStreamTimestamp = millis;
+    }
+    updateDataAge();
 }
 
 function formatiereKurzesAlter(millis) {
@@ -3795,9 +3812,18 @@ function startStream() {
     eventSource.onmessage = function(e) {
         var data = JSON.parse(e.data);
         if (!data.error) {
+            aktualisiereStreamSignal(Date.now());
             handleData(data);
         }
     };
+    eventSource.addEventListener('stream', function(e) {
+        try {
+            var data = JSON.parse(e.data);
+            aktualisiereStreamSignal(data.stream_heartbeat_at);
+        } catch (err) {
+            aktualisiereStreamSignal(Date.now());
+        }
+    });
     eventSource.onerror = function() {
         if (eventSource) {
             eventSource.close();

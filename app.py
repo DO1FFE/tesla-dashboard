@@ -1654,7 +1654,7 @@ FLEET_TELEMETRY_STREAM_QUEUE_MAX = max(
     1, int(os.getenv("TESLA_FLEET_TELEMETRY_STREAM_QUEUE_MAX", "1"))
 )
 FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS = max(
-    0.5, float(os.getenv("TESLA_FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS", "1.0"))
+    0.25, float(os.getenv("TESLA_FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS", "0.5"))
 )
 _fleet_telemetry_message_queue = queue.Queue(maxsize=FLEET_TELEMETRY_MQTT_QUEUE_MAX)
 _fleet_telemetry_profile_queue = queue.Queue(maxsize=1)
@@ -10138,8 +10138,8 @@ def stream_vehicle(vehicle_id="default"):
                             last_path_len = 0
                     msg = f"data: {json.dumps(payload)}\n\n"
                 except queue.Empty:
-                    # Periodically send a comment to keep the connection alive
-                    msg = ": ping\n\n"
+                    heartbeat = {"stream_heartbeat_at": int(time.time() * 1000)}
+                    msg = f"event: stream\ndata: {json.dumps(heartbeat)}\n\n"
                 try:
                     yield msg
                 except GeneratorExit:
