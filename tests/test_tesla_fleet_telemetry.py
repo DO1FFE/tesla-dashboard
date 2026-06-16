@@ -501,6 +501,28 @@ def test_stream_liefert_subscriber_snapshot_direkt_aus(monkeypatch):
         response.close()
 
 
+def test_streamstart_fordert_liveprofil_fuer_browser_an(monkeypatch):
+    angefordert = []
+    initial = {"drive_state": {}, "path": []}
+    monkeypatch.setattr(app, "_start_thread", lambda vehicle_id: None)
+    monkeypatch.setattr(app, "latest_data", {"veh-1": initial})
+    monkeypatch.setattr(app, "subscribers", {})
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_aktualisieren",
+        lambda cache_id, data: angefordert.append((cache_id, data)) or data,
+    )
+
+    response = app.app.test_client().get("/stream/veh-1", buffered=False)
+
+    try:
+        assert next(response.response).decode("utf-8") == ": verbunden\n\n"
+        assert next(response.response).decode("utf-8").startswith("data: ")
+        assert angefordert == [("veh-1", initial)]
+    finally:
+        response.close()
+
+
 def test_subscriber_stream_bekommt_stabile_snapshots(monkeypatch):
     ziel_queue = app.queue.Queue(maxsize=app.FLEET_TELEMETRY_STREAM_QUEUE_MAX)
     daten = {

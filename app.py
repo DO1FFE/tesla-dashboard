@@ -10105,6 +10105,13 @@ def stream_vehicle(vehicle_id="default"):
             if vehicle_id in latest_data:
                 initial = latest_data[vehicle_id]
                 if isinstance(initial, dict):
+                    try:
+                        _fleet_telemetrie_profile_aktualisieren(vehicle_id, initial)
+                    except Exception:
+                        logging.exception(
+                            "Live-Telemetry-Profil konnte beim Streamstart "
+                            "nicht angefordert werden"
+                        )
                     path = initial.get("path")
                     if isinstance(path, list):
                         last_path_len = len(path)
