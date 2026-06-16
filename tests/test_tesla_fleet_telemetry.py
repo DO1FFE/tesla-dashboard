@@ -501,7 +501,7 @@ def test_stream_liefert_subscriber_snapshot_direkt_aus(monkeypatch):
         response.close()
 
 
-def test_streamstart_fordert_liveprofil_fuer_browser_an(monkeypatch):
+def test_streamstart_fordert_kein_telemetrieprofil_an(monkeypatch):
     angefordert = []
     initial = {"drive_state": {}, "path": []}
     monkeypatch.setattr(app, "_start_thread", lambda vehicle_id: None)
@@ -518,7 +518,7 @@ def test_streamstart_fordert_liveprofil_fuer_browser_an(monkeypatch):
     try:
         assert next(response.response).decode("utf-8") == ": verbunden\n\n"
         assert next(response.response).decode("utf-8").startswith("data: ")
-        assert angefordert == [("veh-1", initial)]
+        assert angefordert == []
     finally:
         response.close()
 
@@ -1013,7 +1013,7 @@ def test_fleet_telemetrie_profile_erkennt_zielzustand():
         "charge_state": {"charging_state": "Charging"},
         "drive_state": {"shift_state": "P"},
         "vehicle_state": {"is_user_present": True},
-    }) == "live"
+    }) == "charging"
 
     assert app._fleet_telemetrie_profile_ziel({
         "drive_state": {"shift_state": "D", "speed": 0},
@@ -1027,14 +1027,20 @@ def test_fleet_telemetrie_profile_erkennt_zielzustand():
     }) == "parked"
 
 
-def test_fleet_telemetrie_profile_bleibt_live_fuer_verbundenen_browser(monkeypatch):
+def test_fleet_telemetrie_profile_ignoriert_verbundenen_browser(monkeypatch):
     monkeypatch.setattr(app, "subscribers", {"veh-1": [object()]})
 
     assert app._fleet_telemetrie_profile_ziel({
         "charge_state": {"charging_state": "Charging"},
         "drive_state": {"shift_state": "P", "speed": 0},
         "vehicle_state": {"is_user_present": False},
-    }, "veh-1") == "live"
+    }) == "charging"
+
+    assert app._fleet_telemetrie_profile_ziel({
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "vehicle_state": {"is_user_present": False},
+        "climate_state": {"is_climate_on": False},
+    }) == "parked"
 
 
 def test_fleet_telemetrie_profile_config_filtert_parkwerte():

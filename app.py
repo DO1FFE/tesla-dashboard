@@ -4288,15 +4288,13 @@ def _fleet_telemetrie_profile_fahrzeug_aktiv(data):
     return False
 
 
-def _fleet_telemetrie_profile_ziel(data, cache_id=None):
+def _fleet_telemetrie_profile_ziel(data):
     """Ermittle das passende Kostenprofil aus den letzten Fahrzeugdaten."""
 
-    if cache_id and subscribers.get(cache_id):
-        return "live"
-    if _fleet_telemetrie_profile_fahrzeug_aktiv(data):
-        return "live"
     if _fleet_telemetrie_profile_ladend(data):
         return "charging"
+    if _fleet_telemetrie_profile_fahrzeug_aktiv(data):
+        return "live"
     return "parked"
 
 
@@ -4763,9 +4761,10 @@ def _fleet_telemetrie_profile_spaeter_anwenden(profil):
 def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
     """Aktualisiere das gewünschte Telemetry-Profil aus Live-Daten."""
 
+    del cache_id
     if not _fleet_telemetrie_profile_aktiviert():
         return _fleet_telemetrie_profile_status_an_daten(data)
-    ziel = _fleet_telemetrie_profile_ziel(data, cache_id)
+    ziel = _fleet_telemetrie_profile_ziel(data)
     jetzt = time.time()
     profil_anfordern = None
     with _fleet_telemetry_profile_lock:
@@ -10105,13 +10104,6 @@ def stream_vehicle(vehicle_id="default"):
             if vehicle_id in latest_data:
                 initial = latest_data[vehicle_id]
                 if isinstance(initial, dict):
-                    try:
-                        _fleet_telemetrie_profile_aktualisieren(vehicle_id, initial)
-                    except Exception:
-                        logging.exception(
-                            "Live-Telemetry-Profil konnte beim Streamstart "
-                            "nicht angefordert werden"
-                        )
                     path = initial.get("path")
                     if isinstance(path, list):
                         last_path_len = len(path)
