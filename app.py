@@ -4288,13 +4288,15 @@ def _fleet_telemetrie_profile_fahrzeug_aktiv(data):
     return False
 
 
-def _fleet_telemetrie_profile_ziel(data):
+def _fleet_telemetrie_profile_ziel(data, cache_id=None):
     """Ermittle das passende Kostenprofil aus den letzten Fahrzeugdaten."""
 
-    if _fleet_telemetrie_profile_ladend(data):
-        return "charging"
+    if cache_id and subscribers.get(cache_id):
+        return "live"
     if _fleet_telemetrie_profile_fahrzeug_aktiv(data):
         return "live"
+    if _fleet_telemetrie_profile_ladend(data):
+        return "charging"
     return "parked"
 
 
@@ -4761,10 +4763,9 @@ def _fleet_telemetrie_profile_spaeter_anwenden(profil):
 def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
     """Aktualisiere das gewünschte Telemetry-Profil aus Live-Daten."""
 
-    del cache_id
     if not _fleet_telemetrie_profile_aktiviert():
         return _fleet_telemetrie_profile_status_an_daten(data)
-    ziel = _fleet_telemetrie_profile_ziel(data)
+    ziel = _fleet_telemetrie_profile_ziel(data, cache_id)
     jetzt = time.time()
     profil_anfordern = None
     with _fleet_telemetry_profile_lock:

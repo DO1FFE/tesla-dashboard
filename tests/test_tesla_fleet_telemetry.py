@@ -988,6 +988,12 @@ def test_fleet_telemetrie_profile_erkennt_zielzustand():
     }) == "charging"
 
     assert app._fleet_telemetrie_profile_ziel({
+        "charge_state": {"charging_state": "Charging"},
+        "drive_state": {"shift_state": "P"},
+        "vehicle_state": {"is_user_present": True},
+    }) == "live"
+
+    assert app._fleet_telemetrie_profile_ziel({
         "drive_state": {"shift_state": "D", "speed": 0},
         "vehicle_state": {"is_user_present": False},
     }) == "live"
@@ -997,6 +1003,16 @@ def test_fleet_telemetrie_profile_erkennt_zielzustand():
         "vehicle_state": {"locked": True, "is_user_present": False},
         "climate_state": {"is_climate_on": False},
     }) == "parked"
+
+
+def test_fleet_telemetrie_profile_bleibt_live_fuer_verbundenen_browser(monkeypatch):
+    monkeypatch.setattr(app, "subscribers", {"veh-1": [object()]})
+
+    assert app._fleet_telemetrie_profile_ziel({
+        "charge_state": {"charging_state": "Charging"},
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "vehicle_state": {"is_user_present": False},
+    }, "veh-1") == "live"
 
 
 def test_fleet_telemetrie_profile_config_filtert_parkwerte():
