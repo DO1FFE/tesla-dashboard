@@ -57,6 +57,11 @@ def test_stream_fehlerpfad_setzt_karte_nicht_auf_default():
     fehlerpfad = js[start:ende]
 
     assert "map.setView(DEFAULT_POS" not in fehlerpfad
+    assert "STREAM_WIEDERVERBINDUNG_MS = 1000" in js
+    assert "streamWiederverbindungsTimer = setTimeout(function()" in fehlerpfad
+    assert "startStream();" in fehlerpfad
+    assert "setTimeout(startStreamIfOnline" not in fehlerpfad
+    assert "5000" not in fehlerpfad
 
 
 def test_live_zoom_nutzt_drive_speed_immer_als_mph():

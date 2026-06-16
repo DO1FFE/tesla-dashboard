@@ -1,3 +1,4 @@
+import json
 import pathlib
 import sys
 from datetime import datetime, timezone
@@ -450,6 +451,34 @@ def test_stream_sendet_ungepuffert_und_unkomprimiert(monkeypatch):
         assert response.headers["Content-Encoding"] == "identity"
         assert response.headers["X-Accel-Buffering"] == "no"
         assert next(response.response).decode("utf-8") == ": verbunden\n\n"
+    finally:
+        response.close()
+
+
+def test_stream_liefert_subscriber_snapshot_direkt_aus(monkeypatch):
+    monkeypatch.setattr(app, "_start_thread", lambda vehicle_id: None)
+    monkeypatch.setattr(app, "latest_data", {})
+    monkeypatch.setattr(app, "subscribers", {})
+
+    response = app.app.test_client().get("/stream/veh-1", buffered=False)
+
+    try:
+        assert next(response.response).decode("utf-8") == ": verbunden\n\n"
+        assert "veh-1" in app.subscribers
+
+        app._subscriber_daten_senden("veh-1", {
+            "fleet_telemetry_received_at": 1234,
+            "drive_state": {"speed": 1},
+            "vehicle_state": {},
+            "charge_state": {},
+            "climate_state": {},
+        })
+
+        payload = next(response.response).decode("utf-8")
+        assert payload.startswith("data: ")
+        daten = json.loads(payload.removeprefix("data: ").strip())
+        assert daten["fleet_telemetry_received_at"] == 1234
+        assert daten["drive_state"]["speed"] == 1
     finally:
         response.close()
 

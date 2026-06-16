@@ -16,6 +16,8 @@ var PARK_GRACE_MS = 5 * 60 * 1000;
 var PARKED_MAP_JITTER_METERS = 25;
 var ROUTENPUNKT_MAX_SPRUNG_METER = 500 * 1000;
 var NAVIGATIONS_ZIEL_NULL_EPSILON = 1e-6;
+var STREAM_WIEDERVERBINDUNG_MS = 1000;
+var streamWiederverbindungsTimer = null;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 18;
@@ -3781,6 +3783,10 @@ function startStream() {
     if (!currentVehicle) {
         return;
     }
+    if (streamWiederverbindungsTimer) {
+        clearTimeout(streamWiederverbindungsTimer);
+        streamWiederverbindungsTimer = null;
+    }
     if (eventSource) {
         eventSource.close();
     }
@@ -3818,10 +3824,14 @@ function startStream() {
                 }
             });
         });
-        // Attempt to reconnect after a short delay in case the browser has
-        // suspended the connection while running in the background.
-        if (!statusAbfrageTimer) {
-            setTimeout(startStreamIfOnline, 5000);
+        // Nach kurzer Trennung den SSE-Kanal direkt wieder öffnen.
+        if (!streamWiederverbindungsTimer) {
+            streamWiederverbindungsTimer = setTimeout(function() {
+                streamWiederverbindungsTimer = null;
+                if (currentVehicle && !eventSource && !statusAbfrageTimer) {
+                    startStream();
+                }
+            }, STREAM_WIEDERVERBINDUNG_MS);
         }
     };
 }
@@ -3829,6 +3839,10 @@ function startStream() {
 function startStreamIfOnline() {
     if (!currentVehicle) {
         return;
+    }
+    if (streamWiederverbindungsTimer) {
+        clearTimeout(streamWiederverbindungsTimer);
+        streamWiederverbindungsTimer = null;
     }
     if (statusAbfrageTimer) {
         clearTimeout(statusAbfrageTimer);
