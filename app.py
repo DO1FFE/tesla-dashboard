@@ -4225,7 +4225,7 @@ def _fleet_telemetrie_profile_status_an_daten(data):
 
 
 def _fleet_telemetrie_profile_ladend(data):
-    """Erkenne einen aktiven oder angeschlossenen Ladevorgang."""
+    """Erkenne einen aktiven Ladevorgang."""
 
     charge = data.get("charge_state") if isinstance(data, dict) else None
     if not isinstance(charge, dict):
@@ -4233,13 +4233,10 @@ def _fleet_telemetrie_profile_ladend(data):
     status = str(charge.get("charging_state") or "").strip().lower()
     if status in {"charging", "starting"}:
         return True
+    if status in {"complete", "stopped", "disconnected", "nopower", "standby"}:
+        return False
     charger_power = _as_float(charge.get("charger_power"))
     if charger_power is not None and charger_power > 0:
-        return True
-    latch = str(charge.get("charge_port_latch") or "").strip().lower()
-    if latch in {"engaged", "latched", "connected"}:
-        return True
-    if _fleet_telemetrie_wahr(charge.get("fast_charger_present")):
         return True
     return False
 

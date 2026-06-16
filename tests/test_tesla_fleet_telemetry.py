@@ -1027,6 +1027,31 @@ def test_fleet_telemetrie_profile_erkennt_zielzustand():
     }) == "parked"
 
 
+def test_fleet_telemetrie_profile_verlaesst_charging_nach_ladeende():
+    assert app._fleet_telemetrie_profile_ziel({
+        "charge_state": {
+            "charging_state": "Complete",
+            "charge_port_latch": "Engaged",
+            "fast_charger_present": True,
+            "charger_power": 13,
+        },
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "vehicle_state": {"is_user_present": False},
+        "climate_state": {"is_climate_on": False},
+    }) == "parked"
+
+    assert app._fleet_telemetrie_profile_ziel({
+        "charge_state": {
+            "charging_state": "Stopped",
+            "charge_port_latch": "Connected",
+            "fast_charger_present": True,
+        },
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "vehicle_state": {"is_user_present": False},
+        "climate_state": {"is_climate_on": False},
+    }) == "parked"
+
+
 def test_fleet_telemetrie_profile_ignoriert_verbundenen_browser(monkeypatch):
     monkeypatch.setattr(app, "subscribers", {"veh-1": [object()]})
 
