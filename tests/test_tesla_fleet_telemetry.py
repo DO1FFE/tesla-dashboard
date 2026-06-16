@@ -419,6 +419,32 @@ def test_fleet_telemetrie_mqtt_batch_default_ist_200():
     assert 'os.getenv("TESLA_FLEET_TELEMETRY_MQTT_BATCH_MAX", "200")' in inhalt
     assert "FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX = max(\n    200," in inhalt
     assert 'os.getenv("TESLA_FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX", "200")' in inhalt
+    assert "FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS = max(" in inhalt
+    assert 'os.getenv("TESLA_FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS", "1.0")' in inhalt
+    assert "q = eventlet_queue.Queue(maxsize=FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX)" in inhalt
+
+
+def test_stream_sendet_ungepuffert_und_unkomprimiert(monkeypatch):
+    monkeypatch.setattr(app, "_start_thread", lambda vehicle_id: None)
+    monkeypatch.setattr(app, "latest_data", {})
+    monkeypatch.setattr(app, "subscribers", {})
+
+    response = app.app.test_client().get(
+        "/stream/veh-1",
+        buffered=False,
+        headers={"Accept-Encoding": "gzip"},
+    )
+
+    try:
+        assert response.status_code == 200
+        assert "text/event-stream" in response.headers["Content-Type"]
+        assert response.headers["Cache-Control"] == "no-cache, no-transform"
+        assert response.headers["Connection"] == "keep-alive"
+        assert response.headers["Content-Encoding"] == "identity"
+        assert response.headers["X-Accel-Buffering"] == "no"
+        assert next(response.response).decode("utf-8") == ": verbunden\n\n"
+    finally:
+        response.close()
 
 
 def test_subscriber_stream_bekommt_stabile_snapshots(monkeypatch):

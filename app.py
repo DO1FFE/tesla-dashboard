@@ -7,6 +7,7 @@ try:
 except RuntimeError:
     eventlet.hubs.use_hub("eventlet.hubs.asyncio")
 eventlet.monkey_patch()
+from eventlet import queue as eventlet_queue
 
 import os
 import csv
@@ -1651,6 +1652,9 @@ FLEET_TELEMETRY_CACHE_WRITE_SECONDS = max(
 )
 FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX = max(
     200, int(os.getenv("TESLA_FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX", "200"))
+)
+FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS = max(
+    0.5, float(os.getenv("TESLA_FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS", "1.0"))
 )
 _fleet_telemetry_message_queue = queue.Queue(maxsize=FLEET_TELEMETRY_MQTT_QUEUE_MAX)
 _fleet_telemetry_profile_queue = queue.Queue(maxsize=1)
@@ -10042,10 +10046,11 @@ def stream_vehicle(vehicle_id="default"):
     ip = _client_ip()
 
     def gen():
-        q = queue.Queue(maxsize=FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX)
+        q = eventlet_queue.Queue(maxsize=FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX)
         subscribers.setdefault(vehicle_id, []).append(q)
         last_path_len = 0
         try:
+            yield ": verbunden\n\n"
             # Send the latest data immediately if available
             if vehicle_id in latest_data:
                 initial = latest_data[vehicle_id]
@@ -10056,7 +10061,7 @@ def stream_vehicle(vehicle_id="default"):
                 yield f"data: {json.dumps(initial)}\n\n"
             while True:
                 try:
-                    data = q.get(timeout=15)
+                    data = q.get(timeout=FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS)
                     payload = data
                     if isinstance(data, dict):
                         payload = dict(data)
@@ -10098,7 +10103,9 @@ def stream_vehicle(vehicle_id="default"):
             _client_stream_getrennt(ip)
 
     resp = Response(gen(), mimetype="text/event-stream")
-    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["Cache-Control"] = "no-cache, no-transform"
+    resp.headers["Connection"] = "keep-alive"
+    resp.headers["Content-Encoding"] = "identity"
     resp.headers["X-Accel-Buffering"] = "no"
     return resp
 
