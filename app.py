@@ -1684,6 +1684,9 @@ FLEET_TELEMETRIE_PROFILE_SYNC_CHECK_INTERVAL_SECONDS = max(
     10.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_SYNC_CHECK_INTERVAL_SECONDS", "60")),
 )
+FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER = frozenset({
+    "RouteLine",
+})
 FLEET_TELEMETRIE_PROFILE_LIVE_1S_FELDER = frozenset({
     "BrakePedal",
     "DestinationLocation",
@@ -1697,7 +1700,6 @@ FLEET_TELEMETRIE_PROFILE_LIVE_1S_FELDER = frozenset({
     "PackCurrent",
     "PackVoltage",
     "PedalPosition",
-    "RouteLine",
     "VehicleSpeed",
 })
 FLEET_TELEMETRIE_PROFILE_LIVE_5S_FELDER = frozenset({
@@ -4504,6 +4506,8 @@ def _fleet_telemetrie_profile_config_erstellen(request_data, profil):
     fields = config.setdefault("fields", {})
     if not isinstance(fields, dict):
         return config_request
+    for feld in FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER:
+        fields.pop(feld, None)
     if profil == "parked":
         for feld in list(fields):
             if feld not in FLEET_TELEMETRIE_PROFILE_PARKED_FELDER:
