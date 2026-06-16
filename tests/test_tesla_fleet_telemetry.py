@@ -552,6 +552,59 @@ def test_subscriber_stream_ersetzt_rueckstand_durch_neuesten_snapshot(monkeypatc
     assert ziel_queue.empty()
 
 
+def test_fleet_telemetrie_adressauflösung_blockiert_livepfad_nicht(monkeypatch):
+    geplant = []
+    monkeypatch.setattr(app, "address_cache", {})
+    monkeypatch.setattr(app, "track_park_time", lambda data: None)
+    monkeypatch.setattr(app, "park_duration_string", lambda _start: "")
+    monkeypatch.setattr(app, "track_drive_path", lambda data: None)
+    monkeypatch.setattr(app, "trip_path", [])
+    monkeypatch.setattr(
+        app,
+        "reverse_geocode",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Reverse-Geocode darf den Live-Pfad nicht blockieren")
+        ),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_adresse_spaeter_aktualisieren",
+        lambda cache_id, lat, lon: geplant.append((cache_id, lat, lon)),
+    )
+    daten = {
+        "drive_state": {"latitude": 51.0, "longitude": 7.0},
+        "charge_state": {},
+        "vehicle_state": {},
+        "climate_state": {},
+    }
+
+    app._fleet_telemetrie_dashboard_daten_anreichern("veh-1", daten)
+
+    assert geplant == [("veh-1", 51.0, 7.0)]
+
+
+def test_fleet_telemetrie_adress_worker_sendet_spaetes_update(monkeypatch):
+    ziel_queue = app.queue.Queue(maxsize=1)
+    monkeypatch.setattr(app, "address_cache", {})
+    monkeypatch.setattr(app, "subscribers", {"veh-1": [ziel_queue]})
+    monkeypatch.setattr(
+        app,
+        "latest_data",
+        {"veh-1": {"drive_state": {"latitude": 51.0, "longitude": 7.0}}},
+    )
+
+    assert app._fleet_telemetrie_adresse_uebernehmen(
+        "veh-1",
+        51.0,
+        7.0,
+        {"address": "Teststraße 1, 45143 Essen"},
+    )
+
+    snapshot = ziel_queue.get_nowait()
+    assert snapshot["location_address"] == "Teststraße 1, 45143 Essen"
+    assert app.address_cache["veh-1"]["address"] == "Teststraße 1, 45143 Essen"
+
+
 def test_fleet_telemetrie_verwirft_ungueltige_navigationskoordinaten():
     daten = {
         "drive_state": {

@@ -1611,6 +1611,10 @@ current_trip_date = None
 drive_pause_ms = None
 latest_data = {}
 address_cache = {}
+_fleet_telemetry_address_queue = queue.Queue(maxsize=100)
+_fleet_telemetry_address_pending = {}
+_fleet_telemetry_address_lock = threading.Lock()
+_fleet_telemetry_address_thread = None
 subscribers = {}
 threads = {}
 _vehicle_list_cache = []
@@ -1946,8 +1950,9 @@ def _subscriber_daten_senden(cache_id, data):
     for ziel_queue in list(subscribers.get(cache_id, [])):
         payload = _subscriber_daten_kopie(data)
         try:
-            if getattr(ziel_queue, "maxsize", 0) > 0:
-                while ziel_queue.qsize() >= ziel_queue.maxsize:
+            maxsize = getattr(ziel_queue, "maxsize", 0) or 0
+            if maxsize > 0:
+                while ziel_queue.qsize() >= maxsize:
                     ziel_queue.get_nowait()
             if hasattr(ziel_queue, "put_nowait"):
                 ziel_queue.put_nowait(payload)
@@ -2006,6 +2011,102 @@ def _fleet_telemetrie_cache_schreiber_loop():
         time.sleep(FLEET_TELEMETRY_CACHE_WRITE_SECONDS)
         _fleet_telemetrie_cache_pending_schreiben()
     _fleet_telemetrie_cache_pending_schreiben()
+
+
+def _fleet_telemetrie_adresse_worker_starten():
+    """Starte den Hintergrund-Worker für Fleet-Telemetry-Adressen."""
+
+    global _fleet_telemetry_address_thread
+
+    if (
+        _fleet_telemetry_address_thread is not None
+        and _fleet_telemetry_address_thread.is_alive()
+    ):
+        return
+    _fleet_telemetry_address_thread = threading.Thread(
+        target=_fleet_telemetrie_adresse_worker_loop,
+        name="fleet_telemetrie_adresse_worker",
+        daemon=True,
+    )
+    _fleet_telemetry_address_thread.start()
+
+
+def _fleet_telemetrie_adresse_spaeter_aktualisieren(cache_id, lat, lon):
+    """Fordere eine Adressauflösung außerhalb des Live-Pfads an."""
+
+    if cache_id is None or lat is None or lon is None:
+        return
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except (TypeError, ValueError):
+        return
+    with _fleet_telemetry_address_lock:
+        bereits_geplant = cache_id in _fleet_telemetry_address_pending
+        _fleet_telemetry_address_pending[cache_id] = (lat, lon)
+    if not bereits_geplant:
+        try:
+            _fleet_telemetry_address_queue.put_nowait(cache_id)
+        except queue.Full:
+            with _fleet_telemetry_address_lock:
+                _fleet_telemetry_address_pending.pop(cache_id, None)
+            return
+    _fleet_telemetrie_adresse_worker_starten()
+
+
+def _fleet_telemetrie_adresse_uebernehmen(cache_id, lat, lon, result):
+    """Übernehme eine später aufgelöste Adresse in Cache und Live-Stream."""
+
+    if not isinstance(result, dict) or not result.get("address"):
+        return False
+    jetzt = time.time()
+    snapshot = None
+    with _fleet_telemetry_lock:
+        address_cache[cache_id] = {
+            "lat": lat,
+            "lon": lon,
+            "address": result["address"],
+            "ts": jetzt,
+        }
+        data = latest_data.get(cache_id)
+        if isinstance(data, dict):
+            drive = data.get("drive_state")
+            if not isinstance(drive, dict):
+                drive = {}
+            aktuelle_lat = _as_float(drive.get("latitude"))
+            aktuelle_lon = _as_float(drive.get("longitude"))
+            if (
+                aktuelle_lat is not None
+                and aktuelle_lon is not None
+                and abs(aktuelle_lat - lat) <= 1e-3
+                and abs(aktuelle_lon - lon) <= 1e-3
+            ):
+                data["location_address"] = result["address"]
+                snapshot = _subscriber_daten_kopie(data)
+    if snapshot is not None:
+        _subscriber_daten_senden(cache_id, snapshot)
+    return True
+
+
+def _fleet_telemetrie_adresse_worker_loop():
+    """Löse Adressen für Fleet-Telemetry-Daten ohne Live-Blockade auf."""
+
+    while True:
+        try:
+            cache_id = _fleet_telemetry_address_queue.get(timeout=1)
+        except queue.Empty:
+            continue
+        with _fleet_telemetry_address_lock:
+            koordinaten = _fleet_telemetry_address_pending.pop(cache_id, None)
+        if koordinaten is None:
+            continue
+        lat, lon = koordinaten
+        try:
+            result = reverse_geocode(lat, lon, cache_id)
+        except Exception:
+            logging.exception("Fleet-Telemetry-Adresse konnte nicht aufgelöst werden")
+            continue
+        _fleet_telemetrie_adresse_uebernehmen(cache_id, lat, lon, result)
 
 
 def _force_statistics_rebuild_on_start():
@@ -5596,19 +5697,11 @@ def _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data):
                 or abs(entry.get("lon") - lon) > 1e-4
             )
             if needs_update:
-                result = reverse_geocode(lat, lon, cache_id)
-                addr = result.get("address")
-                if addr:
-                    address_cache[cache_id] = {
-                        "lat": lat,
-                        "lon": lon,
-                        "address": addr,
-                        "ts": now,
-                    }
+                _fleet_telemetrie_adresse_spaeter_aktualisieren(cache_id, lat, lon)
             entry = address_cache.get(cache_id)
             if entry and entry.get("address"):
                 data["location_address"] = entry["address"]
-            else:
+            elif not data.get("location_address"):
                 data.pop("location_address", None)
         except Exception:
             pass
