@@ -1142,12 +1142,16 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     live_fields = live["config"]["fields"]
 
     assert live_fields["Location"]["interval_seconds"] == 1
+    assert "minimum_delta" not in live_fields["Location"]
     assert live_fields["VehicleSpeed"]["interval_seconds"] == 1
-    assert live_fields["VehicleSpeed"]["minimum_delta"] == 0.1
+    assert "minimum_delta" not in live_fields["VehicleSpeed"]
     assert live_fields["PackCurrent"]["interval_seconds"] == 1
+    assert "minimum_delta" not in live_fields["PackCurrent"]
     assert live_fields["BatteryLevel"]["interval_seconds"] == 5
+    assert "minimum_delta" not in live_fields["BatteryLevel"]
     assert live_fields["ChargeState"]["interval_seconds"] == 10
     assert live_fields["InsideTemp"]["interval_seconds"] == 10
+    assert "minimum_delta" not in live_fields["InsideTemp"]
     assert live_fields["MediaNowPlayingTitle"]["interval_seconds"] == 60
     assert "RouteLine" not in live_fields
 

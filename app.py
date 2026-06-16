@@ -1879,15 +1879,6 @@ FLEET_TELEMETRIE_PROFILE_CHARGING_60S_FELDER = frozenset({
     "TpmsSoftWarnings",
 })
 FLEET_TELEMETRIE_PROFILE_MINDELTAS = {
-    "live": {
-        "GpsHeading": 0.2,
-        "PackCurrent": 0.1,
-        "PackVoltage": 0.5,
-        "PedalPosition": 0.05,
-        "Soc": 0.05,
-        "BatteryLevel": 0.05,
-        "VehicleSpeed": 0.1,
-    },
     "charging": {
         "ACChargingEnergyIn": 0.1,
         "ACChargingPower": 0.1,
@@ -4520,6 +4511,9 @@ def _fleet_telemetrie_profile_config_erstellen(request_data, profil):
         if intervall is None:
             continue
         feld_config["interval_seconds"] = intervall
+        if profil == "live":
+            feld_config.pop("minimum_delta", None)
+            continue
         if feld in mindeltas:
             feld_config["minimum_delta"] = mindeltas[feld]
     return config_request
