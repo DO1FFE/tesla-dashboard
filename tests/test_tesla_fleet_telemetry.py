@@ -1131,10 +1131,23 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
                 "MediaNowPlayingTitle": {"interval_seconds": 30},
                 "BatteryLevel": {"interval_seconds": 1, "minimum_delta": 0.1},
                 "ChargeState": {"interval_seconds": 1},
+                "PackCurrent": {"interval_seconds": 1, "minimum_delta": 0.1},
                 "VehicleSpeed": {"interval_seconds": 1, "minimum_delta": 0.1},
             },
         },
     }
+
+    live = app._fleet_telemetrie_profile_config_erstellen(basis, "live")
+    live_fields = live["config"]["fields"]
+
+    assert live_fields["Location"]["interval_seconds"] == 1
+    assert live_fields["VehicleSpeed"]["interval_seconds"] == 1
+    assert live_fields["VehicleSpeed"]["minimum_delta"] == 0.1
+    assert live_fields["PackCurrent"]["interval_seconds"] == 1
+    assert live_fields["BatteryLevel"]["interval_seconds"] == 5
+    assert live_fields["ChargeState"]["interval_seconds"] == 10
+    assert live_fields["InsideTemp"]["interval_seconds"] == 10
+    assert live_fields["MediaNowPlayingTitle"]["interval_seconds"] == 60
 
     gedrosselt = app._fleet_telemetrie_profile_config_erstellen(basis, "parked")
     fields = gedrosselt["config"]["fields"]

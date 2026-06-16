@@ -1684,6 +1684,65 @@ FLEET_TELEMETRIE_PROFILE_SYNC_CHECK_INTERVAL_SECONDS = max(
     10.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_SYNC_CHECK_INTERVAL_SECONDS", "60")),
 )
+FLEET_TELEMETRIE_PROFILE_LIVE_1S_FELDER = frozenset({
+    "BrakePedal",
+    "DestinationLocation",
+    "Gear",
+    "GpsHeading",
+    "GpsState",
+    "LightsHazardsActive",
+    "LightsHighBeams",
+    "LightsTurnSignal",
+    "Location",
+    "PackCurrent",
+    "PackVoltage",
+    "PedalPosition",
+    "RouteLine",
+    "VehicleSpeed",
+})
+FLEET_TELEMETRIE_PROFILE_LIVE_5S_FELDER = frozenset({
+    "BatteryLevel",
+    "ExpectedEnergyPercentAtTripArrival",
+    "EstBatteryRange",
+    "IdealBatteryRange",
+    "MilesToArrival",
+    "MinutesToArrival",
+    "Odometer",
+    "RatedRange",
+    "RouteTrafficMinutesDelay",
+    "Soc",
+})
+FLEET_TELEMETRIE_PROFILE_LIVE_10S_FELDER = frozenset({
+    "CenterDisplay",
+    "ChargeState",
+    "DetailedChargeState",
+    "DoorState",
+    "DriverSeatOccupied",
+    "FdWindow",
+    "FpWindow",
+    "InsideTemp",
+    "Locked",
+    "OutsideTemp",
+    "RdWindow",
+    "RpWindow",
+})
+FLEET_TELEMETRIE_PROFILE_LIVE_30S_FELDER = frozenset({
+    "ClimateKeeperMode",
+    "DefrostForPreconditioning",
+    "DefrostMode",
+    "HvacFanSpeed",
+    "HvacFanStatus",
+    "HvacPower",
+    "HvacSteeringWheelHeatAuto",
+    "HvacSteeringWheelHeatLevel",
+    "MediaPlaybackStatus",
+    "SeatHeaterLeft",
+    "SeatHeaterRearCenter",
+    "SeatHeaterRearLeft",
+    "SeatHeaterRearRight",
+    "SeatHeaterRight",
+    "WiperHeatEnabled",
+})
 FLEET_TELEMETRIE_PROFILE_PARKED_10S_FELDER = frozenset({
     "BrakePedal",
     "CenterDisplay",
@@ -1818,6 +1877,15 @@ FLEET_TELEMETRIE_PROFILE_CHARGING_60S_FELDER = frozenset({
     "TpmsSoftWarnings",
 })
 FLEET_TELEMETRIE_PROFILE_MINDELTAS = {
+    "live": {
+        "GpsHeading": 0.2,
+        "PackCurrent": 0.1,
+        "PackVoltage": 0.5,
+        "PedalPosition": 0.05,
+        "Soc": 0.05,
+        "BatteryLevel": 0.05,
+        "VehicleSpeed": 0.1,
+    },
     "charging": {
         "ACChargingEnergyIn": 0.1,
         "ACChargingPower": 0.1,
@@ -4400,7 +4468,15 @@ def _fleet_telemetrie_profile_intervall(profil, feld):
     """Gib das gewünschte Intervall für ein Profilfeld zurück."""
 
     if profil == "live":
-        return None
+        if feld in FLEET_TELEMETRIE_PROFILE_LIVE_1S_FELDER:
+            return 1
+        if feld in FLEET_TELEMETRIE_PROFILE_LIVE_5S_FELDER:
+            return 5
+        if feld in FLEET_TELEMETRIE_PROFILE_LIVE_10S_FELDER:
+            return 10
+        if feld in FLEET_TELEMETRIE_PROFILE_LIVE_30S_FELDER:
+            return 30
+        return 60
     if profil == "parked":
         if feld in FLEET_TELEMETRIE_PROFILE_PARKED_10S_FELDER:
             return 10
@@ -4424,8 +4500,6 @@ def _fleet_telemetrie_profile_config_erstellen(request_data, profil):
     if profil not in FLEET_TELEMETRIE_PROFILE:
         raise ValueError(f"Unbekanntes Telemetry-Profil: {profil}")
     config_request = copy.deepcopy(request_data)
-    if profil == "live":
-        return config_request
     config = config_request.setdefault("config", {})
     fields = config.setdefault("fields", {})
     if not isinstance(fields, dict):
