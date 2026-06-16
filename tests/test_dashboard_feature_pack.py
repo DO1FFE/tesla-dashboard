@@ -165,6 +165,19 @@ def test_livepfad_wird_per_delta_an_leaflet_angehaengt():
     assert "polyline.addLatLng(pt)" in js
 
 
+def test_live_update_alter_nutzt_telemetrie_empfangszeit():
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+    start = js.index("function neuesterDatenZeitstempel")
+    ende = js.index("function updateDataAge", start)
+    block = js[start:ende]
+
+    assert "data && data.fleet_telemetry_received_at" in block
+    assert (
+        block.index("data && data.fleet_telemetry_received_at")
+        < block.index("data && data.fleet_telemetry_updated_at")
+    )
+
+
 def test_online_und_disconnected_state_zaehlen_seit_dauer_hoch():
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
 

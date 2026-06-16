@@ -154,7 +154,7 @@ def test_fleet_telemetrie_mqtt_zeichnet_parkstatus_auf(monkeypatch):
     assert {vehicle_id for vehicle_id, _data in parking_aufrufe} == {"veh-1"}
 
 
-def test_fleet_telemetrie_mqtt_ignoriert_unveraenderte_rohwerte(monkeypatch):
+def test_fleet_telemetrie_mqtt_sendet_empfangszeit_bei_unveraenderten_rohwerten(monkeypatch):
     gespeicherte_daten = []
 
     class Sammler:
@@ -179,26 +179,33 @@ def test_fleet_telemetrie_mqtt_ignoriert_unveraenderte_rohwerte(monkeypatch):
         "tesla/TESTVIN/v/LightsHighBeams",
         b"false",
         {"topic_base": "tesla"},
+        1000,
     )
     erster_zeitstempel = app.latest_data["veh-1"]["fleet_telemetry_updated_at"]
+    assert app.latest_data["veh-1"]["fleet_telemetry_received_at"] == 1000
 
-    assert not app._fleet_telemetrie_mqtt_message(
+    assert app._fleet_telemetrie_mqtt_message(
         "tesla/TESTVIN/v/LightsHighBeams",
         b"false",
         {"topic_base": "tesla"},
+        2000,
     )
     assert app.latest_data["veh-1"]["fleet_telemetry_updated_at"] == erster_zeitstempel
+    assert app.latest_data["veh-1"]["fleet_telemetry_received_at"] == 2000
     assert len(gespeicherte_daten) == 1
-    assert len(sammler.daten) == 1
+    assert len(sammler.daten) == 2
+    assert sammler.daten[-1]["fleet_telemetry_received_at"] == 2000
 
     assert app._fleet_telemetrie_mqtt_message(
         "tesla/TESTVIN/v/LightsHighBeams",
         b"true",
         {"topic_base": "tesla"},
+        3000,
     )
     assert app.latest_data["veh-1"]["vehicle_state"]["lights_high_beams"] is True
+    assert app.latest_data["veh-1"]["fleet_telemetry_received_at"] == 3000
     assert len(gespeicherte_daten) == 2
-    assert len(sammler.daten) == 2
+    assert len(sammler.daten) == 3
 
 
 def test_fleet_telemetrie_connectivity_unterscheidet_connected_und_disconnected(monkeypatch):

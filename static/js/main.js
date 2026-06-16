@@ -3118,6 +3118,7 @@ function describe(key) {
 
 function neuesterDatenZeitstempel(data, vehicle, drive, charge, climate) {
     var kandidaten = [
+        data && data.fleet_telemetry_received_at,
         data && data.fleet_telemetry_updated_at,
         data && data.timestamp,
         vehicle && vehicle.timestamp,

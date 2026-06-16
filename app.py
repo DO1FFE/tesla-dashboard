@@ -4883,7 +4883,23 @@ def _fleet_telemetrie_basisdaten(data, vin, cache_id, timestamp_ms):
     data.setdefault("vehicle_config", {})
     data["timestamp"] = timestamp_ms
     data["fleet_telemetry_updated_at"] = timestamp_ms
+    _fleet_telemetrie_empfang_vermerken(data, timestamp_ms)
     return data
+
+
+def _fleet_telemetrie_empfang_vermerken(data, timestamp_ms, field=None):
+    """Merke, wann zuletzt irgendein Telemetriepaket empfangen wurde."""
+
+    if not isinstance(data, dict):
+        return None
+    if timestamp_ms is None:
+        timestamp_ms = int(time.time() * 1000)
+    bisher = _as_float(data.get("fleet_telemetry_received_at"))
+    if bisher is None or timestamp_ms >= bisher:
+        data["fleet_telemetry_received_at"] = timestamp_ms
+    if field:
+        data["fleet_telemetry_last_received_field"] = field
+    return timestamp_ms
 
 
 def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
@@ -5643,12 +5659,24 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
             data = latest_data.get(cache_id)
             if not isinstance(data, dict):
                 data = _load_cached(cache_id) or {}
+            hatte_timestamp = "timestamp" in data
+            timestamp_vorher = data.get("timestamp")
+            hatte_update_zeit = "fleet_telemetry_updated_at" in data
+            update_zeit_vorher = data.get("fleet_telemetry_updated_at")
             geändert = False
             letzter_zeitstempel = None
             letztes_feld = None
+            letzter_empfangszeitstempel = None
+            letztes_empfangenes_feld = None
             for field, value, timestamp_ms in feldwerte:
                 if timestamp_ms is None:
                     timestamp_ms = int(time.time() * 1000)
+                if (
+                    letzter_empfangszeitstempel is None
+                    or timestamp_ms >= letzter_empfangszeitstempel
+                ):
+                    letzter_empfangszeitstempel = timestamp_ms
+                    letztes_empfangenes_feld = field
                 value = _fleet_telemetrie_wert(value)
                 if _fleet_telemetrie_wert_unveraendert(data, field, value):
                     continue
@@ -5662,7 +5690,27 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
                 geändert = True
                 letzter_zeitstempel = timestamp_ms
                 letztes_feld = field
+            if letzter_empfangszeitstempel is not None:
+                _fleet_telemetrie_empfang_vermerken(
+                    data,
+                    letzter_empfangszeitstempel,
+                    letztes_empfangenes_feld,
+                )
             if not geändert:
+                if letzter_empfangszeitstempel is None:
+                    continue
+                if hatte_timestamp:
+                    data["timestamp"] = timestamp_vorher
+                else:
+                    data.pop("timestamp", None)
+                if hatte_update_zeit:
+                    data["fleet_telemetry_updated_at"] = update_zeit_vorher
+                else:
+                    data.pop("fleet_telemetry_updated_at", None)
+                data["_live"] = True
+                data.pop("api_error", None)
+                latest_data[cache_id] = data
+                aktualisierte_daten.append((cache_id, data, False))
                 continue
             data["state_checked_at"] = letzter_zeitstempel
             data["fleet_telemetry_last_field"] = letztes_feld
@@ -5676,10 +5724,11 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
             data.pop("api_error", None)
             latest_data[cache_id] = data
             _fleet_telemetrie_cache_spaeter_speichern(cache_id, data)
-            aktualisierte_daten.append((cache_id, data))
-    for cache_id, data in aktualisierte_daten:
+            aktualisierte_daten.append((cache_id, data, True))
+    for cache_id, data, daten_geaendert in aktualisierte_daten:
         _subscriber_daten_senden(cache_id, data)
-        _aprs_spaeter_senden(data)
+        if daten_geaendert:
+            _aprs_spaeter_senden(data)
     return bool(aktualisierte_daten)
 
 
