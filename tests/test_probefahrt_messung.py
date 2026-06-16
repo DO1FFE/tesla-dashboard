@@ -61,7 +61,7 @@ def test_messdaten_auswerten_erkennt_getrennte_quelle():
     assert "vor der App" in auswertung["entscheidung"]
 
 
-def test_bericht_enthaelt_profile_und_bewertung():
+def test_bericht_enthaelt_live_ansicht_bereiche_und_bewertung():
     auswertung = probefahrt_messung.messdaten_auswerten(
         [
             '100.000\ttesla/VIN123/v/Location\t{"latitude":51.0,"longitude":7.0}',
@@ -73,7 +73,13 @@ def test_bericht_enthaelt_profile_und_bewertung():
 
     bericht = probefahrt_messung.bericht_erstellen(auswertung, ("bewegung",))
 
-    assert "Profil bewegung:" in bericht
+    assert "Live-Ansicht bewegung:" in bericht
     assert "Location: 1" in bericht
     assert "VehicleSpeed: 1" in bericht
     assert "Bewertung:" in bericht
+
+
+def test_bereiche_auswahl_nutzt_live_ansicht_begriffe():
+    assert probefahrt_messung.bereiche_auswahl(
+        ["bewegung", "karte", "instrumente"]
+    ) == ("bewegung", "karte", "instrumente")

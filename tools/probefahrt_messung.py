@@ -14,17 +14,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-MESSPROFILE = {
+MESSBEREICHE = {
     "bewegung": (
         "Location",
         "VehicleSpeed",
         "Gear",
         "GpsHeading",
         "PedalPosition",
-        "PackCurrent",
-        "PackVoltage",
+        "BrakePedal",
     ),
-    "navigation": (
+    "karte": (
+        "Location",
         "DestinationLocation",
         "DestinationName",
         "ExpectedEnergyPercentAtTripArrival",
@@ -33,26 +33,18 @@ MESSPROFILE = {
         "RouteTrafficMinutesDelay",
         "RouteLine",
     ),
-    "laden": (
-        "ChargeState",
-        "DetailedChargeState",
+    "instrumente": (
         "BatteryLevel",
         "Soc",
-        "ChargeRateMilePerHour",
-        "ChargerPower",
-        "ChargePort",
-    ),
-    "basis": (
+        "PackCurrent",
+        "PackVoltage",
         "InsideTemp",
         "OutsideTemp",
         "Odometer",
-        "Locked",
-        "DoorState",
-        "CenterDisplay",
     ),
 }
 
-KRITISCHE_BEWEGUNGSFELDER = {
+KRITISCHE_LIVE_FELDER = {
     "Location",
     "VehicleSpeed",
     "Gear",
@@ -191,23 +183,23 @@ def entscheidung_bilden(felder, verbindungen, gesamt):
         if letzter_status == "disconnected" and not felder:
             return "Fahrzeug/Fleet-Verbindung ist getrennt; die Verzögerung liegt vor der App."
 
-    bewegungs_counts = {
+    live_counts = {
         feld: felder.get(feld, {}).get("anzahl", 0)
-        for feld in KRITISCHE_BEWEGUNGSFELDER
+        for feld in KRITISCHE_LIVE_FELDER
     }
-    if sum(bewegungs_counts.values()) == 0:
-        return "Keine frischen Bewegungsfelder; Browser und Flask können nichts schneller anzeigen."
+    if sum(live_counts.values()) == 0:
+        return "Keine frischen Live-Ansicht-Felder; Browser und Flask können nichts schneller anzeigen."
 
     groesste_luecke = 0.0
-    for feld in KRITISCHE_BEWEGUNGSFELDER:
+    for feld in KRITISCHE_LIVE_FELDER:
         luecke = felder.get(feld, {}).get("max_luecke_s")
         if luecke is not None:
             groesste_luecke = max(groesste_luecke, luecke)
     if groesste_luecke > 5.0:
-        return f"Bewegungsdaten kommen an, aber mit großen MQTT-Lücken bis {groesste_luecke:.1f} s."
+        return f"Live-Ansicht-Daten kommen an, aber mit großen MQTT-Lücken bis {groesste_luecke:.1f} s."
     if groesste_luecke > 2.5:
-        return f"Bewegungsdaten kommen an, aber nicht durchgehend echtzeitnah: Lücken bis {groesste_luecke:.1f} s."
-    return "MQTT-Bewegungsdaten sehen echtzeitnah aus; bei Browserverzug danach App/SSE prüfen."
+        return f"Live-Ansicht-Daten kommen an, aber nicht durchgehend echtzeitnah: Lücken bis {groesste_luecke:.1f} s."
+    return "MQTT-Daten für die Live-Ansicht sehen echtzeitnah aus; bei Browserverzug danach App/SSE prüfen."
 
 
 def wert_kurz(wert):
@@ -219,7 +211,7 @@ def wert_kurz(wert):
     return text
 
 
-def bericht_erstellen(auswertung, profile):
+def bericht_erstellen(auswertung, bereiche):
     """Erzeuge einen kompakten Messbericht für die Konsole."""
 
     zeilen = [
@@ -234,10 +226,10 @@ def bericht_erstellen(auswertung, profile):
             zeilen.append(f"  +{eintrag['sekunde']:.1f}s {status}")
 
     felder = auswertung["felder"]
-    for profil in profile:
-        profil_felder = MESSPROFILE[profil]
-        zeilen.append(f"Profil {profil}:")
-        for feld in profil_felder:
+    for bereich in bereiche:
+        bereich_felder = MESSBEREICHE[bereich]
+        zeilen.append(f"Live-Ansicht {bereich}:")
+        for feld in bereich_felder:
             daten = felder.get(feld)
             if not daten:
                 zeilen.append(f"  {feld}: 0")
@@ -253,17 +245,17 @@ def bericht_erstellen(auswertung, profile):
     return "\n".join(zeilen)
 
 
-def profile_auswahl(rohdaten):
-    """Lese die gewünschten Auswertungsprofile aus der Kommandozeile."""
+def bereiche_auswahl(rohdaten):
+    """Lese die gewünschten Live-Ansicht-Bereiche aus der Kommandozeile."""
 
     if "alle" in rohdaten:
-        return tuple(MESSPROFILE)
+        return tuple(MESSBEREICHE)
     gewaehlt = []
-    for profil in rohdaten:
-        if profil not in MESSPROFILE:
-            raise SystemExit(f"Unbekanntes Profil: {profil}")
-        if profil not in gewaehlt:
-            gewaehlt.append(profil)
+    for bereich in rohdaten:
+        if bereich not in MESSBEREICHE:
+            raise SystemExit(f"Unbekannter Live-Ansicht-Bereich: {bereich}")
+        if bereich not in gewaehlt:
+            gewaehlt.append(bereich)
     return tuple(gewaehlt)
 
 
@@ -273,7 +265,7 @@ def vorhandene_datei_auswerten(args):
     pfad = Path(args.auswerten)
     zeilen = pfad.read_text(encoding="utf-8", errors="replace").splitlines()
     auswertung = messdaten_auswerten(zeilen, topic_basis=args.topic_basis)
-    print(bericht_erstellen(auswertung, profile_auswahl(args.profil)))
+    print(bericht_erstellen(auswertung, bereiche_auswahl(args.bereich)))
     if args.json_datei:
         Path(args.json_datei).write_text(
             json.dumps(auswertung, ensure_ascii=False, indent=2),
@@ -357,7 +349,7 @@ def messung_starten(args):
     print(f"JSON: {json_datei}")
     if fehler:
         print(f"mosquitto_sub stderr: {fehler}", file=sys.stderr)
-    print(bericht_erstellen(auswertung, profile_auswahl(args.profil)))
+    print(bericht_erstellen(auswertung, bereiche_auswahl(args.bereich)))
 
 
 def parser_erstellen():
@@ -383,10 +375,10 @@ def parser_erstellen():
     parser.add_argument("--ausgabe", help="TSV-Ausgabedatei.")
     parser.add_argument("--json-datei", help="JSON-Auswertung schreiben.")
     parser.add_argument(
-        "--profil",
+        "--bereich",
         nargs="+",
-        default=["bewegung", "navigation", "laden"],
-        help="Auswertungsprofile: bewegung navigation laden basis alle.",
+        default=["bewegung", "karte", "instrumente"],
+        help="Live-Ansicht-Bereiche: bewegung karte instrumente alle.",
     )
     parser.add_argument(
         "--retained",
