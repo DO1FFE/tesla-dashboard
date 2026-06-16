@@ -147,6 +147,16 @@ def test_routeline_wird_in_der_livekarte_verwendet():
     assert "color: '#00e5ff'" in js
 
 
+def test_livekarte_verwirft_unplausible_routeline_spruenge():
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+
+    assert "ROUTENPUNKT_MAX_SPRUNG_METER" in js
+    assert "function routenPunkteSindPlausibel" in js
+    assert "entfernung > ROUTENPUNKT_MAX_SPRUNG_METER" in js
+    assert "routenPunkteSindPlausibel(routenPunkte, mapLat, mapLng, dLat, dLng)" in js
+    assert "istPlausibleNavigationsZielKoordinate(dLat, dLng)" in js
+
+
 def test_livepfad_wird_per_delta_an_leaflet_angehaengt():
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
 

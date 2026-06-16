@@ -412,6 +412,68 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
     assert daten["vehicle_state"]["media_info"]["media_playback_status"] == "Playing"
 
 
+def test_fleet_telemetrie_mqtt_batch_default_ist_200():
+    inhalt = pathlib.Path("app.py").read_text(encoding="utf-8")
+
+    assert "FLEET_TELEMETRY_MQTT_BATCH_MAX = max(\n    200," in inhalt
+    assert 'os.getenv("TESLA_FLEET_TELEMETRY_MQTT_BATCH_MAX", "200")' in inhalt
+    assert "FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX = max(\n    200," in inhalt
+    assert 'os.getenv("TESLA_FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX", "200")' in inhalt
+
+
+def test_subscriber_stream_bekommt_stabile_snapshots(monkeypatch):
+    ziel_queue = app.queue.Queue(maxsize=app.FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX)
+    daten = {
+        "drive_state": {"speed": 1},
+        "path": [[51.0, 7.0]],
+    }
+    monkeypatch.setattr(app, "subscribers", {"veh-1": [ziel_queue]})
+
+    app._subscriber_daten_senden("veh-1", daten)
+    daten["drive_state"]["speed"] = 2
+    daten["path"].append([51.1, 7.1])
+
+    snapshot = ziel_queue.get_nowait()
+    assert snapshot["drive_state"]["speed"] == 1
+    assert snapshot["path"] == [[51.0, 7.0]]
+
+
+def test_fleet_telemetrie_verwirft_ungueltige_navigationskoordinaten():
+    daten = {
+        "drive_state": {
+            "active_route_latitude": 51.1,
+            "active_route_longitude": 7.1,
+        }
+    }
+
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "DestinationLocation",
+        {"latitude": 0, "longitude": 7.1},
+        1234,
+    )
+
+    drive = daten["drive_state"]
+    assert "active_route_latitude" not in drive
+    assert "active_route_longitude" not in drive
+    assert drive["timestamp"] == 1234
+
+
+def test_fleet_telemetrie_verwirft_nicht_endliche_navigationskoordinaten():
+    daten = {"drive_state": {}}
+
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "DestinationLocation",
+        {"latitude": float("nan"), "longitude": 7.1},
+        1234,
+    )
+
+    drive = daten["drive_state"]
+    assert "active_route_latitude" not in drive
+    assert "active_route_longitude" not in drive
+
+
 def test_fleet_telemetrie_reichert_tpms_und_spiegel_aus_rohdaten_an():
     daten = {
         "fleet_telemetry_raw": {

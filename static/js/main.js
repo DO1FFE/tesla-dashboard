@@ -14,6 +14,8 @@ var currentGear = null;
 var THERMOMETER_IDS = ['thermometer-inside', 'thermometer-outside', 'thermometer-battery'];
 var PARK_GRACE_MS = 5 * 60 * 1000;
 var PARKED_MAP_JITTER_METERS = 25;
+var ROUTENPUNKT_MAX_SPRUNG_METER = 500 * 1000;
+var NAVIGATIONS_ZIEL_NULL_EPSILON = 1e-6;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
 var DEFAULT_ZOOM = 18;
@@ -304,6 +306,29 @@ function zoomFuerPrivatsphaereRadius(radius, fallbackZoom) {
     return fallbackZoom;
 }
 
+function istGueltigeKartenKoordinate(lat, lng) {
+    if (lat === null || lat === undefined || lng === null || lng === undefined) {
+        return false;
+    }
+    if (lat === '' || lng === '') {
+        return false;
+    }
+    lat = Number(lat);
+    lng = Number(lng);
+    return isFinite(lat) &&
+        isFinite(lng) &&
+        lat >= -90 &&
+        lat <= 90 &&
+        lng >= -180 &&
+        lng <= 180;
+}
+
+function istPlausibleNavigationsZielKoordinate(lat, lng) {
+    return istGueltigeKartenKoordinate(lat, lng) &&
+        Math.abs(Number(lat)) >= NAVIGATIONS_ZIEL_NULL_EPSILON &&
+        Math.abs(Number(lng)) >= NAVIGATIONS_ZIEL_NULL_EPSILON;
+}
+
 function dekodierePolyline(polyline, praezision) {
     if (typeof polyline !== 'string' || !polyline) {
         return [];
@@ -356,8 +381,7 @@ function routeLineZuKartenPunkte(routeLine) {
     return dekodierePolyline(kodiertePolyline, 6).filter(function(point) {
         return Array.isArray(point) &&
             point.length >= 2 &&
-            isFinite(point[0]) &&
-            isFinite(point[1]);
+            istGueltigeKartenKoordinate(point[0], point[1]);
     });
 }
 
@@ -493,6 +517,58 @@ function entfernungMeter(lat1, lng1, lat2, lng2) {
             Math.cos(rLat1) * Math.cos(rLat2) *
             Math.sin(dLng / 2) * Math.sin(dLng / 2);
     return radius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function routenPunkteSindPlausibel(points, startLat, startLng, zielLat, zielLng) {
+    if (!Array.isArray(points) || points.length < 2) {
+        return false;
+    }
+    var vorherigerPunkt = null;
+    for (var i = 0; i < points.length; i++) {
+        var point = points[i];
+        if (!Array.isArray(point) || point.length < 2) {
+            return false;
+        }
+        var lat = Number(point[0]);
+        var lng = Number(point[1]);
+        if (!istGueltigeKartenKoordinate(lat, lng)) {
+            return false;
+        }
+        if (vorherigerPunkt) {
+            var entfernung = entfernungMeter(
+                vorherigerPunkt[0],
+                vorherigerPunkt[1],
+                lat,
+                lng
+            );
+            if (entfernung != null && entfernung > ROUTENPUNKT_MAX_SPRUNG_METER) {
+                return false;
+            }
+        }
+        vorherigerPunkt = [lat, lng];
+    }
+
+    var ersterPunkt = points[0];
+    var letzterPunkt = points[points.length - 1];
+    if (istGueltigeKartenKoordinate(startLat, startLng)) {
+        var startEntfernung = Math.min(
+            entfernungMeter(startLat, startLng, ersterPunkt[0], ersterPunkt[1]),
+            entfernungMeter(startLat, startLng, letzterPunkt[0], letzterPunkt[1])
+        );
+        if (startEntfernung > ROUTENPUNKT_MAX_SPRUNG_METER) {
+            return false;
+        }
+    }
+    if (istGueltigeKartenKoordinate(zielLat, zielLng)) {
+        var zielEntfernung = Math.min(
+            entfernungMeter(zielLat, zielLng, ersterPunkt[0], ersterPunkt[1]),
+            entfernungMeter(zielLat, zielLng, letzterPunkt[0], letzterPunkt[1])
+        );
+        if (zielEntfernung > ROUTENPUNKT_MAX_SPRUNG_METER) {
+            return false;
+        }
+    }
+    return true;
 }
 
 function fahrzeugIstGeparktFuerKarte(data, drive, speedKmh) {
@@ -1087,10 +1163,18 @@ function handleData(data) {
     updateSuperchargerList(data);
 
     // Show destination flag and route line if navigation is active
-    if (drive.active_route_destination && drive.active_route_latitude && drive.active_route_longitude) {
-        var dLat = Number(drive.active_route_latitude);
-        var dLng = Number(drive.active_route_longitude);
-        if (privacyModeAktiv) {
+    var dLat = null;
+    var dLng = null;
+    var zielKoordinatePlausibel = false;
+    if (
+        drive.active_route_destination &&
+        drive.active_route_latitude != null &&
+        drive.active_route_longitude != null
+    ) {
+        dLat = Number(drive.active_route_latitude);
+        dLng = Number(drive.active_route_longitude);
+        zielKoordinatePlausibel = istPlausibleNavigationsZielKoordinate(dLat, dLng);
+        if (zielKoordinatePlausibel && privacyModeAktiv) {
             var privatZiel = privatisiereKartenPunkt(dLat, dLng);
             dLat = privatZiel.lat;
             dLng = privatZiel.lng;
@@ -1098,12 +1182,16 @@ function handleData(data) {
     }
     if (
         drive.active_route_destination &&
+        zielKoordinatePlausibel &&
         isFinite(mapLat) &&
         isFinite(mapLng) &&
         isFinite(dLat) &&
         isFinite(dLng)
     ) {
         var routenPunkte = privacyModeAktiv ? [] : routeLineZuKartenPunkte(drive.active_route_line);
+        if (!routenPunkteSindPlausibel(routenPunkte, mapLat, mapLng, dLat, dLng)) {
+            routenPunkte = [];
+        }
         var nutztRouteLine = routenPunkte.length > 1;
         var linienPunkte = nutztRouteLine ? routenPunkte : [[mapLat, mapLng], [dLat, dLng]];
         var linienOptionen = nutztRouteLine ? {
@@ -3866,3 +3954,5 @@ $('#sms-send').on('click', function() {
 $('#alarm-close').on('click', function() {
     $('#alarm-popup').removeClass('show');
 });
+
+// © 2026 Erik Schauer, do1ffe@darc.de

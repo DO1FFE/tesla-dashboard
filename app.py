@@ -1641,7 +1641,7 @@ FLEET_TELEMETRY_MQTT_QUEUE_MAX = max(
     1000, int(os.getenv("TESLA_FLEET_TELEMETRY_MQTT_QUEUE_MAX", "20000"))
 )
 FLEET_TELEMETRY_MQTT_BATCH_MAX = max(
-    10, int(os.getenv("TESLA_FLEET_TELEMETRY_MQTT_BATCH_MAX", "250"))
+    200, int(os.getenv("TESLA_FLEET_TELEMETRY_MQTT_BATCH_MAX", "200"))
 )
 FLEET_TELEMETRY_MQTT_BATCH_SECONDS = max(
     0.01, float(os.getenv("TESLA_FLEET_TELEMETRY_MQTT_BATCH_SECONDS", "0.05"))
@@ -1650,7 +1650,7 @@ FLEET_TELEMETRY_CACHE_WRITE_SECONDS = max(
     0.2, float(os.getenv("TESLA_FLEET_TELEMETRY_CACHE_WRITE_SECONDS", "1.0"))
 )
 FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX = max(
-    1, int(os.getenv("TESLA_FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX", "3"))
+    200, int(os.getenv("TESLA_FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX", "200"))
 )
 _fleet_telemetry_message_queue = queue.Queue(maxsize=FLEET_TELEMETRY_MQTT_QUEUE_MAX)
 _fleet_telemetry_profile_queue = queue.Queue(maxsize=1)
@@ -1925,25 +1925,37 @@ _aprs_sender_thread = None
 _aprs_sender_lock = threading.Lock()
 
 
+def _subscriber_daten_kopie(data):
+    """Erzeuge einen stabilen Snapshot für Live-Stream-Queues."""
+
+    if not isinstance(data, dict):
+        return data
+    try:
+        return copy.deepcopy(data)
+    except Exception:
+        return dict(data)
+
+
 def _subscriber_daten_senden(cache_id, data):
-    """Sende nur den neuesten Stand an Live-Streams."""
+    """Sende Live-Daten an die Frontend-Streams."""
 
     for ziel_queue in list(subscribers.get(cache_id, [])):
+        payload = _subscriber_daten_kopie(data)
         try:
             if getattr(ziel_queue, "maxsize", 0) > 0:
                 while ziel_queue.qsize() >= ziel_queue.maxsize:
                     ziel_queue.get_nowait()
             if hasattr(ziel_queue, "put_nowait"):
-                ziel_queue.put_nowait(data)
+                ziel_queue.put_nowait(payload)
             else:
-                ziel_queue.put(data)
+                ziel_queue.put(payload)
         except queue.Full:
             try:
                 ziel_queue.get_nowait()
                 if hasattr(ziel_queue, "put_nowait"):
-                    ziel_queue.put_nowait(data)
+                    ziel_queue.put_nowait(payload)
                 else:
-                    ziel_queue.put(data)
+                    ziel_queue.put(payload)
             except Exception:
                 pass
         except Exception:
@@ -3763,6 +3775,24 @@ def _fleet_telemetrie_shift(value):
     return None
 
 
+def _fleet_telemetrie_gueltige_zielkoordinaten(lat, lon):
+    """Liefere plausible Zielkoordinaten oder ``None`` bei Platzhalterwerten."""
+    from math import isfinite
+
+    null_epsilon = 1e-6
+    lat = _as_float(lat)
+    lon = _as_float(lon)
+    if lat is None or lon is None:
+        return None
+    if not isfinite(lat) or not isfinite(lon):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    if abs(lat) < null_epsilon or abs(lon) < null_epsilon:
+        return None
+    return lat, lon
+
+
 def _fleet_telemetrie_ladestatus(value):
     """Wandle Fleet-Telemetry-Ladestatus in vehicle_data-kompatible Werte um."""
     text = _fleet_telemetrie_norm_text(value)
@@ -4881,9 +4911,12 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         return True
     if field == "DestinationLocation":
         if isinstance(value, dict):
-            lat = value.get("latitude")
-            lon = value.get("longitude")
-            if lat is not None and lon is not None:
+            koordinaten = _fleet_telemetrie_gueltige_zielkoordinaten(
+                value.get("latitude"),
+                value.get("longitude"),
+            )
+            if koordinaten is not None:
+                lat, lon = koordinaten
                 drive["active_route_latitude"] = lat
                 drive["active_route_longitude"] = lon
             else:
