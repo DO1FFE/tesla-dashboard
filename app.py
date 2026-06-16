@@ -1650,8 +1650,8 @@ FLEET_TELEMETRY_MQTT_BATCH_SECONDS = max(
 FLEET_TELEMETRY_CACHE_WRITE_SECONDS = max(
     0.2, float(os.getenv("TESLA_FLEET_TELEMETRY_CACHE_WRITE_SECONDS", "1.0"))
 )
-FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX = max(
-    200, int(os.getenv("TESLA_FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX", "200"))
+FLEET_TELEMETRY_STREAM_QUEUE_MAX = max(
+    1, int(os.getenv("TESLA_FLEET_TELEMETRY_STREAM_QUEUE_MAX", "1"))
 )
 FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS = max(
     0.5, float(os.getenv("TESLA_FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS", "1.0"))
@@ -10095,7 +10095,7 @@ def stream_vehicle(vehicle_id="default"):
     ip = _client_ip()
 
     def gen():
-        q = eventlet_queue.Queue(maxsize=FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX)
+        q = eventlet_queue.Queue(maxsize=FLEET_TELEMETRY_STREAM_QUEUE_MAX)
         subscribers.setdefault(vehicle_id, []).append(q)
         last_path_len = 0
         try:

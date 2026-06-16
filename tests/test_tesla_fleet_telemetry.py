@@ -420,16 +420,16 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
     assert daten["vehicle_state"]["media_info"]["media_playback_status"] == "Playing"
 
 
-def test_fleet_telemetrie_mqtt_batch_default_ist_200():
+def test_fleet_telemetrie_mqtt_batch_default_ist_200_und_stream_latest_only():
     inhalt = pathlib.Path("app.py").read_text(encoding="utf-8")
 
     assert "FLEET_TELEMETRY_MQTT_BATCH_MAX = max(\n    200," in inhalt
     assert 'os.getenv("TESLA_FLEET_TELEMETRY_MQTT_BATCH_MAX", "200")' in inhalt
-    assert "FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX = max(\n    200," in inhalt
-    assert 'os.getenv("TESLA_FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX", "200")' in inhalt
+    assert "FLEET_TELEMETRY_STREAM_QUEUE_MAX = max(\n    1," in inhalt
+    assert 'os.getenv("TESLA_FLEET_TELEMETRY_STREAM_QUEUE_MAX", "1")' in inhalt
     assert "FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS = max(" in inhalt
     assert 'os.getenv("TESLA_FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS", "1.0")' in inhalt
-    assert "q = eventlet_queue.Queue(maxsize=FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX)" in inhalt
+    assert "q = eventlet_queue.Queue(maxsize=FLEET_TELEMETRY_STREAM_QUEUE_MAX)" in inhalt
 
 
 def test_stream_sendet_ungepuffert_und_unkomprimiert(monkeypatch):
@@ -484,7 +484,7 @@ def test_stream_liefert_subscriber_snapshot_direkt_aus(monkeypatch):
 
 
 def test_subscriber_stream_bekommt_stabile_snapshots(monkeypatch):
-    ziel_queue = app.queue.Queue(maxsize=app.FLEET_TELEMETRY_SUBSCRIBER_QUEUE_MAX)
+    ziel_queue = app.queue.Queue(maxsize=app.FLEET_TELEMETRY_STREAM_QUEUE_MAX)
     daten = {
         "drive_state": {"speed": 1},
         "path": [[51.0, 7.0]],
@@ -498,6 +498,18 @@ def test_subscriber_stream_bekommt_stabile_snapshots(monkeypatch):
     snapshot = ziel_queue.get_nowait()
     assert snapshot["drive_state"]["speed"] == 1
     assert snapshot["path"] == [[51.0, 7.0]]
+
+
+def test_subscriber_stream_ersetzt_rueckstand_durch_neuesten_snapshot(monkeypatch):
+    ziel_queue = app.queue.Queue(maxsize=1)
+    monkeypatch.setattr(app, "subscribers", {"veh-1": [ziel_queue]})
+
+    app._subscriber_daten_senden("veh-1", {"drive_state": {"speed": 1}})
+    app._subscriber_daten_senden("veh-1", {"drive_state": {"speed": 2}})
+
+    snapshot = ziel_queue.get_nowait()
+    assert snapshot["drive_state"]["speed"] == 2
+    assert ziel_queue.empty()
 
 
 def test_fleet_telemetrie_verwirft_ungueltige_navigationskoordinaten():

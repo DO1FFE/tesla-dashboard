@@ -16,7 +16,7 @@ var PARK_GRACE_MS = 5 * 60 * 1000;
 var PARKED_MAP_JITTER_METERS = 25;
 var ROUTENPUNKT_MAX_SPRUNG_METER = 500 * 1000;
 var NAVIGATIONS_ZIEL_NULL_EPSILON = 1e-6;
-var STREAM_WIEDERVERBINDUNG_MS = 1000;
+var STREAM_WIEDERVERBINDUNG_MS = 250;
 var streamWiederverbindungsTimer = null;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
