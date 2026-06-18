@@ -147,7 +147,9 @@ def test_routeline_wird_in_der_livekarte_verwendet():
     assert "function routeLineZuKartenPunkte(routeLine)" in js
     assert "dekodierePolyline(kodiertePolyline, 6)" in js
     assert "privacyModeAktiv ? [] : routeLineZuKartenPunkte(drive.active_route_line)" in js
-    assert "nutztRouteLine ? routenPunkte : [[mapLat, mapLng], [dLat, dLng]]" in js
+    assert "var zeigtNavigationsLinie = nutztRouteLine || (" in js
+    assert "var linienPunkte = nutztRouteLine ? routenPunkte : []" in js
+    assert "linienPunkte = [[mapLat, mapLng], [dLat, dLng]]" in js
     assert "nutztRouteLine ? kartenPunkteSignatur(routenPunkte) : 'luftlinie'" in js
     assert "color: '#00e5ff'" in js
 
@@ -158,7 +160,9 @@ def test_livekarte_verwirft_unplausible_routeline_spruenge():
     assert "ROUTENPUNKT_MAX_SPRUNG_METER" in js
     assert "function routenPunkteSindPlausibel" in js
     assert "entfernung > ROUTENPUNKT_MAX_SPRUNG_METER" in js
-    assert "routenPunkteSindPlausibel(routenPunkte, mapLat, mapLng, dLat, dLng)" in js
+    assert "routenPunkteSindPlausibel(" in js
+    assert "aktuellePositionPlausibel ? mapLat : null" in js
+    assert "zielKoordinatePlausibel ? dLat : null" in js
     assert "istPlausibleNavigationsZielKoordinate(dLat, dLng)" in js
 
 

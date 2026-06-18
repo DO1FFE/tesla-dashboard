@@ -1165,12 +1165,11 @@ function handleData(data) {
     }
     updateSuperchargerList(data);
 
-    // Show destination flag and route line if navigation is active
+    // Navigationsziel und empfangene RouteLine in der Karte anzeigen
     var dLat = null;
     var dLng = null;
     var zielKoordinatePlausibel = false;
     if (
-        drive.active_route_destination &&
         drive.active_route_latitude != null &&
         drive.active_route_longitude != null
     ) {
@@ -1183,20 +1182,29 @@ function handleData(data) {
             dLng = privatZiel.lng;
         }
     }
-    if (
-        drive.active_route_destination &&
-        zielKoordinatePlausibel &&
-        isFinite(mapLat) &&
-        isFinite(mapLng) &&
-        isFinite(dLat) &&
-        isFinite(dLng)
-    ) {
-        var routenPunkte = privacyModeAktiv ? [] : routeLineZuKartenPunkte(drive.active_route_line);
-        if (!routenPunkteSindPlausibel(routenPunkte, mapLat, mapLng, dLat, dLng)) {
+    var aktuellePositionPlausibel = isFinite(mapLat) && isFinite(mapLng);
+    var routenPunkte = privacyModeAktiv ? [] : routeLineZuKartenPunkte(drive.active_route_line);
+    if (routenPunkte.length > 1) {
+        if (!routenPunkteSindPlausibel(
+            routenPunkte,
+            aktuellePositionPlausibel ? mapLat : null,
+            aktuellePositionPlausibel ? mapLng : null,
+            zielKoordinatePlausibel ? dLat : null,
+            zielKoordinatePlausibel ? dLng : null
+        )) {
             routenPunkte = [];
         }
-        var nutztRouteLine = routenPunkte.length > 1;
-        var linienPunkte = nutztRouteLine ? routenPunkte : [[mapLat, mapLng], [dLat, dLng]];
+    }
+    var nutztRouteLine = routenPunkte.length > 1;
+    var zeigtNavigationsLinie = nutztRouteLine || (
+        zielKoordinatePlausibel &&
+        aktuellePositionPlausibel
+    );
+    if (zeigtNavigationsLinie || zielKoordinatePlausibel) {
+        var linienPunkte = nutztRouteLine ? routenPunkte : [];
+        if (!nutztRouteLine && zielKoordinatePlausibel && aktuellePositionPlausibel) {
+            linienPunkte = [[mapLat, mapLng], [dLat, dLng]];
+        }
         var linienOptionen = nutztRouteLine ? {
             color: '#00e5ff',
             opacity: 0.9,
@@ -1207,7 +1215,7 @@ function handleData(data) {
             weight: 2
         };
         var zielSignatur = [
-            drive.active_route_destination,
+            drive.active_route_destination || '',
             mapLat,
             mapLng,
             dLat,
@@ -1215,16 +1223,28 @@ function handleData(data) {
             nutztRouteLine ? kartenPunkteSignatur(routenPunkte) : 'luftlinie'
         ].join('|');
         if (zielSignatur !== letzteZielSignatur) {
-            if (!destMarker) {
-                destMarker = L.marker([dLat, dLng], { icon: flagIcon }).addTo(map);
-            } else {
-                destMarker.setLatLng([dLat, dLng]);
+            if (zielKoordinatePlausibel) {
+                if (!destMarker) {
+                    destMarker = L.marker([dLat, dLng], { icon: flagIcon }).addTo(map);
+                } else {
+                    destMarker.setLatLng([dLat, dLng]);
+                }
+            } else if (destMarker) {
+                map.removeLayer(destMarker);
+                destMarker = null;
             }
-            if (!destLine) {
-                destLine = L.polyline(linienPunkte, linienOptionen).addTo(map);
+            if (linienPunkte.length > 1) {
+                if (!destLine) {
+                    destLine = L.polyline(linienPunkte, linienOptionen).addTo(map);
+                } else {
+                    destLine.setLatLngs(linienPunkte);
+                    destLine.setStyle(linienOptionen);
+                }
             } else {
-                destLine.setLatLngs(linienPunkte);
-                destLine.setStyle(linienOptionen);
+                if (destLine) {
+                    map.removeLayer(destLine);
+                    destLine = null;
+                }
             }
             letzteZielSignatur = zielSignatur;
         }
