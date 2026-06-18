@@ -587,6 +587,28 @@ function fahrzeugIstGeparktFuerKarte(data, drive, speedKmh) {
     return status === 'Geparkt' || status === 'Ladevorgang' || gang === 'P';
 }
 
+function navigationFuerKarteAktiv(data, drive) {
+    drive = drive || {};
+    var gang = normalizeShiftState(drive.shift_state);
+    if (gang && gang !== 'P') {
+        return true;
+    }
+    var speedMph = Number(drive.speed);
+    if (isFinite(speedMph) && Math.abs(speedMph) > 0.5) {
+        return true;
+    }
+    var status = getStatus(data || {});
+    if (status === 'Geparkt' || status === 'Ladevorgang' || gang === 'P') {
+        return false;
+    }
+    return Boolean(
+        drive.active_route_line ||
+        drive.active_route_destination ||
+        drive.active_route_latitude != null ||
+        drive.active_route_longitude != null
+    );
+}
+
 function positionIstNeu(lat, lng, geparkt) {
     if (!isFinite(lat) || !isFinite(lng)) {
         return false;
@@ -1200,7 +1222,8 @@ function handleData(data) {
         zielKoordinatePlausibel &&
         aktuellePositionPlausibel
     );
-    if (zeigtNavigationsLinie || zielKoordinatePlausibel) {
+    var navigationInKarteAktiv = navigationFuerKarteAktiv(data, drive);
+    if (navigationInKarteAktiv && (zeigtNavigationsLinie || zielKoordinatePlausibel)) {
         var linienPunkte = nutztRouteLine ? routenPunkte : [];
         if (!nutztRouteLine && zielKoordinatePlausibel && aktuellePositionPlausibel) {
             linienPunkte = [[mapLat, mapLng], [dLat, dLng]];

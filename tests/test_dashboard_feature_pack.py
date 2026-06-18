@@ -166,6 +166,15 @@ def test_livekarte_verwirft_unplausible_routeline_spruenge():
     assert "istPlausibleNavigationsZielKoordinate(dLat, dLng)" in js
 
 
+def test_livekarte_loescht_navigation_bei_inaktivem_status():
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+
+    assert "function navigationFuerKarteAktiv(data, drive)" in js
+    assert "status === 'Geparkt' || status === 'Ladevorgang' || gang === 'P'" in js
+    assert "var navigationInKarteAktiv = navigationFuerKarteAktiv(data, drive)" in js
+    assert "navigationInKarteAktiv && (zeigtNavigationsLinie || zielKoordinatePlausibel)" in js
+
+
 def test_livepfad_wird_per_delta_an_leaflet_angehaengt():
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
 
