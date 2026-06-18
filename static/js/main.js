@@ -589,6 +589,9 @@ function fahrzeugIstGeparktFuerKarte(data, drive, speedKmh) {
 
 function navigationFuerKarteAktiv(data, drive) {
     drive = drive || {};
+    if (drive.active_route_active === false) {
+        return false;
+    }
     var gang = normalizeShiftState(drive.shift_state);
     if (gang && gang !== 'P') {
         return true;

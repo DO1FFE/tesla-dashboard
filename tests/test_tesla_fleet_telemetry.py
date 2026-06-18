@@ -381,6 +381,7 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
     assert daten["drive_state"]["active_route_energy_at_arrival"] == 42
     assert daten["drive_state"]["active_route_miles_to_arrival"] == 12.5
     assert daten["drive_state"]["active_route_line"] == "abcdef"
+    assert daten["drive_state"]["active_route_active"] is True
     assert daten["drive_state"]["gps_state"] == "GpsStateActive"
     assert daten["charge_state"]["charge_energy_added"] == 7.5
     assert daten["charge_state"]["charger_power"] == 11
@@ -639,6 +640,55 @@ def test_fleet_telemetrie_verwirft_nicht_endliche_navigationskoordinaten():
     drive = daten["drive_state"]
     assert "active_route_latitude" not in drive
     assert "active_route_longitude" not in drive
+
+
+def test_fleet_telemetrie_navigation_beendet_loescht_kartendaten():
+    daten = {
+        "drive_state": {
+            "active_route_active": True,
+            "active_route_destination": "Ziel",
+            "active_route_latitude": 51.1,
+            "active_route_longitude": 7.1,
+            "active_route_energy_at_arrival": 42,
+            "active_route_miles_to_arrival": 12.5,
+            "active_route_minutes_to_arrival": 18,
+            "active_route_traffic_minutes_delay": 3,
+            "active_route_line": "abcdef",
+        }
+    }
+
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "DestinationName",
+        None,
+        1234,
+    )
+
+    drive = daten["drive_state"]
+    for feld in app.FLEET_TELEMETRIE_NAVIGATIONSFELDER:
+        assert feld not in drive
+    assert drive["active_route_active"] is False
+    assert drive["active_route_ended_at"] == 1234
+
+
+def test_fleet_telemetrie_alte_routeline_nach_navigationsende_ignoriert():
+    daten = {
+        "drive_state": {
+            "active_route_active": False,
+            "active_route_ended_at": 1234,
+        }
+    }
+
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "RouteLine",
+        "abcdef",
+        1240,
+    )
+
+    drive = daten["drive_state"]
+    assert "active_route_line" not in drive
+    assert drive["active_route_active"] is False
 
 
 def test_fleet_telemetrie_reichert_tpms_und_spiegel_aus_rohdaten_an():

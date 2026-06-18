@@ -170,6 +170,7 @@ def test_livekarte_loescht_navigation_bei_inaktivem_status():
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
 
     assert "function navigationFuerKarteAktiv(data, drive)" in js
+    assert "drive.active_route_active === false" in js
     assert "status === 'Geparkt' || status === 'Ladevorgang' || gang === 'P'" in js
     assert "var navigationInKarteAktiv = navigationFuerKarteAktiv(data, drive)" in js
     assert "navigationInKarteAktiv && (zeigtNavigationsLinie || zielKoordinatePlausibel)" in js
