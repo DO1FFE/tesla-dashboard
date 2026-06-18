@@ -1684,9 +1684,7 @@ FLEET_TELEMETRIE_PROFILE_SYNC_CHECK_INTERVAL_SECONDS = max(
     10.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_SYNC_CHECK_INTERVAL_SECONDS", "60")),
 )
-FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER = frozenset({
-    "RouteLine",
-})
+FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER = frozenset()
 FLEET_TELEMETRIE_PROFILE_LIVE_1S_FELDER = frozenset({
     "BrakePedal",
     "DestinationLocation",
@@ -1726,6 +1724,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_10S_FELDER = frozenset({
     "Locked",
     "OutsideTemp",
     "RdWindow",
+    "RouteLine",
     "RpWindow",
 })
 FLEET_TELEMETRIE_PROFILE_LIVE_30S_FELDER = frozenset({
