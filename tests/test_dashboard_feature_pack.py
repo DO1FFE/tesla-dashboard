@@ -195,6 +195,10 @@ def test_livekarte_verwirft_unplausible_routeline_spruenge():
 
     assert "ROUTENPUNKT_MAX_SPRUNG_METER" in js
     assert "function routenPunkteSindPlausibel" in js
+    assert "function routenPunkteAusreisserAmRandEntfernen(points)" in js
+    assert "routenPunkte = routenPunkteAusreisserAmRandEntfernen(routenPunkte)" in js
+    assert "bereinigt.shift()" in js
+    assert "bereinigt.pop()" in js
     assert "entfernung > ROUTENPUNKT_MAX_SPRUNG_METER" in js
     assert "routenPunkteSindPlausibel(" in js
     assert "aktuellePositionPlausibel ? mapLat : null" in js

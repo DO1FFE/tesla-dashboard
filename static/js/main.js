@@ -574,6 +574,38 @@ function routenPunkteSindPlausibel(points, startLat, startLng, zielLat, zielLng)
     return true;
 }
 
+function routenPunkteAusreisserAmRandEntfernen(points) {
+    if (!Array.isArray(points)) {
+        return [];
+    }
+    var bereinigt = points.slice();
+
+    function punktAbstand(indexA, indexB) {
+        return entfernungMeter(
+            bereinigt[indexA][0],
+            bereinigt[indexA][1],
+            bereinigt[indexB][0],
+            bereinigt[indexB][1]
+        );
+    }
+
+    while (bereinigt.length > 2) {
+        var ersteLuecke = punktAbstand(0, 1);
+        if (ersteLuecke == null || ersteLuecke <= ROUTENPUNKT_MAX_SPRUNG_METER) {
+            break;
+        }
+        bereinigt.shift();
+    }
+    while (bereinigt.length > 2) {
+        var letzteLuecke = punktAbstand(bereinigt.length - 2, bereinigt.length - 1);
+        if (letzteLuecke == null || letzteLuecke <= ROUTENPUNKT_MAX_SPRUNG_METER) {
+            break;
+        }
+        bereinigt.pop();
+    }
+    return bereinigt;
+}
+
 function fahrzeugIstGeparktFuerKarte(data, drive, speedKmh) {
     drive = drive || {};
     var gang = normalizeShiftState(drive.shift_state);
@@ -1200,6 +1232,7 @@ function handleData(data) {
     var aktuellePositionPlausibel = isFinite(mapLat) && isFinite(mapLng);
     var routenPunkte = privacyModeAktiv ? [] : routeLineZuKartenPunkte(drive.active_route_line);
     if (routenPunkte.length > 1) {
+        routenPunkte = routenPunkteAusreisserAmRandEntfernen(routenPunkte);
         if (!routenPunkteSindPlausibel(
             routenPunkte,
             aktuellePositionPlausibel ? mapLat : null,
