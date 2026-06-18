@@ -1256,7 +1256,10 @@ function handleData(data) {
         }
         var linienOptionen = nutztRouteLine ? {
             color: '#00e5ff',
+            lineCap: 'round',
+            lineJoin: 'round',
             opacity: 0.9,
+            smoothFactor: 0,
             weight: 4
         } : {
             color: 'red',

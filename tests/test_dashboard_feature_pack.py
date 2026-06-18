@@ -188,6 +188,8 @@ def test_routeline_wird_in_der_livekarte_verwendet():
     assert "linienPunkte = [[mapLat, mapLng], [dLat, dLng]]" in js
     assert "nutztRouteLine ? kartenPunkteSignatur(routenPunkte) : 'luftlinie'" in js
     assert "color: '#00e5ff'" in js
+    assert "smoothFactor: 0" in js
+    assert "lineJoin: 'round'" in js
 
 
 def test_livekarte_verwirft_unplausible_routeline_spruenge():
