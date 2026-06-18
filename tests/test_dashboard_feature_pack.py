@@ -50,6 +50,42 @@ def test_api_daten_bleiben_trotz_privatmodus_real(monkeypatch):
     assert "privacy_radius_m" not in payload
 
 
+def test_apiliste_aktualisiert_vor_ausgabe(monkeypatch, tmp_path):
+    erfasst = {}
+
+    monkeypatch.setattr(app_module, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(app_module, "_start_thread", lambda vehicle_id: None)
+    monkeypatch.setattr(app_module, "_fetch_data_once", lambda vehicle_id: {})
+    monkeypatch.setattr(
+        app_module,
+        "latest_data",
+        {
+            "default": {
+                "drive_state": {"shift_state": "P"},
+                "path": [[51.0, 7.0]],
+            },
+        },
+    )
+
+    def fake_update_api_list(data):
+        erfasst["data"] = data
+        (tmp_path / "api-liste.txt").write_text(
+            "drive_state.shift_state: P\n"
+            "path: [[51.0, 7.0]]\n",
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(app_module, "update_api_list", fake_update_api_list)
+
+    response = app.test_client().get("/apiliste")
+
+    assert response.status_code == 200
+    assert erfasst["data"]["drive_state"]["shift_state"] == "P"
+    text = response.get_data(as_text=True)
+    assert "drive_state.shift_state: P" in text
+    assert "path:" not in text
+
+
 def test_stream_fehlerpfad_setzt_karte_nicht_auf_default():
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
     start = js.index("eventSource.onerror = function()")

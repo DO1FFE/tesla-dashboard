@@ -1140,6 +1140,20 @@ def update_api_list(data, filename=os.path.join(DATA_DIR, "api-liste.txt")):
         pass
 
 
+def _api_liste_aus_aktuellen_daten_aktualisieren(cache_id="default"):
+    """Aktualisiere die API-Liste aus dem aktuellen Dashboard-Datensatz."""
+
+    try:
+        _start_thread(cache_id)
+        data = latest_data.get(cache_id)
+        if data is None:
+            data = _fetch_data_once(cache_id)
+        if isinstance(data, dict):
+            update_api_list(data)
+    except Exception:
+        pass
+
+
 # Communication with the Tesla API is logged via ``log_api_data`` and the
 # ``teslapy``/``urllib3`` loggers. Requests to this web application are not
 # recorded in ``api.log``.
@@ -11014,6 +11028,7 @@ def api_errors_route():
 @app.route("/apiliste")
 def api_list_file():
     """Return the aggregated API key list as plain text."""
+    _api_liste_aus_aktuellen_daten_aktualisieren()
     try:
         with open(os.path.join(DATA_DIR, "api-liste.txt"), "r", encoding="utf-8") as f:
             lines = [
