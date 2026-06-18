@@ -5114,6 +5114,32 @@ def _fleet_telemetrie_navigation_hat_zielkern(drive):
     )
 
 
+def _fleet_telemetrie_navigation_cache_bereinigen(data):
+    """Bereinige alte Navigationsreste aus geladenen Cache-Daten."""
+
+    if not isinstance(data, dict):
+        return
+    drive = data.get("drive_state")
+    if not isinstance(drive, dict):
+        return
+    if drive.get("active_route_active") is True:
+        return
+    if _fleet_telemetrie_navigation_hat_zielkern(drive):
+        return
+    hat_alte_navigation = any(
+        drive.get(feld) is not None
+        for feld in FLEET_TELEMETRIE_NAVIGATIONSFELDER
+    )
+    if not hat_alte_navigation:
+        return
+    timestamp_ms = (
+        _as_float(drive.get("timestamp"))
+        or _as_float(data.get("timestamp"))
+        or int(time.time() * 1000)
+    )
+    _fleet_telemetrie_navigation_beenden(drive, int(timestamp_ms))
+
+
 def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
     """Schreibe ein einzelnes Fleet-Telemetry-Feld in die Dashboard-Struktur."""
     value = _fleet_telemetrie_wert(value)
@@ -5807,6 +5833,7 @@ def _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data):
 
     _fleet_telemetrie_rohdaten_anreichern(data)
     _fleet_telemetrie_ladeinformationen_aktualisieren(cache_id, data)
+    _fleet_telemetrie_navigation_cache_bereinigen(data)
 
     try:
         track_park_time(data)

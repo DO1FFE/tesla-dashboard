@@ -592,23 +592,13 @@ function navigationFuerKarteAktiv(data, drive) {
     if (drive.active_route_active === false) {
         return false;
     }
-    var gang = normalizeShiftState(drive.shift_state);
-    if (gang && gang !== 'P') {
+    if (drive.active_route_active === true) {
         return true;
-    }
-    var speedMph = Number(drive.speed);
-    if (isFinite(speedMph) && Math.abs(speedMph) > 0.5) {
-        return true;
-    }
-    var status = getStatus(data || {});
-    if (status === 'Geparkt' || status === 'Ladevorgang' || gang === 'P') {
-        return false;
     }
     return Boolean(
-        drive.active_route_line ||
         drive.active_route_destination ||
-        drive.active_route_latitude != null ||
-        drive.active_route_longitude != null
+        drive.active_route_miles_to_arrival != null ||
+        drive.active_route_minutes_to_arrival != null
     );
 }
 

@@ -171,7 +171,8 @@ def test_livekarte_loescht_navigation_bei_inaktivem_status():
 
     assert "function navigationFuerKarteAktiv(data, drive)" in js
     assert "drive.active_route_active === false" in js
-    assert "status === 'Geparkt' || status === 'Ladevorgang' || gang === 'P'" in js
+    assert "drive.active_route_active === true" in js
+    assert "drive.active_route_line ||" not in js
     assert "var navigationInKarteAktiv = navigationFuerKarteAktiv(data, drive)" in js
     assert "navigationInKarteAktiv && (zeigtNavigationsLinie || zielKoordinatePlausibel)" in js
 

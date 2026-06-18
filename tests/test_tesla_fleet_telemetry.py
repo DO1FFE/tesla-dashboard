@@ -691,6 +691,27 @@ def test_fleet_telemetrie_alte_routeline_nach_navigationsende_ignoriert():
     assert drive["active_route_active"] is False
 
 
+def test_fleet_telemetrie_bereinigt_alte_navigation_aus_cache():
+    daten = {
+        "timestamp": 1200,
+        "drive_state": {
+            "timestamp": 1234,
+            "active_route_line": "abcdef",
+            "active_route_latitude": 51.1,
+            "active_route_longitude": 7.1,
+        },
+    }
+
+    app._fleet_telemetrie_navigation_cache_bereinigen(daten)
+
+    drive = daten["drive_state"]
+    assert "active_route_line" not in drive
+    assert "active_route_latitude" not in drive
+    assert "active_route_longitude" not in drive
+    assert drive["active_route_active"] is False
+    assert drive["active_route_ended_at"] == 1234
+
+
 def test_fleet_telemetrie_reichert_tpms_und_spiegel_aus_rohdaten_an():
     daten = {
         "fleet_telemetry_raw": {
