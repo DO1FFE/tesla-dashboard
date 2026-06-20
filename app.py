@@ -9465,8 +9465,6 @@ def _fleet_telemetrie_fahrzeugliste(telemetrie_aktiv_erforderlich=True):
         if not isinstance(vehicle_state, dict):
             vehicle_state = {}
         vehicle_id = data.get("id_s")
-        if vehicle_id in (None, "") and cache_id != "default":
-            vehicle_id = cache_id
         display_name = data.get("display_name") or vehicle_state.get("vehicle_name")
         add_vehicle(
             vehicle_id,
@@ -9497,6 +9495,77 @@ def _fleet_telemetrie_fahrzeugliste(telemetrie_aktiv_erforderlich=True):
         _default_vehicle_id = vehicles[0]["id"]
 
     return vehicles
+
+
+def _bekannte_fahrzeug_ids():
+    """Ermittle bekannte Fahrzeug-IDs ohne freie Cache-Verzeichnisnamen."""
+    ids = {"default"}
+
+    def add_id(value):
+        value = str(value or "").strip()
+        if value:
+            ids.add(value)
+
+    def hat_fahrzeugdaten(data):
+        if not isinstance(data, dict):
+            return False
+        for key in ("id_s", "id", "vehicle_id", "vin"):
+            if data.get(key) not in (None, ""):
+                return True
+        for key in ("drive_state", "charge_state", "vehicle_state", "climate_state"):
+            value = data.get(key)
+            if isinstance(value, dict) and value:
+                return True
+        return bool(
+            data.get("fleet_telemetry_updated_at")
+            or data.get("fleet_telemetry_received_at")
+        )
+
+    if _default_vehicle_id is not None:
+        add_id(_default_vehicle_id)
+
+    for vehicle in _fleet_telemetrie_fahrzeuge():
+        for key in ("id_s", "id", "vehicle_id"):
+            add_id(vehicle.get(key))
+
+    cached_default = _load_cached("default")
+    if isinstance(cached_default, dict):
+        for key in ("id_s", "id", "vehicle_id"):
+            add_id(cached_default.get(key))
+
+    for data in list(latest_data.values()):
+        if not isinstance(data, dict):
+            continue
+        explizite_ids = [
+            data.get("id_s"),
+            data.get("id"),
+            data.get("vehicle_id"),
+        ]
+        if any(value not in (None, "") for value in explizite_ids):
+            for value in explizite_ids:
+                add_id(value)
+
+    for cache_id, data in list(latest_data.items()):
+        if hat_fahrzeugdaten(data):
+            add_id(cache_id)
+
+    return ids
+
+
+def _fahrzeug_id_bekannt(vehicle_id):
+    """Prüfe, ob ein API-Fahrzeugpfad zu einem bekannten Fahrzeug gehört."""
+    vehicle_id = str(vehicle_id or "default").strip()
+    if not vehicle_id:
+        vehicle_id = "default"
+    return vehicle_id in _bekannte_fahrzeug_ids()
+
+
+def _unbekanntes_fahrzeug_response(vehicle_id):
+    """Antworte auf fremde oder gescannte Fahrzeug-IDs ohne Cache-Nebenwirkung."""
+    return jsonify({
+        "error": "Unbekanntes Fahrzeug",
+        "vehicle_id": str(vehicle_id or ""),
+    }), 404
 
 
 def reverse_geocode(lat, lon, vehicle_id=None):
@@ -10333,6 +10402,8 @@ def api_data():
 
 @app.route("/api/data/<vehicle_id>")
 def api_data_vehicle(vehicle_id):
+    if not _fahrzeug_id_bekannt(vehicle_id):
+        return _unbekanntes_fahrzeug_response(vehicle_id)
     _start_thread(vehicle_id)
     data = latest_data.get(vehicle_id)
     if data is None:
@@ -10496,6 +10567,8 @@ def api_vehicles():
 @app.route("/api/state/<vehicle_id>")
 def api_state(vehicle_id=None):
     """Return the last known state of the vehicle."""
+    if vehicle_id is not None and not _fahrzeug_id_bekannt(vehicle_id):
+        return _unbekanntes_fahrzeug_response(vehicle_id)
     state_info = get_vehicle_state(vehicle_id)
     return jsonify(state_info)
 
@@ -10625,6 +10698,8 @@ def api_announcement():
 def api_alarm_state(vehicle_id=None):
     """Return the current alarm state."""
     vid = vehicle_id or "default"
+    if not _fahrzeug_id_bekannt(vid):
+        return _unbekanntes_fahrzeug_response(vid)
     _start_thread(vid)
     data = latest_data.get(vid)
     if data is None:

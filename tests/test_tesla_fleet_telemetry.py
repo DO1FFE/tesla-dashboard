@@ -1131,6 +1131,45 @@ def test_fahrzeugliste_dedupliziert_fleet_alias_ids(monkeypatch):
     assert fahrzeuge == [{"id": "fleet-id", "display_name": "Testauto"}]
 
 
+def test_fahrzeugliste_ignoriert_fremde_latest_data_cache_keys(monkeypatch):
+    monkeypatch.setattr(app, "_fleet_telemetrie_aktiv", lambda: True)
+    monkeypatch.setattr(app, "_default_vehicle_id", None)
+    monkeypatch.setattr(app, "_load_cached", lambda vehicle_id: None)
+    monkeypatch.setattr(app, "_fleet_telemetrie_fahrzeuge", lambda: [{
+        "vin": "TESTVIN",
+        "id_s": "fleet-id",
+        "display_name": "Testauto",
+    }])
+    monkeypatch.setattr(
+        app,
+        "latest_data",
+        {
+            "wp-config.env": {"state": None},
+            "fleet-id": {"id_s": "fleet-id", "display_name": "Testauto"},
+        },
+    )
+
+    fahrzeuge = app.get_vehicle_list()
+
+    assert fahrzeuge == [{"id": "fleet-id", "display_name": "Testauto"}]
+
+
+def test_api_data_unbekanntes_fahrzeug_erzeugt_keinen_cache_ordner(monkeypatch, tmp_path):
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(app, "_default_vehicle_id", None)
+    monkeypatch.setattr(app, "_fleet_telemetrie_fahrzeuge", lambda: [{
+        "vin": "TESTVIN",
+        "id_s": "fleet-id",
+    }])
+    monkeypatch.setattr(app, "latest_data", {})
+
+    response = app.app.test_client().get("/api/data/wp-config.env")
+
+    assert response.status_code == 404
+    assert response.get_json()["error"] == "Unbekanntes Fahrzeug"
+    assert not (tmp_path / "wp-config.env").exists()
+
+
 def test_fleet_telemetrie_profile_erkennt_zielzustand():
     assert app._fleet_telemetrie_profile_ziel({
         "charge_state": {"charging_state": "Charging"},
