@@ -178,8 +178,14 @@
                     <rect id="inside-level" x="11" y="45" width="8" height="0" class="level" />
                     <circle id="inside-bulb" cx="15" cy="50" r="9" class="bulb" />
                 </svg>
-                <div id="inside-temp-value" class="label" aria-live="polite">Innen: -- °C</div>
-                <div id="desired-temp" class="label" title="Wunschtemperatur" aria-live="polite">Wunsch: -- °C</div>
+                <div id="inside-temp-value" class="label temperatur-zeile" aria-live="polite">
+                    <span class="temperatur-name">Innen:</span>
+                    <span class="temperatur-wert">-- °C</span>
+                </div>
+                <div id="desired-temp" class="label temperatur-zeile" title="Wunschtemperatur" aria-live="polite">
+                    <span class="temperatur-name">Wunsch:</span>
+                    <span class="temperatur-wert">-- °C</span>
+                </div>
             </div>
             <div id="thermometer-outside" class="thermometer">
                 <svg width="30" height="70" viewBox="0 0 30 60">
@@ -195,7 +201,7 @@
                     <rect id="battery-level" x="11" y="45" width="8" height="0" class="level" />
                     <circle id="battery-bulb" cx="15" cy="50" r="9" class="bulb" />
                 </svg>
-                <div id="battery-temp-value" class="label" aria-live="polite">Batterie: Ø -- °C</div>
+                <div id="battery-temp-value" class="label" aria-live="polite">Batterie Ø: -- °C</div>
                 <div id="battery-temp-minmax" class="label thermometer-subvalue" aria-live="polite">
                     <span id="battery-temp-min-value">Min: -- °C</span>
                     <span id="battery-temp-max-value">Max: -- °C</span>

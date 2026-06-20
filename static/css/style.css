@@ -1378,6 +1378,22 @@ select {
   white-space: nowrap;
 }
 
+#inside-temp-value.temperatur-zeile,
+#desired-temp.temperatur-zeile {
+  display: grid;
+  grid-template-columns: 4.6em 4.4em;
+  width: 9em;
+  text-align: initial;
+}
+
+#thermometers .temperatur-name {
+  text-align: right;
+}
+
+#thermometers .temperatur-wert {
+  text-align: left;
+}
+
 #thermometers .thermometer-subvalue {
   font-size: 0.74em;
   line-height: 1.15;

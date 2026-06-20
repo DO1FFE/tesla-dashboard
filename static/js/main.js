@@ -1558,14 +1558,14 @@ function updateCabinProtection(value) {
 
 function updateDesiredTemp(temp) {
     if (temp == null || isNaN(temp)) {
+        setzeTemperaturAnzeige('#desired-temp', 'Wunsch', '-- \u00B0C');
         $('#desired-temp')
-            .text('Wunsch: -- \u00B0C')
             .attr('title', 'Wunschtemperatur')
             .attr('aria-label', 'Wunschtemperatur -- \u00B0C');
         return;
     }
+    setzeTemperaturAnzeige('#desired-temp', 'Wunsch', temp.toFixed(1) + ' \u00B0C');
     $('#desired-temp')
-        .text('Wunsch: ' + temp.toFixed(1) + ' \u00B0C')
         .attr('title', 'Wunschtemperatur')
         .attr('aria-label', 'Wunschtemperatur ' + temp.toFixed(1) + ' \u00B0C');
 }
@@ -2221,6 +2221,21 @@ function updateOdometer(value) {
     $('#odometer-value').text(formatted + ' km');
 }
 
+function setzeTemperaturAnzeige(ziel, name, wert) {
+    var $ziel = ziel && ziel.jquery ? ziel : $(ziel);
+    if (!$ziel.length) {
+        return;
+    }
+    var $name = $ziel.find('.temperatur-name');
+    var $wert = $ziel.find('.temperatur-wert');
+    if ($name.length && $wert.length) {
+        $name.text(name + ':');
+        $wert.text(wert);
+        return;
+    }
+    $ziel.text(name + ': ' + wert);
+}
+
 function updateThermometers(inside, outside, battery, batteryMin, batteryMax) {
     var range = MAX_TEMP - MIN_TEMP;
     if (battery != null && !isNaN(battery)) {
@@ -2251,10 +2266,11 @@ function updateThermometers(inside, outside, battery, batteryMin, batteryMax) {
         $level.attr('y', y).attr('height', h).css('fill', color);
         $bulb.css('fill', color);
         var label = missing ? '-.- °C' : temp.toFixed(1) + ' °C';
+        var anzeigename = labelPrefix;
         if (prefix === 'battery') {
-            label = 'Ø ' + label;
+            anzeigename += ' Ø';
         }
-        $label.text(labelPrefix + ': ' + label);
+        setzeTemperaturAnzeige($label, anzeigename, label);
     }
     set('inside', inside, 'Innen');
     set('outside', outside, 'Außen');

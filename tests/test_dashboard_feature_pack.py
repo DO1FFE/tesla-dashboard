@@ -164,16 +164,33 @@ def test_batterietemperatur_zeigt_durchschnitt_minimum_und_maximum():
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
     css = pathlib.Path("static/css/style.css").read_text(encoding="utf-8")
 
-    assert "Batterie: Ø -- °C" in html
+    assert "Batterie Ø: -- °C" in html
     assert 'id="battery-temp-minmax"' in html
     assert 'id="battery-temp-min-value"' in html
     assert 'id="battery-temp-max-value"' in html
     assert "charge.module_temp_min" in js
     assert "charge.module_temp_max" in js
-    assert "'Ø ' + label" in js
+    assert "anzeigename += ' Ø'" in js
     assert "aktualisiereBatterieTemperaturGrenzen" in js
     assert "Batterietemperatur Min/Max" in js
     assert "#battery-temp-minmax" in css
+
+
+def test_innen_und_wunschtemperatur_richten_doppelpunkte_aus():
+    html = pathlib.Path("templates/index.html").read_text(encoding="utf-8")
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+    css = pathlib.Path("static/css/style.css").read_text(encoding="utf-8")
+
+    assert 'id="inside-temp-value" class="label temperatur-zeile"' in html
+    assert 'id="desired-temp" class="label temperatur-zeile"' in html
+    assert '<span class="temperatur-name">Innen:</span>' in html
+    assert '<span class="temperatur-name">Wunsch:</span>' in html
+    assert "function setzeTemperaturAnzeige" in js
+    assert "setzeTemperaturAnzeige('#desired-temp', 'Wunsch'" in js
+    assert "setzeTemperaturAnzeige($label, anzeigename, label)" in js
+    assert "#inside-temp-value.temperatur-zeile" in css
+    assert "#desired-temp.temperatur-zeile" in css
+    assert "grid-template-columns: 4.6em 4.4em" in css
 
 
 def test_pedalposition_ist_unter_dem_tacho_eingebunden():
