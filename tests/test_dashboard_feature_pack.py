@@ -164,12 +164,12 @@ def test_batterietemperatur_zeigt_durchschnitt_minimum_und_maximum():
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
     css = pathlib.Path("static/css/style.css").read_text(encoding="utf-8")
 
-    assert '<span class="temperatur-name">Batterie Ø:</span>' in html
+    assert '<span class="temperatur-name">Batterie Ø:&nbsp;</span>' in html
     assert 'id="battery-temp-minmax"' in html
     assert 'id="battery-temp-min-value" class="temperatur-zeile"' in html
     assert 'id="battery-temp-max-value" class="temperatur-zeile"' in html
-    assert '<span class="temperatur-name">Min:</span>' in html
-    assert '<span class="temperatur-name">Max:</span>' in html
+    assert '<span class="temperatur-name">Min:&nbsp;</span>' in html
+    assert '<span class="temperatur-name">Max:&nbsp;</span>' in html
     assert "charge.module_temp_min" in js
     assert "charge.module_temp_max" in js
     assert "anzeigename += ' Ø'" in js
@@ -189,11 +189,12 @@ def test_innen_und_wunschtemperatur_richten_doppelpunkte_aus():
 
     assert 'id="inside-temp-value" class="label temperatur-zeile"' in html
     assert 'id="desired-temp" class="label temperatur-zeile"' in html
-    assert '<span class="temperatur-name">Innen:</span>' in html
-    assert '<span class="temperatur-name">Wunsch:</span>' in html
+    assert '<span class="temperatur-name">Innen:&nbsp;</span>' in html
+    assert '<span class="temperatur-name">Wunsch:&nbsp;</span>' in html
     assert 'id="outside-temp-value" class="label temperatur-zeile"' in html
-    assert '<span class="temperatur-name">Außen:</span>' in html
+    assert '<span class="temperatur-name">Außen:&nbsp;</span>' in html
     assert "function setzeTemperaturAnzeige" in js
+    assert "name + ':\\u00A0'" in js
     assert "setzeTemperaturAnzeige('#desired-temp', 'Wunsch'" in js
     assert "setzeTemperaturAnzeige($label, anzeigename, label)" in js
     assert "#thermometers .temperatur-zeile" in css

@@ -2229,7 +2229,7 @@ function setzeTemperaturAnzeige(ziel, name, wert) {
     var $name = $ziel.find('.temperatur-name');
     var $wert = $ziel.find('.temperatur-wert');
     if ($name.length && $wert.length) {
-        $name.text(name + ':');
+        $name.text(name + ':\u00A0');
         $wert.text(wert);
         return;
     }
