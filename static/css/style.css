@@ -1037,10 +1037,22 @@ select {
 #inside-temp-value,
 #desired-temp,
 #outside-temp-value,
-#battery-temp-value {
+#battery-temp-value,
+#battery-temp-minmax {
   display: block;
   width: 9em;
   text-align: right;
+}
+
+#battery-temp-minmax {
+  color: #d8d8d8;
+  font-size: 0.74em;
+  line-height: 1.15;
+  margin-top: 0;
+}
+
+#battery-temp-minmax span {
+  display: block;
 }
 
 #gear-shift div {
@@ -1364,6 +1376,12 @@ select {
   text-align: right;
   align-self: center;
   white-space: nowrap;
+}
+
+#thermometers .thermometer-subvalue {
+  font-size: 0.74em;
+  line-height: 1.15;
+  margin-top: 0;
 }
 
 #thermometers .tube {

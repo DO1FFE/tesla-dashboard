@@ -1122,7 +1122,13 @@ function handleData(data) {
     updateChargingInfo(charge, data);
     updateLadeplanungInfo(charge, drive, data);
     updateTechnischeDetails(charge);
-    updateThermometers(climate.inside_temp, climate.outside_temp, charge.battery_temp);
+    updateThermometers(
+        climate.inside_temp,
+        climate.outside_temp,
+        charge.battery_temp,
+        charge.module_temp_min,
+        charge.module_temp_max
+    );
     updateClimateStatus(climate.is_climate_on);
     updateClimateMode(climate.climate_keeper_mode);
     updateCabinProtection(climate.cabin_overheat_protection);
@@ -2215,7 +2221,7 @@ function updateOdometer(value) {
     $('#odometer-value').text(formatted + ' km');
 }
 
-function updateThermometers(inside, outside, battery) {
+function updateThermometers(inside, outside, battery, batteryMin, batteryMax) {
     var range = MAX_TEMP - MIN_TEMP;
     if (battery != null && !isNaN(battery)) {
         letzteBatterieTemperatur = battery;
@@ -2245,11 +2251,42 @@ function updateThermometers(inside, outside, battery) {
         $level.attr('y', y).attr('height', h).css('fill', color);
         $bulb.css('fill', color);
         var label = missing ? '-.- °C' : temp.toFixed(1) + ' °C';
+        if (prefix === 'battery') {
+            label = 'Ø ' + label;
+        }
         $label.text(labelPrefix + ': ' + label);
     }
     set('inside', inside, 'Innen');
     set('outside', outside, 'Außen');
     set('battery', battery, 'Batterie');
+    aktualisiereBatterieTemperaturGrenzen(batteryMin, batteryMax);
+}
+
+function aktualisiereBatterieTemperaturGrenzen(minimum, maximum) {
+    var minWert = parseNumber(minimum);
+    var maxWert = parseNumber(maximum);
+    if (minWert != null) {
+        letzteBatterieTemperaturMinimum = minWert;
+    } else {
+        minWert = letzteBatterieTemperaturMinimum;
+    }
+    if (maxWert != null) {
+        letzteBatterieTemperaturMaximum = maxWert;
+    } else {
+        maxWert = letzteBatterieTemperaturMaximum;
+    }
+    if (minWert != null && maxWert != null && minWert > maxWert) {
+        var tausch = minWert;
+        minWert = maxWert;
+        maxWert = tausch;
+    }
+    var minText = minWert == null ? '-- °C' : minWert.toFixed(1) + ' °C';
+    var maxText = maxWert == null ? '-- °C' : maxWert.toFixed(1) + ' °C';
+    $('#battery-temp-min-value').text('Min: ' + minText);
+    $('#battery-temp-max-value').text('Max: ' + maxText);
+    $('#battery-temp-minmax')
+        .attr('title', 'Batterietemperatur Min/Max: ' + minText + ' / ' + maxText)
+        .attr('aria-label', 'Batterietemperatur Minimum ' + minText + ', Maximum ' + maxText);
 }
 
 function updateBatteryIndicator(level, rangeMiles, chargingState, heaterOn) {
@@ -2289,6 +2326,8 @@ var lastChargeSessionStartMs = null;
 var lastChargingState = null;
 var lastChargingInfoHtml = null;
 var letzteBatterieTemperatur = null;
+var letzteBatterieTemperaturMinimum = null;
+var letzteBatterieTemperaturMaximum = null;
 var letzteTechnischeDetailsHtml = null;
 
 function parseNumber(value) {

@@ -159,6 +159,23 @@ def test_technische_packdetails_sind_in_ui_eingebunden():
     assert "charge.pack_power" in js
 
 
+def test_batterietemperatur_zeigt_durchschnitt_minimum_und_maximum():
+    html = pathlib.Path("templates/index.html").read_text(encoding="utf-8")
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+    css = pathlib.Path("static/css/style.css").read_text(encoding="utf-8")
+
+    assert "Batterie: Ø -- °C" in html
+    assert 'id="battery-temp-minmax"' in html
+    assert 'id="battery-temp-min-value"' in html
+    assert 'id="battery-temp-max-value"' in html
+    assert "charge.module_temp_min" in js
+    assert "charge.module_temp_max" in js
+    assert "'Ø ' + label" in js
+    assert "aktualisiereBatterieTemperaturGrenzen" in js
+    assert "Batterietemperatur Min/Max" in js
+    assert "#battery-temp-minmax" in css
+
+
 def test_pedalposition_ist_unter_dem_tacho_eingebunden():
     html = pathlib.Path("templates/index.html").read_text(encoding="utf-8")
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
