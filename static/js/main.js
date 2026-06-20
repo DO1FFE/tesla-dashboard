@@ -2298,8 +2298,8 @@ function aktualisiereBatterieTemperaturGrenzen(minimum, maximum) {
     }
     var minText = minWert == null ? '-- °C' : minWert.toFixed(1) + ' °C';
     var maxText = maxWert == null ? '-- °C' : maxWert.toFixed(1) + ' °C';
-    $('#battery-temp-min-value').text('Min: ' + minText);
-    $('#battery-temp-max-value').text('Max: ' + maxText);
+    setzeTemperaturAnzeige('#battery-temp-min-value', 'Min', minText);
+    setzeTemperaturAnzeige('#battery-temp-max-value', 'Max', maxText);
     $('#battery-temp-minmax')
         .attr('title', 'Batterietemperatur Min/Max: ' + minText + ' / ' + maxText)
         .attr('aria-label', 'Batterietemperatur Minimum ' + minText + ', Maximum ' + maxText);

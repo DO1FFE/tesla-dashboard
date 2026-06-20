@@ -164,16 +164,22 @@ def test_batterietemperatur_zeigt_durchschnitt_minimum_und_maximum():
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
     css = pathlib.Path("static/css/style.css").read_text(encoding="utf-8")
 
-    assert "Batterie Ø: -- °C" in html
+    assert '<span class="temperatur-name">Batterie Ø:</span>' in html
     assert 'id="battery-temp-minmax"' in html
-    assert 'id="battery-temp-min-value"' in html
-    assert 'id="battery-temp-max-value"' in html
+    assert 'id="battery-temp-min-value" class="temperatur-zeile"' in html
+    assert 'id="battery-temp-max-value" class="temperatur-zeile"' in html
+    assert '<span class="temperatur-name">Min:</span>' in html
+    assert '<span class="temperatur-name">Max:</span>' in html
     assert "charge.module_temp_min" in js
     assert "charge.module_temp_max" in js
     assert "anzeigename += ' Ø'" in js
     assert "aktualisiereBatterieTemperaturGrenzen" in js
+    assert "setzeTemperaturAnzeige('#battery-temp-min-value', 'Min', minText)" in js
+    assert "setzeTemperaturAnzeige('#battery-temp-max-value', 'Max', maxText)" in js
     assert "Batterietemperatur Min/Max" in js
     assert "#battery-temp-minmax" in css
+    assert "#battery-temp-value.temperatur-zeile" in css
+    assert "#battery-temp-minmax .temperatur-zeile" in css
 
 
 def test_innen_und_wunschtemperatur_richten_doppelpunkte_aus():
@@ -185,11 +191,12 @@ def test_innen_und_wunschtemperatur_richten_doppelpunkte_aus():
     assert 'id="desired-temp" class="label temperatur-zeile"' in html
     assert '<span class="temperatur-name">Innen:</span>' in html
     assert '<span class="temperatur-name">Wunsch:</span>' in html
+    assert 'id="outside-temp-value" class="label temperatur-zeile"' in html
+    assert '<span class="temperatur-name">Außen:</span>' in html
     assert "function setzeTemperaturAnzeige" in js
     assert "setzeTemperaturAnzeige('#desired-temp', 'Wunsch'" in js
     assert "setzeTemperaturAnzeige($label, anzeigename, label)" in js
-    assert "#inside-temp-value.temperatur-zeile" in css
-    assert "#desired-temp.temperatur-zeile" in css
+    assert "#thermometers .temperatur-zeile" in css
     assert "grid-template-columns: 4.6em 4.4em" in css
 
 

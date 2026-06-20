@@ -1051,7 +1051,7 @@ select {
   margin-top: 0;
 }
 
-#battery-temp-minmax span {
+#battery-temp-minmax > span {
   display: block;
 }
 
@@ -1378,12 +1378,17 @@ select {
   white-space: nowrap;
 }
 
-#inside-temp-value.temperatur-zeile,
-#desired-temp.temperatur-zeile {
+#thermometers .temperatur-zeile {
   display: grid;
   grid-template-columns: 4.6em 4.4em;
   width: 9em;
   text-align: initial;
+}
+
+#battery-temp-value.temperatur-zeile,
+#battery-temp-minmax .temperatur-zeile {
+  grid-template-columns: 5.8em 4.2em;
+  width: 10em;
 }
 
 #thermometers .temperatur-name {
