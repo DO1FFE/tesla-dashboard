@@ -1,3 +1,4 @@
+import base64
 import json
 import pathlib
 import sys
@@ -8,6 +9,21 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import app
+
+
+def _routeline_protobuf(polyline):
+    laenge = len(polyline)
+    varint = bytearray()
+    while True:
+        byte = laenge & 0x7F
+        laenge >>= 7
+        if laenge:
+            varint.append(byte | 0x80)
+        else:
+            varint.append(byte)
+            break
+    payload = b"\x0a" + bytes(varint) + polyline.encode("ascii")
+    return base64.b64encode(payload).decode("ascii")
 
 
 @pytest.fixture(autouse=True)
@@ -693,6 +709,30 @@ def test_fleet_telemetrie_alte_routeline_nach_navigationsende_ignoriert():
     drive = daten["drive_state"]
     assert "active_route_line" not in drive
     assert drive["active_route_active"] is False
+
+
+def test_fleet_telemetrie_entpackt_base64_protobuf_routeline():
+    polyline = "{wrcaBczhlLr@fZbWc@TcOF{Sd@"
+    routeline = _routeline_protobuf(polyline)
+    daten = {
+        "drive_state": {
+            "active_route_active": True,
+            "active_route_destination": "Ziel",
+        },
+    }
+
+    assert app._fleet_telemetrie_routeline_normalisieren(routeline) == polyline
+    assert app._fleet_telemetrie_routeline_normalisieren(polyline) == polyline
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "RouteLine",
+        routeline,
+        1234,
+    )
+
+    drive = daten["drive_state"]
+    assert drive["active_route_line"] == polyline
+    assert drive["active_route_active"] is True
 
 
 def test_fleet_telemetrie_bereinigt_alte_navigation_aus_cache():

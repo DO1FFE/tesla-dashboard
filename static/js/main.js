@@ -370,21 +370,116 @@ function dekodierePolyline(polyline, praezision) {
     return punkte;
 }
 
+function routelineTextIstPolyline(text) {
+    if (typeof text !== 'string' || !text) {
+        return false;
+    }
+    for (var i = 0; i < text.length; i++) {
+        var code = text.charCodeAt(i);
+        if (code < 63 || code > 126) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function routelineVarintLesen(payload, index) {
+    var wert = 0;
+    var verschiebung = 0;
+    while (index < payload.length && verschiebung <= 63) {
+        var byte = payload.charCodeAt(index++) & 0xff;
+        wert |= (byte & 0x7f) << verschiebung;
+        if (!(byte & 0x80)) {
+            return { wert: wert, index: index };
+        }
+        verschiebung += 7;
+    }
+    return null;
+}
+
+function routelineAusProtobuf(payload) {
+    if (typeof payload !== 'string' || !payload) {
+        return null;
+    }
+    var index = 0;
+    while (index < payload.length) {
+        var tag = routelineVarintLesen(payload, index);
+        if (!tag) {
+            return null;
+        }
+        index = tag.index;
+        var drahttyp = tag.wert & 0x07;
+        if (drahttyp === 2) {
+            var laenge = routelineVarintLesen(payload, index);
+            if (!laenge) {
+                return null;
+            }
+            index = laenge.index;
+            var ende = index + laenge.wert;
+            if (ende > payload.length) {
+                return null;
+            }
+            var text = payload.slice(index, ende);
+            if (routelineTextIstPolyline(text)) {
+                return text;
+            }
+            index = ende;
+        } else if (drahttyp === 0) {
+            var varint = routelineVarintLesen(payload, index);
+            if (!varint) {
+                return null;
+            }
+            index = varint.index;
+        } else if (drahttyp === 5) {
+            index += 4;
+        } else if (drahttyp === 1) {
+            index += 8;
+        } else {
+            return null;
+        }
+    }
+    return null;
+}
+
+function routelineKandidaten(routeLine) {
+    var roh = routeLine.trim();
+    var kandidaten = [];
+    if (typeof atob === 'function') {
+        try {
+            var payload = atob(roh);
+            var protobufPolyline = routelineAusProtobuf(payload);
+            if (protobufPolyline) {
+                kandidaten.push(protobufPolyline);
+            }
+            kandidaten.push(payload);
+        } catch (err) {}
+    }
+    var roheProtobufPolyline = routelineAusProtobuf(roh);
+    if (roheProtobufPolyline) {
+        kandidaten.push(roheProtobufPolyline);
+    }
+    kandidaten.push(roh);
+    return kandidaten.filter(function(kandidat, index) {
+        return kandidat && kandidaten.indexOf(kandidat) === index;
+    });
+}
+
 function routeLineZuKartenPunkte(routeLine) {
     if (typeof routeLine !== 'string' || !routeLine.trim()) {
         return [];
     }
-    var kodiertePolyline = routeLine.trim();
-    if (typeof atob === 'function') {
-        try {
-            kodiertePolyline = atob(kodiertePolyline);
-        } catch (err) {}
+    var kandidaten = routelineKandidaten(routeLine);
+    for (var i = 0; i < kandidaten.length; i++) {
+        var punkte = dekodierePolyline(kandidaten[i], 6).filter(function(point) {
+            return Array.isArray(point) &&
+                point.length >= 2 &&
+                istGueltigeKartenKoordinate(point[0], point[1]);
+        });
+        if (punkte.length > 1) {
+            return punkte;
+        }
     }
-    return dekodierePolyline(kodiertePolyline, 6).filter(function(point) {
-        return Array.isArray(point) &&
-            point.length >= 2 &&
-            istGueltigeKartenKoordinate(point[0], point[1]);
-    });
+    return [];
 }
 
 map.on('zoomend', function() {

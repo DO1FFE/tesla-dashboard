@@ -222,8 +222,11 @@ def test_routeline_wird_in_der_livekarte_verwendet():
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
 
     assert "function dekodierePolyline(polyline, praezision)" in js
+    assert "function routelineAusProtobuf(payload)" in js
+    assert "function routelineKandidaten(routeLine)" in js
     assert "function routeLineZuKartenPunkte(routeLine)" in js
-    assert "dekodierePolyline(kodiertePolyline, 6)" in js
+    assert "var protobufPolyline = routelineAusProtobuf(payload)" in js
+    assert "dekodierePolyline(kandidaten[i], 6)" in js
     assert "privacyModeAktiv ? [] : routeLineZuKartenPunkte(drive.active_route_line)" in js
     assert "var zeigtNavigationsLinie = nutztRouteLine || (" in js
     assert "var linienPunkte = nutztRouteLine ? routenPunkte : []" in js

@@ -10,6 +10,7 @@ eventlet.monkey_patch()
 from eventlet import queue as eventlet_queue
 
 import os
+import base64
 import csv
 import json
 import queue
@@ -5233,6 +5234,98 @@ def _fleet_telemetrie_navigation_hat_zielkern(drive):
     )
 
 
+def _fleet_telemetrie_varint_lesen(payload, index=0):
+    """Lese einen Protobuf-Varint aus Bytes."""
+
+    wert = 0
+    verschiebung = 0
+    while index < len(payload) and verschiebung <= 63:
+        byte = payload[index]
+        index += 1
+        wert |= (byte & 0x7F) << verschiebung
+        if not byte & 0x80:
+            return wert, index
+        verschiebung += 7
+    return None, index
+
+
+def _fleet_telemetrie_routeline_ist_polyline(text):
+    """Prüfe grob, ob ein Text wie eine Google-Polyline aussieht."""
+
+    if not isinstance(text, str) or not text:
+        return False
+    return all(63 <= ord(zeichen) <= 126 for zeichen in text)
+
+
+def _fleet_telemetrie_routeline_aus_protobuf(payload):
+    """Extrahiere die eigentliche Polyline aus Teslas RouteLine-Protobuf."""
+
+    if not isinstance(payload, (bytes, bytearray)) or not payload:
+        return None
+    index = 0
+    while index < len(payload):
+        tag, index = _fleet_telemetrie_varint_lesen(payload, index)
+        if tag is None:
+            return None
+        drahttyp = tag & 0x07
+        if drahttyp == 2:
+            laenge, index = _fleet_telemetrie_varint_lesen(payload, index)
+            if laenge is None:
+                return None
+            ende = index + laenge
+            if ende > len(payload):
+                return None
+            try:
+                text = bytes(payload[index:ende]).decode("ascii")
+            except UnicodeDecodeError:
+                text = None
+            if _fleet_telemetrie_routeline_ist_polyline(text):
+                return text
+            index = ende
+            continue
+        if drahttyp == 0:
+            _, index = _fleet_telemetrie_varint_lesen(payload, index)
+            continue
+        if drahttyp == 5:
+            index += 4
+            continue
+        if drahttyp == 1:
+            index += 8
+            continue
+        return None
+    return None
+
+
+def _fleet_telemetrie_routeline_normalisieren(value):
+    """Wandle Base64-Protobuf-RouteLine in die echte Polyline um."""
+
+    if not isinstance(value, str):
+        return value
+    route_line = value.strip()
+    if not route_line:
+        return value
+    try:
+        payload = base64.b64decode(route_line, validate=True)
+    except Exception:
+        return value
+    polyline = _fleet_telemetrie_routeline_aus_protobuf(payload)
+    return polyline or value
+
+
+def _fleet_telemetrie_routeline_in_daten_normalisieren(data):
+    """Normalisiere eine gecachte RouteLine im Dashboard-Datensatz."""
+
+    if not isinstance(data, dict):
+        return
+    drive = data.get("drive_state")
+    if not isinstance(drive, dict):
+        return
+    route_line = drive.get("active_route_line")
+    normalisiert = _fleet_telemetrie_routeline_normalisieren(route_line)
+    if isinstance(normalisiert, str) and normalisiert != route_line:
+        drive["active_route_line"] = normalisiert
+
+
 def _fleet_telemetrie_navigation_cache_bereinigen(data):
     """Bereinige alte Navigationsreste aus geladenen Cache-Daten."""
 
@@ -5349,6 +5442,7 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         drive["timestamp"] = timestamp_ms
         return True
     if field == "RouteLine":
+        value = _fleet_telemetrie_routeline_normalisieren(value)
         if value is None or (isinstance(value, str) and not value.strip()):
             _fleet_telemetrie_navigation_beenden(drive, timestamp_ms)
         else:
@@ -5952,6 +6046,7 @@ def _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data):
 
     _fleet_telemetrie_rohdaten_anreichern(data)
     _fleet_telemetrie_ladeinformationen_aktualisieren(cache_id, data)
+    _fleet_telemetrie_routeline_in_daten_normalisieren(data)
     _fleet_telemetrie_navigation_cache_bereinigen(data)
 
     try:
@@ -6558,6 +6653,7 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
             data["state"] = _normalisiere_dashboard_state(data.get("state"))
             _fleet_telemetrie_entferne_fremddaten(data)
             _fleet_telemetrie_rohdaten_anreichern(data)
+            _fleet_telemetrie_routeline_in_daten_normalisieren(data)
             _fleet_telemetrie_statusbeginn_ergänzen(data)
             data = _fleet_telemetrie_profile_status_an_daten(data)
             data["_live"] = True
@@ -6567,6 +6663,7 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
         data["state"] = _normalisiere_dashboard_state(data.get("state"))
         _fleet_telemetrie_entferne_fremddaten(data)
         _fleet_telemetrie_rohdaten_anreichern(data)
+        _fleet_telemetrie_routeline_in_daten_normalisieren(data)
         _fleet_telemetrie_statusbeginn_ergänzen(data)
         data = _fleet_telemetrie_profile_status_an_daten(data)
         data["_live"] = False
