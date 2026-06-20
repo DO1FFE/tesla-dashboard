@@ -3410,9 +3410,6 @@ function telemetryConfigSyncHtml() {
     if (lastTelemetryConfigSyncProfile) {
         titel += ' (' + lastTelemetryConfigSyncProfile + ')';
     }
-    if (lastTelemetryConfigKeyPaired === false) {
-        titel += ' · key_paired: false';
-    }
     return ' <span class="telemetry-sync-icon ' + klasse + '" role="img" ' +
         'aria-label="' + escapeHtml(titel) + '" title="' + escapeHtml(titel) + '">' +
         telemetryConfigSyncSvgHtml(statusMarke) + '</span>';
@@ -3472,8 +3469,7 @@ function updateTelemetryProfile(
     telemetryParkDelaySeconds = parseNumber(parkDelaySeconds);
     lastTelemetryConfigSyncState = configSyncState || 'unknown';
     lastTelemetryConfigSynced = configSynced === true;
-    lastTelemetryConfigKeyPaired = configKeyPaired === false ? false :
-        (configKeyPaired === true ? true : null);
+    lastTelemetryConfigKeyPaired = configKeyPaired === true ? true : null;
     lastTelemetryConfigSyncError = configSyncError || null;
     lastTelemetryConfigSyncProfile = configSyncProfile || null;
     zeichneTelemetryProfile();

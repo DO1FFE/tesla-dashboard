@@ -1972,6 +1972,32 @@ def _fleet_telemetrie_profile_status_standard():
     }
 
 
+def _fleet_telemetrie_key_paired_normalisieren(value):
+    """Ignoriere negative key_paired-Meldungen alter Fahrzeuge."""
+
+    return True if value is True else None
+
+
+def _fleet_telemetrie_sync_details_normalisieren(details):
+    """Entferne nicht relevante negative key_paired-Details aus Syncdaten."""
+
+    if not isinstance(details, list):
+        return []
+    normalisiert = []
+    for detail in details:
+        if not isinstance(detail, dict):
+            continue
+        detail_kopie = dict(detail)
+        if _fleet_telemetrie_key_paired_normalisieren(
+            detail_kopie.get("key_paired")
+        ) is True:
+            detail_kopie["key_paired"] = True
+        else:
+            detail_kopie.pop("key_paired", None)
+        normalisiert.append(detail_kopie)
+    return normalisiert
+
+
 def _fleet_telemetrie_profile_status_laden():
     """Lade den letzten bekannten Telemetry-Profilstatus."""
 
@@ -1998,8 +2024,9 @@ def _fleet_telemetrie_profile_status_laden():
     status["last_error"] = geladen.get("last_error")
     if isinstance(geladen.get("config_synced"), bool):
         status["config_synced"] = geladen.get("config_synced")
-    if isinstance(geladen.get("config_key_paired"), bool):
-        status["config_key_paired"] = geladen.get("config_key_paired")
+    status["config_key_paired"] = _fleet_telemetrie_key_paired_normalisieren(
+        geladen.get("config_key_paired")
+    )
     sync_state = str(geladen.get("config_sync_state") or "").strip().lower()
     if sync_state in {"unknown", "pending", "active", "synced", "unpaired", "error"}:
         status["config_sync_state"] = sync_state
@@ -2012,8 +2039,9 @@ def _fleet_telemetrie_profile_status_laden():
             continue
         status[key] = value
     status["config_sync_error"] = geladen.get("config_sync_error")
-    if isinstance(geladen.get("config_sync_details"), list):
-        status["config_sync_details"] = geladen.get("config_sync_details")
+    status["config_sync_details"] = _fleet_telemetrie_sync_details_normalisieren(
+        geladen.get("config_sync_details")
+    )
     return status
 
 
@@ -4421,7 +4449,9 @@ def _fleet_telemetrie_profile_status_an_daten(data):
     )
     data["telemetry_profile_updated_at"] = status.get("updated_at")
     data["telemetry_config_synced"] = status.get("config_synced")
-    data["telemetry_config_key_paired"] = status.get("config_key_paired")
+    data["telemetry_config_key_paired"] = _fleet_telemetrie_key_paired_normalisieren(
+        status.get("config_key_paired")
+    )
     sync_state = status.get("config_sync_state") or "unknown"
     stream_aktiv = _fleet_telemetrie_profile_stream_nach_config_aktiv(data, status)
     if sync_state == "pending" and stream_aktiv:
@@ -4763,16 +4793,19 @@ def _fleet_telemetrie_profile_sync_pruefen(token=None, request_data=None):
             antwort = {}
         synced = antwort.get("synced")
         synced_bool = synced is True
-        key_paired = antwort.get("key_paired")
-        key_paired_bool = key_paired if isinstance(key_paired, bool) else None
-        if key_paired_bool is not None:
-            key_paired_werte.append(key_paired_bool)
-        details.append({
+        key_paired_bool = _fleet_telemetrie_key_paired_normalisieren(
+            antwort.get("key_paired")
+        )
+        if key_paired_bool is True:
+            key_paired_werte.append(True)
+        detail = {
             "vin": vin,
             "synced": synced_bool,
-            "key_paired": key_paired_bool,
             "limit_reached": antwort.get("limit_reached"),
-        })
+        }
+        if key_paired_bool is True:
+            detail["key_paired"] = True
+        details.append(detail)
         if not synced_bool:
             alle_synced = False
     alle_key_paired = all(key_paired_werte) if key_paired_werte else None
@@ -4801,17 +4834,17 @@ def _fleet_telemetrie_profile_sync_resultat_setzen(status, profil, ergebnis):
         state = "unknown"
     synced = ergebnis.get("synced")
     status["config_synced"] = synced if isinstance(synced, bool) else None
-    key_paired = ergebnis.get("key_paired")
-    status["config_key_paired"] = (
-        key_paired if isinstance(key_paired, bool) else None
+    status["config_key_paired"] = _fleet_telemetrie_key_paired_normalisieren(
+        ergebnis.get("key_paired")
     )
     status["config_sync_state"] = state
     status["config_sync_profile"] = profil
     status["config_sync_checked_at"] = float(ergebnis.get("checked_at") or jetzt)
     status["config_sync_updated_at"] = jetzt
     status["config_sync_error"] = ergebnis.get("error")
-    details = ergebnis.get("details")
-    status["config_sync_details"] = details if isinstance(details, list) else []
+    status["config_sync_details"] = _fleet_telemetrie_sync_details_normalisieren(
+        ergebnis.get("details")
+    )
 
 
 def _fleet_telemetrie_profile_sync_fehler(fehler):
@@ -5065,7 +5098,9 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
     )
     data["telemetry_profile_updated_at"] = status_kopie.get("updated_at")
     data["telemetry_config_synced"] = status_kopie.get("config_synced")
-    data["telemetry_config_key_paired"] = status_kopie.get("config_key_paired")
+    data["telemetry_config_key_paired"] = _fleet_telemetrie_key_paired_normalisieren(
+        status_kopie.get("config_key_paired")
+    )
     sync_state = status_kopie.get("config_sync_state") or "unknown"
     stream_aktiv = _fleet_telemetrie_profile_stream_nach_config_aktiv(
         data,

@@ -1327,6 +1327,52 @@ def test_fleet_telemetrie_profile_sync_pruefung_liefert_fahrzeugstatus(monkeypat
     assert abfragen[0][1]["headers"]["Authorization"] == "Bearer token-123"
 
 
+def test_fleet_telemetrie_profile_ignoriert_key_paired_false(monkeypatch):
+    class Antwort:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "response": {
+                    "synced": True,
+                    "key_paired": False,
+                    "limit_reached": False,
+                },
+            }
+
+    monkeypatch.setattr(app, "_fleet_telemetrie_fahrzeuge", lambda: [{
+        "vin": "TESTVIN",
+    }])
+    monkeypatch.setattr(app, "_fleet_telemetrie_oauth_token", lambda: "token-123")
+    monkeypatch.setattr(app.requests, "get", lambda url, **kwargs: Antwort())
+
+    ergebnis = app._fleet_telemetrie_profile_sync_pruefen()
+
+    assert ergebnis["synced"] is True
+    assert ergebnis["key_paired"] is None
+    assert ergebnis["state"] == "synced"
+    assert ergebnis["details"] == [{
+        "vin": "TESTVIN",
+        "synced": True,
+        "limit_reached": False,
+    }]
+
+    app._fleet_telemetrie_profile_erfolg_setzen("parked", ergebnis)
+    daten = {}
+
+    app._fleet_telemetrie_profile_status_an_daten(daten)
+
+    assert daten["telemetry_config_synced"] is True
+    assert daten["telemetry_config_key_paired"] is None
+    assert app._fleet_telemetry_profile_status["config_key_paired"] is None
+    assert app._fleet_telemetry_profile_status["config_sync_details"] == [{
+        "vin": "TESTVIN",
+        "synced": True,
+        "limit_reached": False,
+    }]
+
+
 def test_fleet_telemetrie_profile_status_enthaelt_syncdaten(monkeypatch):
     monkeypatch.setattr(app.time, "time", lambda: 2000.0)
 
@@ -1385,7 +1431,7 @@ def test_fleet_telemetrie_profile_pending_wird_bei_datenstrom_aktiv(monkeypatch)
     app._fleet_telemetrie_profile_status_an_daten(daten)
 
     assert daten["telemetry_config_synced"] is False
-    assert daten["telemetry_config_key_paired"] is False
+    assert daten["telemetry_config_key_paired"] is None
     assert daten["telemetry_config_stream_active"] is True
     assert daten["telemetry_config_sync_state"] == "active"
 
