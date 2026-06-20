@@ -1712,6 +1712,10 @@ FLEET_TELEMETRIE_PROFILE_SYNC_CHECK_INTERVAL_SECONDS = max(
     10.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_SYNC_CHECK_INTERVAL_SECONDS", "60")),
 )
+FLEET_TELEMETRIE_PROFILE_RESEND_AFTER_SECONDS = max(
+    60.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_RESEND_AFTER_SECONDS", "300")),
+)
 FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER = frozenset()
 FLEET_TELEMETRIE_PROFILE_LIVE_1S_FELDER = frozenset({
     "BrakePedal",
@@ -4905,6 +4909,22 @@ def _fleet_telemetrie_profile_erfolg_setzen(profil, sync_ergebnis=None):
         _fleet_telemetrie_profile_status_speichern()
 
 
+def _fleet_telemetrie_profile_neuversand_fällig(status, jetzt):
+    """Prüfe, ob eine nicht übernommene Konfiguration erneut gesendet werden soll."""
+
+    if not isinstance(status, dict):
+        return False
+    sync_state = str(status.get("config_sync_state") or "").lower()
+    if sync_state not in {"pending", "error"}:
+        return False
+    letzter_versand = _as_float(status.get("last_sent"))
+    if letzter_versand is None or letzter_versand <= 0:
+        letzter_versand = _as_float(status.get("config_sync_updated_at"))
+    if letzter_versand is None or letzter_versand <= 0:
+        return False
+    return jetzt - letzter_versand >= FLEET_TELEMETRIE_PROFILE_RESEND_AFTER_SECONDS
+
+
 def _fleet_telemetrie_profile_sync_erneut_pruefen():
     """Prüfe ausstehende Fleet-Konfigurationen in ruhigen Abständen erneut."""
 
@@ -4922,15 +4942,29 @@ def _fleet_telemetrie_profile_sync_erneut_pruefen():
         profil = status.get("config_sync_profile") or status.get("current")
         if profil not in FLEET_TELEMETRIE_PROFILE:
             return
+        neu_senden = _fleet_telemetrie_profile_neuversand_fällig(status, jetzt)
         status["config_sync_checked_at"] = jetzt
+        if neu_senden:
+            status["last_sent"] = jetzt
+            status["last_sent_profile"] = profil
+            status["config_synced"] = False
+            status["config_sync_state"] = "pending"
+            status["config_sync_profile"] = profil
+            status["config_sync_error"] = None
+            status["updated_at"] = jetzt
         _fleet_telemetrie_profile_status_speichern()
     try:
-        ergebnis = _fleet_telemetrie_profile_sync_pruefen()
+        if neu_senden:
+            ergebnis = _fleet_telemetrie_profile_anwenden(profil)
+        else:
+            ergebnis = _fleet_telemetrie_profile_sync_pruefen()
     except Exception as exc:
         ergebnis = _fleet_telemetrie_profile_sync_fehler(exc)
     with _fleet_telemetry_profile_lock:
         if _fleet_telemetry_profile_status.get("config_sync_profile") != profil:
             return
+        if neu_senden and ergebnis.get("error") is None:
+            _fleet_telemetry_profile_status["last_error"] = None
         _fleet_telemetrie_profile_sync_resultat_setzen(
             _fleet_telemetry_profile_status,
             profil,
