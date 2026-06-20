@@ -993,6 +993,20 @@ energy_logger = _get_energy_logger(None)
 sms_logger = _get_sms_logger(None)
 
 
+def _normalisiere_dashboard_state(state):
+    """Normalisiere externe Fahrzeugzustände für das Dashboard."""
+    if not isinstance(state, str):
+        return state
+    state_text = state.strip().lower()
+    if not state_text:
+        return None
+    if state_text == "connected":
+        return "online"
+    if state_text == "disconnected":
+        return "offline"
+    return state_text
+
+
 def _load_last_state(vehicle_id=None, filename=None):
     """Load the last logged state for each vehicle from ``state.log``."""
 
@@ -1008,7 +1022,7 @@ def _load_last_state(vehicle_id=None, filename=None):
                     try:
                         entry = json.loads(line[idx:])
                         vid = entry.get("vehicle_id")
-                        state = entry.get("state")
+                        state = _normalisiere_dashboard_state(entry.get("state"))
                         if vid is not None and state is not None:
                             result[vid] = state
                     except Exception:
@@ -2529,7 +2543,11 @@ def _distribute_state_duration(conn, start, end, state):
     current = start
     while current < end:
         day = datetime.fromtimestamp(current, LOCAL_TZ).date()
-        next_day = datetime.combine(day + timedelta(days=1), datetime.min.time(), LOCAL_TZ).timestamp()
+        next_day = datetime.combine(
+            day + timedelta(days=1),
+            datetime.min.time(),
+            LOCAL_TZ,
+        ).timestamp()
         segment_end = min(end, next_day)
         duration = segment_end - current
         key = state if state in {"online", "offline", "asleep"} else "offline"
@@ -2550,7 +2568,7 @@ def _process_state_log_increment(conn):
         offset = 0
 
     last_ts = None
-    last_state = _get_meta(conn, "state_last_state")
+    last_state = _normalisiere_dashboard_state(_get_meta(conn, "state_last_state"))
     ts_val = _get_meta(conn, "state_last_ts")
     if ts_val is not None:
         try:
@@ -2572,7 +2590,7 @@ def _process_state_log_increment(conn):
                     continue
                 try:
                     data = json.loads(line[idx:])
-                    state = data.get("state")
+                    state = _normalisiere_dashboard_state(data.get("state"))
                 except Exception:
                     continue
                 entries.append((ts_dt.timestamp(), state))
@@ -2811,7 +2829,11 @@ def _initial_statistics_backfill(conn):
     _snapshot_trip_file_state(conn)
     backfill_now = None
     try:
-        with open(resolve_log_path(_default_vehicle_id or default_vehicle_id(), "state.log"), "r", encoding="utf-8") as handle:
+        with open(
+            resolve_log_path(_default_vehicle_id or default_vehicle_id(), "state.log"),
+            "r",
+            encoding="utf-8",
+        ) as handle:
             last_line = None
             for line in handle:
                 last_line = line
@@ -2823,8 +2845,20 @@ def _initial_statistics_backfill(conn):
                 if ts_dt:
                     try:
                         data = json.loads(last_line[idx:])
-                        _set_meta(conn, "state_last_state", data.get("state"))
-                        _set_meta(conn, "state_last_ts", backfill_now if backfill_now is not None else ts_dt.timestamp())
+                        _set_meta(
+                            conn,
+                            "state_last_state",
+                            _normalisiere_dashboard_state(data.get("state")),
+                        )
+                        _set_meta(
+                            conn,
+                            "state_last_ts",
+                            (
+                                backfill_now
+                                if backfill_now is not None
+                                else ts_dt.timestamp()
+                            ),
+                        )
                     except Exception:
                         pass
     except Exception:
@@ -3042,6 +3076,7 @@ def _log_api_error(exc):
 def log_vehicle_state(vehicle_id, state):
     """Log vehicle state changes to ``state.log`` if changed."""
     try:
+        state = _normalisiere_dashboard_state(state)
         key = _vehicle_key(vehicle_id)
         with state_lock:
             if last_vehicle_state.get(key) != state:
@@ -3448,7 +3483,7 @@ def _vorklimatisierung_im_stand_erlaubt(fahrzeugdaten):
 
     state = fahrzeugdaten.get("state")
     if isinstance(state, str):
-        state_norm = state.strip().lower()
+        state_norm = _normalisiere_dashboard_state(state)
         if state_norm in {"asleep", "offline", "parked"}:
             return True
         if state_norm == "online" and _vorklimatisierung_oder_klima_aktiv(fahrzeugdaten):
@@ -3663,7 +3698,7 @@ def _load_last_parking_entry(vehicle_id, filename=None):
             "vehicle_id": vid or vehicle_id,
             "battery_pct": _as_float(payload.get("battery_pct")),
             "range_km": _as_float(payload.get("range_km")),
-            "state": payload.get("state") or None,
+            "state": _normalisiere_dashboard_state(payload.get("state")),
             "session": payload.get("session") or None,
         }
         ts_dt = _parse_log_time(ts_str)
@@ -3699,6 +3734,7 @@ def _log_dashboard_parking_sample(
 
     pct = _as_float(battery_pct)
     rng = _as_float(range_km)
+    state = _normalisiere_dashboard_state(state)
     if pct is None and rng is None and state is None:
         return False
 
@@ -3717,7 +3753,7 @@ def _log_dashboard_parking_sample(
             cached = {
                 "battery_pct": last.get("battery_pct"),
                 "range_km": last.get("range_km"),
-                "state": last.get("state"),
+                "state": _normalisiere_dashboard_state(last.get("state")),
                 "session": last.get("session"),
             }
             _last_parking_samples[vehicle_id] = cached
@@ -3735,7 +3771,7 @@ def _log_dashboard_parking_sample(
         if (
             _normalized(last.get("battery_pct")) == record["battery_pct"]
             and _normalized(last.get("range_km")) == record["range_km"]
-            and (last.get("state") or None) == record["state"]
+            and _normalisiere_dashboard_state(last.get("state")) == record["state"]
             and (last.get("session") or None) == record["session"]
         ):
             return False
@@ -3774,7 +3810,7 @@ def _record_dashboard_parking_state(vehicle_id, data):
 
     shift = _normalize_shift_state(drive_state.get("shift_state"))
     charging_state = str(charge_state.get("charging_state") or "")
-    state_value = data.get("state")
+    state_value = _normalisiere_dashboard_state(data.get("state"))
 
     speed_val = _as_float(drive_state.get("speed"))
     power_val = _as_float(drive_state.get("power"))
@@ -6021,7 +6057,7 @@ def _fleet_telemetrie_verbindungsstatus_state(status):
     if status_text == "connected":
         return "online"
     if status_text == "disconnected":
-        return "disconnected"
+        return "offline"
     return None
 
 
@@ -6075,7 +6111,7 @@ def _fleet_telemetrie_verbindung_aktualisieren(vin, payload, timestamp_ms=None):
             data = latest_data.get(cache_id)
             if not isinstance(data, dict):
                 data = _load_cached(cache_id) or {}
-            vorheriger_state = data.get("state")
+            vorheriger_state = _normalisiere_dashboard_state(data.get("state"))
             fallback_since_ms = timestamp_ms
             if vorheriger_state == state and data.get("state_since_ms") is not None:
                 fallback_since_ms = data.get("state_since_ms")
@@ -6450,6 +6486,7 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
             age = None
         if age is not None and age <= TESLA_FLEET_TELEMETRY_STALE_SECONDS:
             data = dict(data)
+            data["state"] = _normalisiere_dashboard_state(data.get("state"))
             _fleet_telemetrie_entferne_fremddaten(data)
             _fleet_telemetrie_rohdaten_anreichern(data)
             _fleet_telemetrie_statusbeginn_ergänzen(data)
@@ -6458,6 +6495,7 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
             return data
     if data:
         data = dict(data)
+        data["state"] = _normalisiere_dashboard_state(data.get("state"))
         _fleet_telemetrie_entferne_fremddaten(data)
         _fleet_telemetrie_rohdaten_anreichern(data)
         _fleet_telemetrie_statusbeginn_ergänzen(data)
@@ -7615,7 +7653,7 @@ def _load_state_entries(filename=None, vehicle_id=None):
                 ts = ts_dt.timestamp()
                 try:
                     data = json.loads(line[idx:])
-                    state = data.get("state")
+                    state = _normalisiere_dashboard_state(data.get("state"))
                     entries.append((ts, state))
                 except Exception:
                     continue
@@ -7822,7 +7860,7 @@ def _process_dashboard_parking_log(filename, distribute_loss):
 
         pct = _as_float(payload.get("battery_pct"))
         rng_km = _as_float(payload.get("range_km"))
-        state_value = payload.get("state") or "parked"
+        state_value = _normalisiere_dashboard_state(payload.get("state")) or "parked"
 
         for anderer_key, anderer_session in list(sessions.items()):
             if anderer_key == session_key or anderer_key[0] != vehicle_id:
@@ -7986,7 +8024,7 @@ def _process_legacy_parking_log(filename, distribute_loss, vehicle_id=None):
                     power_val = _as_float(drive_state.get("power"))
                     charging_state = str(charge_state.get("charging_state") or "")
 
-                    state_value = data.get("state")
+                    state_value = _normalisiere_dashboard_state(data.get("state"))
                     if not isinstance(state_value, str) or not state_value:
                         state_value = "parked"
 
@@ -8795,7 +8833,9 @@ def _refresh_state(vehicle, times=1):
         except Exception as exc:
             _log_api_error(exc)
             break
-        state = vehicle.get("state") or vehicle["state"]
+        state = _normalisiere_dashboard_state(
+            vehicle.get("state") or vehicle["state"]
+        )
         log_vehicle_state(vid, state)
         log_api_data("get_vehicle_summary", {"state": state}, vehicle_id=vid)
         if state == "online":
@@ -8810,20 +8850,20 @@ def _zustand_aus_cache(cached):
         return None
     state = cached.get("state")
     if isinstance(state, str) and state.strip():
-        return state
+        return _normalisiere_dashboard_state(state)
     return None
 
 
 def _setze_zustand_wenn_bekannt(data, state):
     """Überschreibe einen Cachezustand nur mit bekannten API-Werten."""
     if isinstance(data, dict) and state is not None:
-        data["state"] = state
+        data["state"] = _normalisiere_dashboard_state(state)
 
 
 def get_vehicle_state(vehicle_id=None):
     """Return the current vehicle state without waking the car."""
     vid = str(vehicle_id or _default_vehicle_id or "default")
-    state = last_vehicle_state.get(vid)
+    state = _normalisiere_dashboard_state(last_vehicle_state.get(vid))
     vorheriger_state = state
     now = time.time()
     cfg = load_config(vehicle_id)
@@ -8844,7 +8884,9 @@ def get_vehicle_state(vehicle_id=None):
         telemetry_state = None
         if isinstance(telemetry_data, dict):
             _fleet_telemetrie_statusbeginn_ergänzen(telemetry_data)
-            telemetry_state = telemetry_data.get("state")
+            telemetry_state = _normalisiere_dashboard_state(
+                telemetry_data.get("state")
+            )
             checked_at = telemetry_data.get(
                 "fleet_telemetry_updated_at",
                 telemetry_data.get("state_checked_at", int(now * 1000)),
@@ -8937,7 +8979,7 @@ def get_vehicle_state(vehicle_id=None):
         }
 
     return {
-        "state": state,
+        "state": _normalisiere_dashboard_state(state),
         "state_checked_at": int(now * 1000),
         "service_mode": service_mode,
         "service_mode_plus": service_mode_plus,
@@ -9211,6 +9253,7 @@ def _formatierter_fahrzeugname(name, car_type, trim_badging):
 
 def get_vehicle_data(vehicle_id=None, state=None):
     """Fetch vehicle data for a given vehicle id."""
+    state = _normalisiere_dashboard_state(state)
     vid = vehicle_id if vehicle_id is not None else _default_vehicle_id
     cache_id = str(vid or "default")
 
@@ -9279,6 +9322,7 @@ def get_vehicle_data(vehicle_id=None, state=None):
             _log_api_error(exc)
             log_vehicle_state(vid, "offline")
             return {"error": "Vehicle unavailable", "state": "offline"}
+        state = _normalisiere_dashboard_state(state)
 
     if state != "online":
         payload = {"state": state}
@@ -9560,7 +9604,7 @@ def _fetch_data_once(vehicle_id="default"):
     if _nur_fleet_telemetrie_datenquelle():
         data = cached if isinstance(cached, dict) else {}
         data = dict(data)
-        data.setdefault("state", _zustand_aus_cache(cached))
+        data["state"] = _zustand_aus_cache(data)
         data["api_error"] = "Noch keine Fleet-Telemetry-Daten empfangen"
         data["state_checked_at"] = int(time.time() * 1000)
         data["preconditioning_display_allowed"] = (
@@ -9572,18 +9616,26 @@ def _fetch_data_once(vehicle_id="default"):
         return data
 
     vehicle_key = str(vid or cache_id)
-    vorheriger_state = last_vehicle_state.get(vehicle_key)
+    vorheriger_state = _normalisiere_dashboard_state(
+        last_vehicle_state.get(vehicle_key)
+    )
     if (
         vorheriger_state is None
         and vehicle_key == "default"
         and len(last_vehicle_state) == 1
     ):
-        vorheriger_state = next(iter(last_vehicle_state.values()))
+        vorheriger_state = _normalisiere_dashboard_state(
+            next(iter(last_vehicle_state.values()))
+        )
     state = vorheriger_state
     # Always refresh the vehicle state so transitions from offline/asleep
     # are detected even when no occupant is present.
     state_info = get_vehicle_state(vid)
-    state = state_info.get("state") if isinstance(state_info, dict) else state
+    state = (
+        _normalisiere_dashboard_state(state_info.get("state"))
+        if isinstance(state_info, dict)
+        else state
+    )
     state_checked_at = (
         state_info.get("state_checked_at") if isinstance(state_info, dict) else None
     )
@@ -10081,7 +10133,11 @@ def _fetch_loop(vehicle_id, interval=3):
                 send_aprs(data)
             except Exception:
                 pass
-        state_wert = data.get("state") if isinstance(data, dict) else None
+        state_wert = (
+            _normalisiere_dashboard_state(data.get("state"))
+            if isinstance(data, dict)
+            else None
+        )
         # Nutze das normale Intervall, solange jemand im Fahrzeug ist, eine
         # Öffnung offen ist oder ein Fahrgang eingelegt wurde. Sonst darf das
         # Auto mit dem Leerlaufintervall schlafen.
@@ -10990,10 +11046,12 @@ def _prepare_statistics_payload():
     # highlight today's statistics and current vehicle state
     today = datetime.now(LOCAL_TZ).date().isoformat()
     vid = str(_default_vehicle_id or "default")
-    state = last_vehicle_state.get(vid)
+    state = _normalisiere_dashboard_state(last_vehicle_state.get(vid))
     if state is None and last_vehicle_state:
         # fall back to any known state if default ID is missing
-        state = next(iter(last_vehicle_state.values()))
+        state = _normalisiere_dashboard_state(
+            next(iter(last_vehicle_state.values()))
+        )
 
     return {
         "rows": rows,
@@ -11839,7 +11897,7 @@ def _timeline_events(limit=100):
 
     events = []
     for eintrag in _json_log_einträge("state.log", limit=300):
-        state = eintrag["data"].get("state")
+        state = _normalisiere_dashboard_state(eintrag["data"].get("state"))
         if not state:
             continue
         events.append(
@@ -11973,7 +12031,11 @@ def _service_health_payload():
         kanonische_id = str(kanonische_id or vehicle_id)
         row = {
             "vehicle_id": kanonische_id,
-            "state": data.get("state") if isinstance(data, dict) else "",
+            "state": (
+                _normalisiere_dashboard_state(data.get("state"))
+                if isinstance(data, dict)
+                else ""
+            ),
             "live": bool(data.get("_live")) if isinstance(data, dict) else False,
             "state_age": _alter_text(ts) if ts else "unbekannt",
             "state_age_seconds": None if ts is None else round(now - ts, 1),

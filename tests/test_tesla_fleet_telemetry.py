@@ -209,7 +209,7 @@ def test_fleet_telemetrie_mqtt_sendet_empfangszeit_bei_unveraenderten_rohwerten(
     assert len(sammler.daten) == 3
 
 
-def test_fleet_telemetrie_connectivity_unterscheidet_connected_und_disconnected(monkeypatch):
+def test_fleet_telemetrie_connectivity_wertet_disconnected_als_offline(monkeypatch):
     gespeicherte_daten = []
     connected_at = "2026-06-14T14:00:00Z"
     disconnected_at = "2026-06-14T14:47:59Z"
@@ -251,12 +251,16 @@ def test_fleet_telemetrie_connectivity_unterscheidet_connected_und_disconnected(
         f'{{"Status": "DISCONNECTED", "CreatedAt": "{disconnected_at}"}}'.encode("utf-8"),
         {"topic_base": "tesla"},
     )
-    assert app.latest_data["veh-1"]["state"] == "disconnected"
+    assert app.latest_data["veh-1"]["state"] == "offline"
     assert app.latest_data["veh-1"]["state_since_ms"] == disconnected_ms
     assert app.latest_data["veh-1"]["state_since_at"] == disconnected_at
-    assert gespeicherte_daten[-1][1]["state"] == "disconnected"
+    assert (
+        app.latest_data["veh-1"]["fleet_telemetry_connectivity"]["Status"]
+        == "DISCONNECTED"
+    )
+    assert gespeicherte_daten[-1][1]["state"] == "offline"
     assert gespeicherte_daten[-1][1]["state_since_ms"] == disconnected_ms
-    assert sammler.daten[-1]["state"] == "disconnected"
+    assert sammler.daten[-1]["state"] == "offline"
     assert sammler.daten[-1]["state_since_ms"] == disconnected_ms
 
 

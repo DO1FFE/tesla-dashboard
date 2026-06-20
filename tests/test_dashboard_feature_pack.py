@@ -250,13 +250,16 @@ def test_stream_heartbeat_wird_im_browser_als_signal_genutzt():
     assert "Letztes Signal vor " in js
 
 
-def test_online_und_disconnected_state_zaehlen_seit_dauer_hoch():
+def test_online_und_offline_state_zaehlen_seit_dauer_hoch():
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
 
     assert "lastStateSinceTimestamp" in js
     assert "function formatiereHochzaehlendeDauer(seitMillis)" in js
+    assert "function normalisiereDashboardState(status)" in js
+    assert "st === 'disconnected'" in js
+    assert "return 'offline'" in js
     assert "State: ' + lastVehicleState" in js
-    assert "lastVehicleState === 'disconnected'" in js
+    assert "lastVehicleState === 'offline'" in js
     assert "lastVehicleState === 'online'" in js
     assert "text += ' (seit ' + formatiereHochzaehlendeDauer" in js
 

@@ -417,7 +417,6 @@ var HIGHLIGHT_BLUE = false;
 var currentPath = [];
 var lastPathDelta = [];
 var OFFLINE_TEXT = 'Das Fahrzeug ist offline und schläft - Bitte nicht wecken! - Die Daten sind die zuletzt bekannten und somit nicht aktuell!';
-var DISCONNECTED_TEXT = 'Die Fleet-Telemetry-Verbindung zum Fahrzeug ist getrennt. Es werden die zuletzt bekannten Daten angezeigt.';
 var SERVICE_MODE_TEXT = 'Fahrzeug befindet sich im Service Mode.';
 var SERVICE_MODE_PLUS_TEXT = 'Fahrzeug befindet sich im Service Mode Plus.';
 var smsForm = $('#sms-form');
@@ -498,11 +497,25 @@ function parseAnnouncements(text) {
     return arr.slice(0, 3);
 }
 
-function istOfflineOderSchlaeft(status) {
+function normalisiereDashboardState(status) {
     if (typeof status !== 'string') {
-        return false;
+        return status;
     }
-    var st = status.toLowerCase();
+    var st = status.trim().toLowerCase();
+    if (!st) {
+        return '';
+    }
+    if (st === 'connected') {
+        return 'online';
+    }
+    if (st === 'disconnected') {
+        return 'offline';
+    }
+    return st;
+}
+
+function istOfflineOderSchlaeft(status) {
+    var st = normalisiereDashboardState(status);
     return st === 'offline' || st === 'asleep';
 }
 
@@ -3331,7 +3344,7 @@ function zeichneVehicleState() {
         return;
     }
     var text = 'State: ' + lastVehicleState;
-    var zustandMitDauer = lastVehicleState === 'disconnected' ||
+    var zustandMitDauer = lastVehicleState === 'offline' ||
         lastVehicleState === 'online';
     if (zustandMitDauer && lastStateSinceTimestamp) {
         text += ' (seit ' + formatiereHochzaehlendeDauer(lastStateSinceTimestamp) + ')';
@@ -3514,7 +3527,7 @@ function displayParkTime() {
 function updateVehicleState(state, stateCheckedAt, stateData) {
     var vorherigerState = lastVehicleState;
     if (typeof state === 'string' && state.length > 0) {
-        lastVehicleState = state;
+        lastVehicleState = normalisiereDashboardState(state);
     } else if (arguments.length > 0) {
         lastVehicleState = null;
         lastStateSinceTimestamp = null;
@@ -3785,15 +3798,10 @@ function updateOfflineInfo(state, serviceMode, serviceModePlus) {
         return;
     }
     if (typeof state === 'string') {
-        var st = state.toLowerCase();
+        var st = normalisiereDashboardState(state);
         if (st === 'offline' || st === 'asleep') {
             hideLoading();
             $msg.text(OFFLINE_TEXT).show();
-            return;
-        }
-        if (st === 'disconnected') {
-            hideLoading();
-            $msg.text(DISCONNECTED_TEXT).show();
             return;
         }
     }
