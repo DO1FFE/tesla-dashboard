@@ -4188,6 +4188,11 @@ FLEET_TELEMETRIE_TPMS_ZEITFELDER = {
     "TpmsLastSeenPressureTimeRr": "tpms_last_seen_pressure_time_rr",
 }
 
+FLEET_TELEMETRIE_TPMS_SOLLWERTFELDER = (
+    "tpms_rcp_front_value",
+    "tpms_rcp_rear_value",
+)
+
 
 def _fleet_telemetrie_tpms_druckwert(vehicle_state, rohwerte, field, target, value):
     """Erhalte den letzten gültigen Reifendruck bei ungültigen Live-Werten."""
@@ -4199,6 +4204,53 @@ def _fleet_telemetrie_tpms_druckwert(vehicle_state, rohwerte, field, target, val
     if druck is not None:
         return druck
     return _as_float(rohwerte.get(field))
+
+
+def _fleet_telemetrie_tpms_sollwerte_ergänzen(cache_id, data):
+    """Übernehme fehlende TPMS-Sollwerte aus einem Cache derselben VIN."""
+
+    if not isinstance(data, dict):
+        return
+    vehicle_state = data.setdefault("vehicle_state", {})
+    fehlende_felder = [
+        feld for feld in FLEET_TELEMETRIE_TPMS_SOLLWERTFELDER
+        if _as_float(vehicle_state.get(feld)) is None
+    ]
+    if not fehlende_felder:
+        return
+    vin = str(data.get("vin") or "")
+    daten_id = str(data.get("id_s") or data.get("vehicle_id") or cache_id or "")
+    kandidaten = []
+    if vin:
+        kandidaten.extend(_fleet_telemetrie_cache_ids(vin))
+    kandidaten.extend(("default", daten_id, str(cache_id or "")))
+    for kandidat in list(dict.fromkeys(str(k) for k in kandidaten if k)):
+        if kandidat == str(cache_id or ""):
+            quelle = data
+        else:
+            quelle = latest_data.get(kandidat)
+            if not isinstance(quelle, dict):
+                quelle = _load_cached(kandidat)
+        if not isinstance(quelle, dict):
+            continue
+        quell_vin = str(quelle.get("vin") or "")
+        if vin and quell_vin and quell_vin != vin:
+            continue
+        quell_id = str(
+            quelle.get("id_s") or quelle.get("vehicle_id") or kandidat or ""
+        )
+        if not vin and daten_id and quell_id and quell_id != daten_id:
+            continue
+        quell_vehicle = quelle.get("vehicle_state")
+        if not isinstance(quell_vehicle, dict):
+            continue
+        for feld in list(fehlende_felder):
+            wert = _as_float(quell_vehicle.get(feld))
+            if wert is not None:
+                vehicle_state[feld] = wert
+                fehlende_felder.remove(feld)
+        if not fehlende_felder:
+            return
 
 
 def _fleet_telemetrie_setze_media(media, key, value):
@@ -6045,6 +6097,7 @@ def _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data):
         return data
 
     _fleet_telemetrie_rohdaten_anreichern(data)
+    _fleet_telemetrie_tpms_sollwerte_ergänzen(cache_id, data)
     _fleet_telemetrie_ladeinformationen_aktualisieren(cache_id, data)
     _fleet_telemetrie_routeline_in_daten_normalisieren(data)
     _fleet_telemetrie_navigation_cache_bereinigen(data)
@@ -6653,6 +6706,7 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
             data["state"] = _normalisiere_dashboard_state(data.get("state"))
             _fleet_telemetrie_entferne_fremddaten(data)
             _fleet_telemetrie_rohdaten_anreichern(data)
+            _fleet_telemetrie_tpms_sollwerte_ergänzen(cache_id, data)
             _fleet_telemetrie_routeline_in_daten_normalisieren(data)
             _fleet_telemetrie_statusbeginn_ergänzen(data)
             data = _fleet_telemetrie_profile_status_an_daten(data)
@@ -6663,6 +6717,7 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
         data["state"] = _normalisiere_dashboard_state(data.get("state"))
         _fleet_telemetrie_entferne_fremddaten(data)
         _fleet_telemetrie_rohdaten_anreichern(data)
+        _fleet_telemetrie_tpms_sollwerte_ergänzen(cache_id, data)
         _fleet_telemetrie_routeline_in_daten_normalisieren(data)
         _fleet_telemetrie_statusbeginn_ergänzen(data)
         data = _fleet_telemetrie_profile_status_an_daten(data)

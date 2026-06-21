@@ -774,6 +774,40 @@ def test_fleet_telemetrie_reichert_tpms_und_spiegel_aus_rohdaten_an():
     assert daten["climate_state"]["side_mirror_heaters"] is True
 
 
+def test_fleet_telemetrie_reichert_tpms_sollwerte_aus_schwester_cache_an(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_ids",
+        lambda vin: ["default", "veh-1"],
+    )
+    monkeypatch.setattr(
+        app,
+        "latest_data",
+        {
+            "default": {
+                "vin": "VIN1",
+                "vehicle_state": {
+                    "tpms_rcp_front_value": 3.1,
+                    "tpms_rcp_rear_value": 3.2,
+                },
+            },
+        },
+    )
+    daten = {
+        "vin": "VIN1",
+        "id_s": "veh-1",
+        "vehicle_state": {
+            "tpms_pressure_fl": 3.0,
+            "tpms_pressure_rl": 3.05,
+        },
+    }
+
+    app._fleet_telemetrie_tpms_sollwerte_ergänzen("veh-1", daten)
+
+    assert daten["vehicle_state"]["tpms_rcp_front_value"] == 3.1
+    assert daten["vehicle_state"]["tpms_rcp_rear_value"] == 3.2
+
+
 def test_fleet_telemetrie_erhaelt_tpms_druck_bei_ungueltigem_update(monkeypatch):
     gespeicherte_daten = []
 
