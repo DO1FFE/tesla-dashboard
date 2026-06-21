@@ -1562,6 +1562,183 @@ def test_fleet_telemetrie_profile_pending_prueft_vor_timeout_nur_sync(monkeypatc
     assert app._fleet_telemetry_profile_status["config_sync_state"] == "pending"
 
 
+def test_fleet_telemetrie_profile_prueft_nach_wechsel_schnell(monkeypatch):
+    pruefungen = []
+
+    monkeypatch.setattr(app.time, "time", lambda: 1012.0)
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_PROFILE_SYNC_CHECK_INTERVAL_SECONDS", 60.0)
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_SYNC_FAST_CHECK_INTERVAL_SECONDS",
+        10.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_SYNC_FAST_WINDOW_SECONDS",
+        180.0,
+    )
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_PROFILE_RESEND_AFTER_SECONDS", 300.0)
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_PROFILE_FAST_RESEND_AFTER_SECONDS", 60.0)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_sync_pruefen",
+        lambda: pruefungen.append("sync") or {
+            "synced": False,
+            "key_paired": None,
+            "state": "pending",
+            "details": [],
+            "checked_at": 1012.0,
+            "error": None,
+        },
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_anwenden",
+        lambda profil: pytest.fail("Nach 12 Sekunden soll nur geprüft werden"),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        {
+            "current": "parked",
+            "target": "live",
+            "target_since": 1000.0,
+            "last_sent": 1000.0,
+            "last_sent_profile": "live",
+            "last_error": None,
+            "config_synced": False,
+            "config_key_paired": None,
+            "config_sync_state": "pending",
+            "config_sync_profile": "live",
+            "config_sync_checked_at": 1000.0,
+            "config_sync_updated_at": 1000.0,
+            "config_sync_error": None,
+            "config_sync_details": [],
+            "updated_at": 1000.0,
+        },
+    )
+
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+
+    assert pruefungen == ["sync"]
+    assert app._fleet_telemetry_profile_status["last_sent"] == 1000.0
+
+
+def test_fleet_telemetrie_profile_sendet_in_schnellphase_erneut(monkeypatch):
+    gesendet = []
+
+    monkeypatch.setattr(app.time, "time", lambda: 1061.0)
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_PROFILE_SYNC_CHECK_INTERVAL_SECONDS", 60.0)
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_SYNC_FAST_CHECK_INTERVAL_SECONDS",
+        10.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_SYNC_FAST_WINDOW_SECONDS",
+        180.0,
+    )
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_PROFILE_RESEND_AFTER_SECONDS", 300.0)
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_PROFILE_FAST_RESEND_AFTER_SECONDS", 60.0)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_anwenden",
+        lambda profil: gesendet.append(profil) or {
+            "synced": False,
+            "key_paired": None,
+            "state": "pending",
+            "details": [{"vin": "TESTVIN", "synced": False}],
+            "checked_at": 1061.0,
+            "error": None,
+        },
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_sync_pruefen",
+        lambda: pytest.fail("Nach 60 Sekunden soll erneut gesendet werden"),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        {
+            "current": "parked",
+            "target": "live",
+            "target_since": 1000.0,
+            "last_sent": 1000.0,
+            "last_sent_profile": "live",
+            "last_error": None,
+            "config_synced": False,
+            "config_key_paired": None,
+            "config_sync_state": "pending",
+            "config_sync_profile": "live",
+            "config_sync_checked_at": 1050.0,
+            "config_sync_updated_at": 1000.0,
+            "config_sync_error": None,
+            "config_sync_details": [],
+            "updated_at": 1000.0,
+        },
+    )
+
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+
+    assert gesendet == ["live"]
+    assert app._fleet_telemetry_profile_status["last_sent"] == 1061.0
+    assert app._fleet_telemetry_profile_status["config_sync_state"] == "pending"
+
+
+def test_fleet_telemetrie_profile_prueft_bestaetigtes_profil_nicht(monkeypatch):
+    pruefungen = []
+
+    monkeypatch.setattr(app.time, "time", lambda: 1012.0)
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_PROFILE_SYNC_CHECK_INTERVAL_SECONDS", 60.0)
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_SYNC_FAST_CHECK_INTERVAL_SECONDS",
+        10.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_SYNC_FAST_WINDOW_SECONDS",
+        180.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_sync_pruefen",
+        lambda: pruefungen.append("sync"),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_anwenden",
+        lambda profil: pytest.fail("Bestätigtes Profil darf nicht erneut gesendet werden"),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        {
+            "current": "live",
+            "target": "live",
+            "target_since": 1000.0,
+            "last_sent": 1000.0,
+            "last_sent_profile": "live",
+            "last_error": None,
+            "config_synced": True,
+            "config_key_paired": None,
+            "config_sync_state": "synced",
+            "config_sync_profile": "live",
+            "config_sync_checked_at": 1000.0,
+            "config_sync_updated_at": 1000.0,
+            "config_sync_error": None,
+            "config_sync_details": [],
+            "updated_at": 1000.0,
+        },
+    )
+
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+
+    assert pruefungen == []
+
+
 def test_fleet_telemetrie_profile_sendet_nach_sync_timeout_erneut(monkeypatch):
     gesendet = []
 

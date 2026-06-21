@@ -1713,9 +1713,21 @@ FLEET_TELEMETRIE_PROFILE_SYNC_CHECK_INTERVAL_SECONDS = max(
     10.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_SYNC_CHECK_INTERVAL_SECONDS", "60")),
 )
+FLEET_TELEMETRIE_PROFILE_SYNC_FAST_CHECK_INTERVAL_SECONDS = max(
+    5.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_SYNC_FAST_CHECK_INTERVAL_SECONDS", "10")),
+)
+FLEET_TELEMETRIE_PROFILE_SYNC_FAST_WINDOW_SECONDS = max(
+    FLEET_TELEMETRIE_PROFILE_SYNC_FAST_CHECK_INTERVAL_SECONDS,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_SYNC_FAST_WINDOW_SECONDS", "180")),
+)
 FLEET_TELEMETRIE_PROFILE_RESEND_AFTER_SECONDS = max(
     60.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_RESEND_AFTER_SECONDS", "300")),
+)
+FLEET_TELEMETRIE_PROFILE_FAST_RESEND_AFTER_SECONDS = max(
+    30.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_FAST_RESEND_AFTER_SECONDS", "60")),
 )
 FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER = frozenset()
 FLEET_TELEMETRIE_PROFILE_LIVE_1S_FELDER = frozenset({
@@ -4928,6 +4940,56 @@ def _fleet_telemetrie_profile_sync_ausstehend_setzen(status, profil, jetzt):
     status["updated_at"] = jetzt
 
 
+def _fleet_telemetrie_profile_letzter_versand(status):
+    """Gib den letzten bekannten Versandzeitpunkt der Telemetry-Konfiguration zurück."""
+
+    letzter_versand = _as_float(status.get("last_sent"))
+    if letzter_versand is None or letzter_versand <= 0:
+        letzter_versand = _as_float(status.get("config_sync_updated_at"))
+    return letzter_versand
+
+
+def _fleet_telemetrie_profile_schnellprüfung_aktiv(status, jetzt, profil=None):
+    """Prüfe, ob ein frischer Profilwechsel engmaschiger überwacht werden soll."""
+
+    if not isinstance(status, dict):
+        return False
+    if profil in FLEET_TELEMETRIE_PROFILE and _fleet_telemetrie_profile_sync_bestaetigt(
+        status,
+        profil,
+    ):
+        return False
+    letzter_versand = _fleet_telemetrie_profile_letzter_versand(status)
+    if letzter_versand is None or letzter_versand <= 0:
+        return False
+    target_since = _as_float(status.get("target_since"))
+    bezugszeit = letzter_versand
+    if status.get("target") == profil and target_since is not None and target_since > 0:
+        bezugszeit = target_since
+    if jetzt < bezugszeit:
+        return False
+    return jetzt - bezugszeit <= FLEET_TELEMETRIE_PROFILE_SYNC_FAST_WINDOW_SECONDS
+
+
+def _fleet_telemetrie_profile_sync_check_intervall(status, jetzt, profil=None):
+    """Gib das passende Prüfintervall für die aktuelle Profilbestätigung zurück."""
+
+    if _fleet_telemetrie_profile_schnellprüfung_aktiv(status, jetzt, profil):
+        return FLEET_TELEMETRIE_PROFILE_SYNC_FAST_CHECK_INTERVAL_SECONDS
+    return FLEET_TELEMETRIE_PROFILE_SYNC_CHECK_INTERVAL_SECONDS
+
+
+def _fleet_telemetrie_profile_resend_intervall(status, jetzt, profil=None):
+    """Gib das passende Neuversand-Intervall für unbestätigte Profile zurück."""
+
+    if _fleet_telemetrie_profile_schnellprüfung_aktiv(status, jetzt, profil):
+        return min(
+            FLEET_TELEMETRIE_PROFILE_FAST_RESEND_AFTER_SECONDS,
+            FLEET_TELEMETRIE_PROFILE_RESEND_AFTER_SECONDS,
+        )
+    return FLEET_TELEMETRIE_PROFILE_RESEND_AFTER_SECONDS
+
+
 def _fleet_telemetrie_profile_sync_fehler(fehler):
     """Erzeuge ein Syncprüfungs-Ergebnis für fehlgeschlagene API-Abfragen."""
 
@@ -5036,12 +5098,15 @@ def _fleet_telemetrie_profile_neuversand_fällig(status, jetzt, profil=None):
     sync_state = str(status.get("config_sync_state") or "").lower()
     if sync_state not in {"pending", "active", "error", "unknown", "synced"}:
         return False
-    letzter_versand = _as_float(status.get("last_sent"))
-    if letzter_versand is None or letzter_versand <= 0:
-        letzter_versand = _as_float(status.get("config_sync_updated_at"))
+    letzter_versand = _fleet_telemetrie_profile_letzter_versand(status)
     if letzter_versand is None or letzter_versand <= 0:
         return False
-    return jetzt - letzter_versand >= FLEET_TELEMETRIE_PROFILE_RESEND_AFTER_SECONDS
+    resend_intervall = _fleet_telemetrie_profile_resend_intervall(
+        status,
+        jetzt,
+        profil,
+    )
+    return jetzt - letzter_versand >= resend_intervall
 
 
 def _fleet_telemetrie_profile_sync_erneut_pruefen():
@@ -5065,7 +5130,12 @@ def _fleet_telemetrie_profile_sync_erneut_pruefen():
         if _fleet_telemetrie_profile_sync_bestaetigt(status, profil):
             return
         letzter_check = float(status.get("config_sync_checked_at") or 0)
-        if jetzt - letzter_check < FLEET_TELEMETRIE_PROFILE_SYNC_CHECK_INTERVAL_SECONDS:
+        check_intervall = _fleet_telemetrie_profile_sync_check_intervall(
+            status,
+            jetzt,
+            profil,
+        )
+        if jetzt - letzter_check < check_intervall:
             return
         neu_senden = _fleet_telemetrie_profile_neuversand_fällig(
             status,
