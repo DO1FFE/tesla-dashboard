@@ -6288,6 +6288,7 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
                 else:
                     data.pop("fleet_telemetry_updated_at", None)
                 data["_live"] = True
+                data = _fleet_telemetrie_profile_aktualisieren(cache_id, data)
                 data.pop("api_error", None)
                 latest_data[cache_id] = data
                 aktualisierte_daten.append((cache_id, data, False))

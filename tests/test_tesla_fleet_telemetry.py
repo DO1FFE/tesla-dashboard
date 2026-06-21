@@ -1673,6 +1673,82 @@ def test_fleet_telemetrie_profile_prueft_syncprofil_mismatch(monkeypatch):
     assert app._fleet_telemetry_profile_status["config_synced"] is True
 
 
+def test_fleet_telemetrie_profile_laeuft_auch_bei_unveraendertem_paket(monkeypatch):
+    angefordert = []
+
+    monkeypatch.setattr(app.time, "time", lambda: 1301.0)
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS", 300.0)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_ids",
+        lambda vin: ["veh-1"],
+    )
+    monkeypatch.setattr(app, "_load_cached", lambda vehicle_id: {})
+    monkeypatch.setattr(app, "_subscriber_daten_senden", lambda *args: None)
+    monkeypatch.setattr(app, "_aprs_spaeter_senden", lambda *args: None)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        {
+            "current": "live",
+            "target": "parked",
+            "target_since": 900.0,
+            "last_sent": 1000.0,
+            "last_sent_profile": "live",
+            "last_error": None,
+            "config_synced": True,
+            "config_key_paired": None,
+            "config_sync_state": "synced",
+            "config_sync_profile": "live",
+            "config_sync_checked_at": 1200.0,
+            "config_sync_updated_at": 1200.0,
+            "config_sync_error": None,
+            "config_sync_details": [],
+            "updated_at": 1200.0,
+        },
+    )
+    monkeypatch.setattr(
+        app,
+        "latest_data",
+        {
+            "veh-1": {
+                "vin": "VIN1",
+                "state": "online",
+                "fleet_telemetry_raw": {"LightsHazardsActive": False},
+                "vehicle_state": {
+                    "lights_hazards_active": False,
+                    "locked": True,
+                    "is_user_present": False,
+                },
+                "drive_state": {"shift_state": "P", "speed": 0},
+                "climate_state": {"is_climate_on": False},
+                "charge_state": {"charging_state": "Disconnected"},
+            },
+        },
+    )
+
+    assert app._fleet_telemetrie_v_felder_aktualisieren(
+        "VIN1",
+        [("LightsHazardsActive", False, 1_301_000)],
+    )
+
+    daten = app.latest_data["veh-1"]
+    assert angefordert == ["parked"]
+    assert daten["telemetry_config_synced"] is False
+    assert daten["telemetry_config_sync_state"] == "pending"
+    assert daten["telemetry_config_sync_profile"] == "parked"
+
+
 def test_fleet_telemetrie_profile_verzoegert_parkprofil(monkeypatch):
     angefordert = []
     jetzt = [1000.0]
