@@ -1620,6 +1620,59 @@ def test_fleet_telemetrie_profile_sendet_nach_sync_timeout_erneut(monkeypatch):
     }]
 
 
+def test_fleet_telemetrie_profile_prueft_syncprofil_mismatch(monkeypatch):
+    pruefungen = []
+
+    monkeypatch.setattr(app.time, "time", lambda: 1299.0)
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_PROFILE_SYNC_CHECK_INTERVAL_SECONDS", 60.0)
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_PROFILE_RESEND_AFTER_SECONDS", 300.0)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_sync_pruefen",
+        lambda: pruefungen.append("sync") or {
+            "synced": True,
+            "key_paired": None,
+            "state": "synced",
+            "details": [{"vin": "TESTVIN", "synced": True}],
+            "checked_at": 1299.0,
+            "error": None,
+        },
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_anwenden",
+        lambda profil: pytest.fail("Vor dem Timeout soll nur geprüft werden"),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        {
+            "current": "live",
+            "target": "parked",
+            "target_since": 900.0,
+            "last_sent": 1000.0,
+            "last_sent_profile": "parked",
+            "last_error": None,
+            "config_synced": True,
+            "config_key_paired": None,
+            "config_sync_state": "synced",
+            "config_sync_profile": "live",
+            "config_sync_checked_at": 1200.0,
+            "config_sync_updated_at": 1200.0,
+            "config_sync_error": None,
+            "config_sync_details": [],
+            "updated_at": 1200.0,
+        },
+    )
+
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+
+    assert pruefungen == ["sync"]
+    assert app._fleet_telemetry_profile_status["config_sync_state"] == "synced"
+    assert app._fleet_telemetry_profile_status["config_sync_profile"] == "parked"
+    assert app._fleet_telemetry_profile_status["config_synced"] is True
+
+
 def test_fleet_telemetrie_profile_verzoegert_parkprofil(monkeypatch):
     angefordert = []
     jetzt = [1000.0]
@@ -1641,6 +1694,14 @@ def test_fleet_telemetrie_profile_verzoegert_parkprofil(monkeypatch):
             "last_sent": 0.0,
             "last_sent_profile": None,
             "last_error": None,
+            "config_synced": True,
+            "config_key_paired": None,
+            "config_sync_state": "synced",
+            "config_sync_profile": "live",
+            "config_sync_checked_at": 999.0,
+            "config_sync_updated_at": 999.0,
+            "config_sync_error": None,
+            "config_sync_details": [],
             "updated_at": 0.0,
         },
     )
@@ -1662,6 +1723,9 @@ def test_fleet_telemetrie_profile_verzoegert_parkprofil(monkeypatch):
     app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
 
     assert angefordert == ["parked"]
+    assert app._fleet_telemetry_profile_status["config_synced"] is False
+    assert app._fleet_telemetry_profile_status["config_sync_state"] == "pending"
+    assert app._fleet_telemetry_profile_status["config_sync_profile"] == "parked"
 
 
 def test_fleet_telemetrie_profile_wiederholt_fehlversuch_nicht_sofort(monkeypatch):
