@@ -1943,7 +1943,7 @@ def test_fleet_telemetrie_profile_verzoegert_parkprofil(monkeypatch):
     jetzt = [1000.0]
 
     monkeypatch.setattr(app.time, "time", lambda: jetzt[0])
-    monkeypatch.setattr(app, "FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS", 300.0)
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS", 120.0)
     monkeypatch.setattr(
         app,
         "_fleet_telemetrie_profile_spaeter_anwenden",
@@ -1982,9 +1982,9 @@ def test_fleet_telemetrie_profile_verzoegert_parkprofil(monkeypatch):
     assert daten["telemetry_profile"] == "live"
     assert daten["telemetry_profile_target"] == "parked"
     assert daten["telemetry_profile_target_since"] == 1000.0
-    assert daten["telemetry_profile_park_delay_seconds"] == 300.0
+    assert daten["telemetry_profile_park_delay_seconds"] == 120.0
 
-    jetzt[0] = 1301.0
+    jetzt[0] = 1120.0
     app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
 
     assert angefordert == ["parked"]
