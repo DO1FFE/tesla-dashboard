@@ -4551,6 +4551,19 @@ def _fleet_telemetrie_profile_ladend(data):
     return False
 
 
+def _fleet_telemetrie_profile_fahrzeug_fährt(data):
+    """Erkenne Fahrbewegung, die immer ein Live-Profil benötigt."""
+
+    if not isinstance(data, dict):
+        return False
+    drive = data.get("drive_state") if isinstance(data.get("drive_state"), dict) else {}
+    shift = str(drive.get("shift_state") or "").strip().upper()
+    if shift in {"D", "R", "N"}:
+        return True
+    speed = _as_float(drive.get("speed"))
+    return speed is not None and abs(speed) >= 0.5
+
+
 def _fleet_telemetrie_profile_fahrzeug_aktiv(data):
     """Erkenne Aktivität, die ein Live-Profil rechtfertigt."""
 
@@ -4567,11 +4580,7 @@ def _fleet_telemetrie_profile_fahrzeug_aktiv(data):
         if isinstance(data.get("climate_state"), dict)
         else {}
     )
-    shift = str(drive.get("shift_state") or "").strip().upper()
-    if shift in {"D", "R", "N"}:
-        return True
-    speed = _as_float(drive.get("speed"))
-    if speed is not None and abs(speed) >= 0.5:
+    if _fleet_telemetrie_profile_fahrzeug_fährt(data):
         return True
     if _fleet_telemetrie_wahr(vehicle.get("is_user_present")):
         return True
@@ -4598,6 +4607,8 @@ def _fleet_telemetrie_profile_fahrzeug_aktiv(data):
 def _fleet_telemetrie_profile_ziel(data):
     """Ermittle das passende Kostenprofil aus den letzten Fahrzeugdaten."""
 
+    if _fleet_telemetrie_profile_fahrzeug_fährt(data):
+        return "live"
     if _fleet_telemetrie_profile_ladend(data):
         return "charging"
     if _fleet_telemetrie_profile_fahrzeug_aktiv(data):

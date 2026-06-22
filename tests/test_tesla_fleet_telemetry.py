@@ -1257,6 +1257,18 @@ def test_fleet_telemetrie_profile_erkennt_zielzustand():
     }) == "charging"
 
     assert app._fleet_telemetrie_profile_ziel({
+        "charge_state": {"charging_state": "Charging"},
+        "drive_state": {"shift_state": "D", "speed": 0},
+        "vehicle_state": {"is_user_present": True},
+    }) == "live"
+
+    assert app._fleet_telemetrie_profile_ziel({
+        "charge_state": {"charging_state": "Charging"},
+        "drive_state": {"shift_state": "P", "speed": 8},
+        "vehicle_state": {"is_user_present": True},
+    }) == "live"
+
+    assert app._fleet_telemetrie_profile_ziel({
         "drive_state": {"shift_state": "D", "speed": 0},
         "vehicle_state": {"is_user_present": False},
     }) == "live"
