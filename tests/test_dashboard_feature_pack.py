@@ -135,6 +135,7 @@ def test_fahrzeugsymbole_sind_in_ui_eingebunden():
 def test_footer_zeigt_telemetrie_profile():
     html = pathlib.Path("templates/index.html").read_text(encoding="utf-8")
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+    css = pathlib.Path("static/css/style.css").read_text(encoding="utf-8")
 
     assert 'id="telemetry-profile"' in html
     assert "updateTelemetryProfile(" in js
@@ -146,6 +147,9 @@ def test_footer_zeigt_telemetrie_profile():
     assert "Telemetry: " in js
     assert "sun_roof_status_available" in js
     assert "part-unknown" in js
+    assert "if (statusMarke === 'synced')" in js
+    assert "statusMarke === 'pending' || statusMarke === 'active'" in js
+    assert ".telemetry-sync-active {\n  color: #ffd54f;" in css
 
 
 def test_technische_packdetails_sind_in_ui_eingebunden():

@@ -3567,9 +3567,9 @@ function telemetryConfigSyncHtml() {
 
 function telemetryConfigSyncSvgHtml(statusMarke) {
     var markierung;
-    if (statusMarke === 'synced' || statusMarke === 'active') {
+    if (statusMarke === 'synced') {
         markierung = '<path class="telemetry-sync-status-mark" d="M16.8 5.3l1.3 1.3 2.6-3.1" />';
-    } else if (statusMarke === 'pending') {
+    } else if (statusMarke === 'pending' || statusMarke === 'active') {
         markierung = '<circle class="telemetry-sync-status-outline" cx="18.6" cy="5.2" r="2.6" />' +
             '<path class="telemetry-sync-status-mark" d="M18.6 3.6v1.8l1.2.8" />';
     } else if (statusMarke === 'error') {
