@@ -1522,6 +1522,62 @@ def test_fleet_telemetrie_profile_pending_wird_bei_datenstrom_aktiv(monkeypatch)
     assert daten["telemetry_config_sync_state"] == "active"
 
 
+def test_fleet_telemetrie_profile_stream_empfang_bestaetigt_legacy(monkeypatch):
+    angefordert = []
+
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        {
+            "current": "live",
+            "target": "live",
+            "target_since": 1500.0,
+            "last_sent": 1900.0,
+            "last_sent_profile": "live",
+            "last_error": None,
+            "config_synced": False,
+            "config_key_paired": None,
+            "config_sync_state": "pending",
+            "config_sync_profile": "live",
+            "config_sync_checked_at": 1950.0,
+            "config_sync_updated_at": 1950.0,
+            "config_sync_error": None,
+            "config_sync_details": [{
+                "vin": "TESTVIN",
+                "synced": False,
+                "key_paired": False,
+            }],
+            "updated_at": 1950.0,
+        },
+    )
+    daten = {
+        "vin": "TESTVIN",
+        "fleet_telemetry_received_at": 1999_000,
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "climate_state": {"is_climate_on": True},
+        "charge_state": {"charging_state": "Disconnected"},
+    }
+
+    daten = app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    assert angefordert == []
+    assert daten["telemetry_config_synced"] is True
+    assert daten["telemetry_config_sync_state"] == "synced"
+    assert app._fleet_telemetry_profile_status["config_synced"] is True
+    assert app._fleet_telemetry_profile_status["config_sync_state"] == "synced"
+    assert app._fleet_telemetry_profile_status["config_sync_details"] == [{
+        "vin": "TESTVIN",
+        "synced": True,
+        "source": "telemetry_stream",
+    }]
+
+
 def test_fleet_telemetrie_profile_pending_prueft_vor_timeout_nur_sync(monkeypatch):
     pruefungen = []
 

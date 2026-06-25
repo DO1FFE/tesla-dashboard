@@ -4488,14 +4488,45 @@ def _fleet_telemetrie_profile_stream_nach_config_aktiv(data, status):
     letzter_versand = _as_float(status.get("last_sent"))
     if letzter_versand is None or letzter_versand <= 0:
         return False
-    aktualisiert = _as_float(data.get("fleet_telemetry_updated_at"))
-    if aktualisiert is None:
-        aktualisiert = _as_float(data.get("state_checked_at"))
-    if aktualisiert is None:
+    zeitpunkte = []
+    for feld in (
+        "fleet_telemetry_received_at",
+        "fleet_telemetry_updated_at",
+        "state_checked_at",
+    ):
+        wert = _as_float(data.get(feld))
+        if wert is None:
+            continue
+        if wert > 1e12:
+            wert /= 1000.0
+        zeitpunkte.append(wert)
+    if not zeitpunkte:
         return False
-    if aktualisiert > 1e12:
-        aktualisiert /= 1000.0
-    return aktualisiert >= letzter_versand
+    return max(zeitpunkte) >= letzter_versand
+
+
+def _fleet_telemetrie_profile_stream_bestaetigt_setzen(status, profil, data, jetzt):
+    """Nutze empfangene Telemetrie als Bestätigung für Legacy-Fahrzeuge."""
+
+    status["config_synced"] = True
+    status["config_key_paired"] = _fleet_telemetrie_key_paired_normalisieren(
+        status.get("config_key_paired")
+    )
+    status["config_sync_state"] = "synced"
+    status["config_sync_profile"] = profil
+    status["config_sync_checked_at"] = jetzt
+    status["config_sync_updated_at"] = jetzt
+    status["config_sync_error"] = None
+    vin = str(data.get("vin") or "").strip() if isinstance(data, dict) else ""
+    details = []
+    if vin:
+        details.append({
+            "vin": vin,
+            "synced": True,
+            "source": "telemetry_stream",
+        })
+    status["config_sync_details"] = details
+    status["updated_at"] = jetzt
 
 
 def _fleet_telemetrie_profile_status_an_daten(data):
@@ -5256,6 +5287,21 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
         anderes_profil_angefordert = (
             status.get("last_sent_profile") != aktivierbares_ziel
         )
+        if (
+            status.get("config_sync_profile") == aktivierbares_ziel
+            and not _fleet_telemetrie_profile_sync_bestaetigt(
+                status,
+                aktivierbares_ziel,
+            )
+            and _fleet_telemetrie_profile_stream_nach_config_aktiv(data, status)
+        ):
+            _fleet_telemetrie_profile_stream_bestaetigt_setzen(
+                status,
+                aktivierbares_ziel,
+                data,
+                jetzt,
+            )
+            status_geändert = True
         ziel_bestaetigt = _fleet_telemetrie_profile_sync_bestaetigt(
             status,
             aktivierbares_ziel,
