@@ -1719,11 +1719,11 @@ FLEET_TELEMETRIE_PROFILE_SYNC_FAST_CHECK_INTERVAL_SECONDS = max(
 )
 FLEET_TELEMETRIE_PROFILE_SYNC_FAST_WINDOW_SECONDS = max(
     FLEET_TELEMETRIE_PROFILE_SYNC_FAST_CHECK_INTERVAL_SECONDS,
-    float(os.getenv("TESLA_FLEET_TELEMETRY_SYNC_FAST_WINDOW_SECONDS", "180")),
+    float(os.getenv("TESLA_FLEET_TELEMETRY_SYNC_FAST_WINDOW_SECONDS", "120")),
 )
 FLEET_TELEMETRIE_PROFILE_RESEND_AFTER_SECONDS = max(
     60.0,
-    float(os.getenv("TESLA_FLEET_TELEMETRY_RESEND_AFTER_SECONDS", "300")),
+    float(os.getenv("TESLA_FLEET_TELEMETRY_RESEND_AFTER_SECONDS", "120")),
 )
 FLEET_TELEMETRIE_PROFILE_FAST_RESEND_AFTER_SECONDS = max(
     30.0,
@@ -4975,7 +4975,11 @@ def _fleet_telemetrie_profile_schnellprüfung_aktiv(status, jetzt, profil=None):
         return False
     target_since = _as_float(status.get("target_since"))
     bezugszeit = letzter_versand
-    if status.get("target") == profil and target_since is not None and target_since > 0:
+    if (
+        status.get("target") == profil
+        and target_since is not None
+        and target_since > letzter_versand
+    ):
         bezugszeit = target_since
     if jetzt < bezugszeit:
         return False
