@@ -1667,6 +1667,7 @@ _fleet_telemetry_thread = None
 _fleet_telemetry_worker_thread = None
 _fleet_telemetry_cache_thread = None
 _fleet_telemetry_profile_thread = None
+_fleet_telemetry_token_thread = None
 _fleet_telemetry_lock = threading.Lock()
 _fleet_telemetry_start_lock = threading.Lock()
 _fleet_telemetry_profile_lock = threading.Lock()
@@ -1708,6 +1709,14 @@ FLEET_TELEMETRIE_PROFILE_SEND_COOLDOWN_SECONDS = max(
 FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT = max(
     3.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_PROFILE_TIMEOUT", "15")),
+)
+FLEET_TELEMETRIE_TOKEN_REFRESH_BEFORE_SECONDS = max(
+    300.0,
+    float(os.getenv("TESLA_FLEET_TOKEN_REFRESH_BEFORE_SECONDS", "1800")),
+)
+FLEET_TELEMETRIE_TOKEN_REFRESH_CHECK_SECONDS = max(
+    60.0,
+    float(os.getenv("TESLA_FLEET_TOKEN_REFRESH_CHECK_SECONDS", "300")),
 )
 FLEET_TELEMETRIE_PROFILE_SYNC_CHECK_INTERVAL_SECONDS = max(
     10.0,
@@ -4848,6 +4857,46 @@ def _fleet_telemetrie_oauth_token():
     return _fleet_telemetrie_oauth_token_aktualisieren(tokens)
 
 
+def _fleet_telemetrie_oauth_token_automatisch_erneuern():
+    """Erneuere den Fleet-Token rechtzeitig vor Ablauf im Hintergrund."""
+
+    tokens = _fleet_telemetrie_oauth_tokens_laden()
+    expires_at = _as_float(os.getenv("TESLA_FLEET_TOKEN_EXPIRES_AT"))
+    if expires_at is None:
+        expires_at = _as_float(tokens.get("expires_at"))
+    token_vorhanden = bool(
+        os.getenv("TESLA_FLEET_ACCESS_TOKEN")
+        or tokens.get("access_token")
+        or os.getenv("TESLA_ACCESS_TOKEN")
+    )
+    refresh_vorhanden = bool(
+        os.getenv("TESLA_FLEET_REFRESH_TOKEN")
+        or tokens.get("refresh_token")
+        or os.getenv("TESLA_REFRESH_TOKEN")
+    )
+    if not refresh_vorhanden:
+        return False
+    if (
+        token_vorhanden
+        and expires_at is not None
+        and expires_at > time.time() + FLEET_TELEMETRIE_TOKEN_REFRESH_BEFORE_SECONDS
+    ):
+        return False
+    return bool(_fleet_telemetrie_oauth_token_aktualisieren(tokens))
+
+
+def _fleet_telemetrie_oauth_refresh_loop():
+    """Halte den Fleet-OAuth-Token während des Betriebs frisch."""
+
+    while _fleet_telemetrie_aktiv():
+        try:
+            if _fleet_telemetrie_oauth_token_automatisch_erneuern():
+                logging.info("Fleet-OAuth-Token automatisch erneuert")
+        except Exception as exc:
+            logging.warning("Fleet-OAuth-Token konnte nicht erneuert werden: %s", exc)
+        time.sleep(FLEET_TELEMETRIE_TOKEN_REFRESH_CHECK_SECONDS)
+
+
 def _fleet_telemetrie_profile_config_vins(request_data=None):
     """Ermittle VINs für die Prüfung der aktiven Fleet-Konfiguration."""
 
@@ -6832,9 +6881,19 @@ def _start_fleet_telemetry_listener():
     global _fleet_telemetry_thread, _fleet_telemetry_worker_thread
     global _fleet_telemetry_cache_thread
     global _fleet_telemetry_profile_thread
+    global _fleet_telemetry_token_thread
     if not _fleet_telemetrie_aktiv():
         return
     with _fleet_telemetry_start_lock:
+        if (
+            _fleet_telemetry_token_thread is None
+            or not _fleet_telemetry_token_thread.is_alive()
+        ):
+            _fleet_telemetry_token_thread = threading.Thread(
+                target=_fleet_telemetrie_oauth_refresh_loop,
+                daemon=True,
+            )
+            _fleet_telemetry_token_thread.start()
         if (
             _fleet_telemetry_worker_thread is None
             or not _fleet_telemetry_worker_thread.is_alive()
@@ -6902,7 +6961,19 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
             return data
     if data:
         data = dict(data)
-        data["state"] = _normalisiere_dashboard_state(data.get("state"))
+        vorheriger_state = _normalisiere_dashboard_state(data.get("state"))
+        data["state"] = "offline"
+        jetzt_ms = int(time.time() * 1000)
+        data["state_checked_at"] = jetzt_ms
+        if vorheriger_state != "offline":
+            try:
+                update_ms = int(float(updated_at))
+            except Exception:
+                update_ms = jetzt_ms
+            data["state_since_ms"] = int(
+                update_ms + TESLA_FLEET_TELEMETRY_STALE_SECONDS * 1000
+            )
+            data["state_since_at"] = data["state_since_ms"]
         _fleet_telemetrie_entferne_fremddaten(data)
         _fleet_telemetrie_rohdaten_anreichern(data)
         _fleet_telemetrie_tpms_sollwerte_ergänzen(cache_id, data)

@@ -1030,6 +1030,28 @@ def test_telemetrie_cache_entfernt_owner_api_supercharger(monkeypatch):
     assert "access_type" not in daten
 
 
+def test_telemetrie_cache_markiert_veraltete_daten_als_offline(monkeypatch):
+    monkeypatch.setattr(app, "_fleet_telemetrie_aktiv", lambda: True)
+    monkeypatch.setattr(app, "TESLA_FLEET_TELEMETRY_STALE_SECONDS", 300.0)
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+
+    update_ms = int((2000.0 - 301.0) * 1000)
+    cache = {
+        "state": "online",
+        "fleet_telemetry_updated_at": update_ms,
+        "charge_state": {},
+        "drive_state": {},
+    }
+
+    daten = app._fleet_telemetrie_cache_fuer_dashboard("veh-1", cache)
+
+    assert daten["state"] == "offline"
+    assert daten["_live"] is False
+    assert daten["api_error"] == "Noch keine aktuellen Fleet-Telemetry-Daten empfangen"
+    assert daten["state_checked_at"] == 2_000_000
+    assert daten["state_since_ms"] == update_ms + 300_000
+
+
 def test_telemetrie_cache_entfernt_owner_api_schiebedachstatus(monkeypatch):
     cache = {
         "state": "online",
@@ -2183,3 +2205,43 @@ def test_fleet_telemetrie_nutzt_gueltigen_env_token(monkeypatch):
     monkeypatch.setattr(app.time, "time", lambda: 200.0)
 
     assert app._fleet_telemetrie_oauth_token_aus_env() == "frischer-token"
+
+
+def test_fleet_telemetrie_erneuert_token_automatisch_vor_ablauf(monkeypatch):
+    aktualisiert = []
+
+    monkeypatch.setenv("TESLA_FLEET_ACCESS_TOKEN", "alter-token")
+    monkeypatch.setenv("TESLA_FLEET_REFRESH_TOKEN", "refresh-123")
+    monkeypatch.setenv("TESLA_FLEET_TOKEN_EXPIRES_AT", "500")
+    monkeypatch.setattr(app.time, "time", lambda: 200.0)
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_TOKEN_REFRESH_BEFORE_SECONDS", 400.0)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_oauth_tokens_laden",
+        lambda: {"refresh_token": "refresh-123"},
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_oauth_token_aktualisieren",
+        lambda tokens: aktualisiert.append(tokens) or "neuer-token",
+    )
+
+    assert app._fleet_telemetrie_oauth_token_automatisch_erneuern() is True
+    assert aktualisiert == [{"refresh_token": "refresh-123"}]
+
+
+def test_fleet_telemetrie_automatischer_token_refresh_ueberspringt_frischen_token(
+    monkeypatch,
+):
+    monkeypatch.setenv("TESLA_FLEET_ACCESS_TOKEN", "frischer-token")
+    monkeypatch.setenv("TESLA_FLEET_REFRESH_TOKEN", "refresh-123")
+    monkeypatch.setenv("TESLA_FLEET_TOKEN_EXPIRES_AT", "1000")
+    monkeypatch.setattr(app.time, "time", lambda: 200.0)
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_TOKEN_REFRESH_BEFORE_SECONDS", 300.0)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_oauth_token_aktualisieren",
+        lambda tokens: pytest.fail("Frischer Token darf nicht erneuert werden"),
+    )
+
+    assert app._fleet_telemetrie_oauth_token_automatisch_erneuern() is False
