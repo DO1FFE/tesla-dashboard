@@ -1798,6 +1798,13 @@ FLEET_TELEMETRIE_PROFILE_LIVE_30S_FELDER = frozenset({
     "SeatHeaterRight",
     "WiperHeatEnabled",
 })
+FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNGSFELDER = (
+    FLEET_TELEMETRIE_PROFILE_LIVE_1S_FELDER
+)
+FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MAX_ABSTAND_SECONDS = max(
+    2.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_CONFIRM_MAX_INTERVAL_SECONDS", "5")),
+)
 FLEET_TELEMETRIE_PROFILE_PARKED_10S_FELDER = frozenset({
     "BrakePedal",
     "CenterDisplay",
@@ -4485,14 +4492,26 @@ def _fleet_telemetrie_profile_status_kopie():
         return dict(_fleet_telemetry_profile_status)
 
 
+def _fleet_telemetrie_timestamp_sekunden(value, referenz=None):
+    """Konvertiere Sekunden- oder Millisekunden-Zeitstempel in Sekunden."""
+
+    wert = _as_float(value)
+    if wert is None:
+        return None
+    referenz_wert = _as_float(referenz)
+    if wert > 1e12 or (
+        referenz_wert is not None
+        and referenz_wert > 0
+        and wert > referenz_wert * 100
+    ):
+        wert /= 1000.0
+    return wert
+
+
 def _fleet_telemetrie_profile_stream_nach_config_aktiv(data, status):
     """Prüfe, ob seit dem letzten Config-Senden wieder Fahrzeugdaten ankamen."""
 
     if not isinstance(data, dict) or not isinstance(status, dict):
-        return False
-    current = status.get("current")
-    sync_profile = status.get("config_sync_profile")
-    if current and sync_profile and current != sync_profile:
         return False
     letzter_versand = _as_float(status.get("last_sent"))
     if letzter_versand is None or letzter_versand <= 0:
@@ -4506,17 +4525,58 @@ def _fleet_telemetrie_profile_stream_nach_config_aktiv(data, status):
         wert = _as_float(data.get(feld))
         if wert is None:
             continue
-        if wert > 1e12:
-            wert /= 1000.0
-        zeitpunkte.append(wert)
+        zeitpunkte.append(_fleet_telemetrie_timestamp_sekunden(wert, letzter_versand))
     if not zeitpunkte:
         return False
-    return max(zeitpunkte) >= letzter_versand
+    return max(zeitpunkte) > letzter_versand
+
+
+def _fleet_telemetrie_profile_live_takt_bestaetigt(data, status):
+    """Prüfe, ob schnelle Live-Felder nach dem Config-Senden eintreffen."""
+
+    letzter_versand = _as_float(status.get("last_sent"))
+    if letzter_versand is None or letzter_versand <= 0:
+        return False
+    empfangen = data.get("fleet_telemetry_field_received_at")
+    vorher = data.get("fleet_telemetry_field_previous_received_at")
+    if not isinstance(empfangen, dict) or not isinstance(vorher, dict):
+        return False
+    for feld in FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNGSFELDER:
+        letzter = _fleet_telemetrie_timestamp_sekunden(
+            empfangen.get(feld),
+            letzter_versand,
+        )
+        vorletzter = _fleet_telemetrie_timestamp_sekunden(
+            vorher.get(feld),
+            letzter_versand,
+        )
+        if letzter is None or vorletzter is None:
+            continue
+        if vorletzter < letzter_versand or letzter < letzter_versand:
+            continue
+        abstand = letzter - vorletzter
+        if (
+            abstand > 0
+            and abstand <= FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MAX_ABSTAND_SECONDS
+        ):
+            return True
+    return False
+
+
+def _fleet_telemetrie_profile_stream_bestaetigt(data, status, profil):
+    """Prüfe, ob der Stream das gesendete Profil belastbar bestätigt."""
+
+    if not _fleet_telemetrie_profile_stream_nach_config_aktiv(data, status):
+        return False
+    if profil == "live":
+        return _fleet_telemetrie_profile_live_takt_bestaetigt(data, status)
+    return True
 
 
 def _fleet_telemetrie_profile_stream_bestaetigt_setzen(status, profil, data, jetzt):
     """Nutze empfangene Telemetrie als Bestätigung für Legacy-Fahrzeuge."""
 
+    status["current"] = profil
     status["config_synced"] = True
     status["config_key_paired"] = _fleet_telemetrie_key_paired_normalisieren(
         status.get("config_key_paired")
@@ -5160,7 +5220,6 @@ def _fleet_telemetrie_profile_erfolg_setzen(profil, sync_ergebnis=None):
     """Merke ein erfolgreich angewendetes Telemetry-Profil."""
 
     with _fleet_telemetry_profile_lock:
-        _fleet_telemetry_profile_status["current"] = profil
         _fleet_telemetry_profile_status["last_error"] = None
         if sync_ergebnis is None:
             sync_ergebnis = {
@@ -5176,6 +5235,11 @@ def _fleet_telemetrie_profile_erfolg_setzen(profil, sync_ergebnis=None):
             profil,
             sync_ergebnis,
         )
+        if _fleet_telemetrie_profile_sync_bestaetigt(
+            _fleet_telemetry_profile_status,
+            profil,
+        ):
+            _fleet_telemetry_profile_status["current"] = profil
         _fleet_telemetry_profile_status["updated_at"] = time.time()
         _fleet_telemetrie_profile_status_speichern()
 
@@ -5261,6 +5325,11 @@ def _fleet_telemetrie_profile_sync_erneut_pruefen():
             profil,
             ergebnis,
         )
+        if _fleet_telemetrie_profile_sync_bestaetigt(
+            _fleet_telemetry_profile_status,
+            profil,
+        ):
+            _fleet_telemetry_profile_status["current"] = profil
         _fleet_telemetry_profile_status["updated_at"] = time.time()
         _fleet_telemetrie_profile_status_speichern()
 
@@ -5342,7 +5411,11 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                 status,
                 aktivierbares_ziel,
             )
-            and _fleet_telemetrie_profile_stream_nach_config_aktiv(data, status)
+            and _fleet_telemetrie_profile_stream_bestaetigt(
+                data,
+                status,
+                aktivierbares_ziel,
+            )
         ):
             _fleet_telemetrie_profile_stream_bestaetigt_setzen(
                 status,
@@ -5476,6 +5549,18 @@ def _fleet_telemetrie_empfang_vermerken(data, timestamp_ms, field=None):
         data["fleet_telemetry_received_at"] = timestamp_ms
     if field:
         data["fleet_telemetry_last_received_field"] = field
+        feld_empfang = data.setdefault("fleet_telemetry_field_received_at", {})
+        feld_vorher = data.setdefault("fleet_telemetry_field_previous_received_at", {})
+        feld_abstand = data.setdefault("fleet_telemetry_field_interval_ms", {})
+        if isinstance(feld_empfang, dict):
+            vorheriger_empfang = _as_float(feld_empfang.get(field))
+            if vorheriger_empfang is None or timestamp_ms >= vorheriger_empfang:
+                if vorheriger_empfang is not None and timestamp_ms != vorheriger_empfang:
+                    if isinstance(feld_vorher, dict):
+                        feld_vorher[field] = int(vorheriger_empfang)
+                    if isinstance(feld_abstand, dict):
+                        feld_abstand[field] = int(timestamp_ms - vorheriger_empfang)
+                feld_empfang[field] = int(timestamp_ms)
     return timestamp_ms
 
 
