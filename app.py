@@ -5537,7 +5537,12 @@ def _fleet_telemetrie_basisdaten(data, vin, cache_id, timestamp_ms):
     return data
 
 
-def _fleet_telemetrie_empfang_vermerken(data, timestamp_ms, field=None):
+def _fleet_telemetrie_empfang_vermerken(
+    data,
+    timestamp_ms,
+    field=None,
+    letztes_feld_merken=True,
+):
     """Merke, wann zuletzt irgendein Telemetriepaket empfangen wurde."""
 
     if not isinstance(data, dict):
@@ -5548,7 +5553,8 @@ def _fleet_telemetrie_empfang_vermerken(data, timestamp_ms, field=None):
     if bisher is None or timestamp_ms >= bisher:
         data["fleet_telemetry_received_at"] = timestamp_ms
     if field:
-        data["fleet_telemetry_last_received_field"] = field
+        if letztes_feld_merken:
+            data["fleet_telemetry_last_received_field"] = field
         feld_empfang = data.setdefault("fleet_telemetry_field_received_at", {})
         feld_vorher = data.setdefault("fleet_telemetry_field_previous_received_at", {})
         feld_abstand = data.setdefault("fleet_telemetry_field_interval_ms", {})
@@ -6522,6 +6528,12 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
                 ):
                     letzter_empfangszeitstempel = timestamp_ms
                     letztes_empfangenes_feld = field
+                _fleet_telemetrie_empfang_vermerken(
+                    data,
+                    timestamp_ms,
+                    field,
+                    letztes_feld_merken=False,
+                )
                 value = _fleet_telemetrie_wert(value)
                 if _fleet_telemetrie_wert_unveraendert(data, field, value):
                     continue

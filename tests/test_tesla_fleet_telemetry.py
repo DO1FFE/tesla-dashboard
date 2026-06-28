@@ -225,6 +225,48 @@ def test_fleet_telemetrie_mqtt_sendet_empfangszeit_bei_unveraenderten_rohwerten(
     assert len(sammler.daten) == 3
 
 
+def test_fleet_telemetrie_batch_merkt_empfangszeit_aller_felder(monkeypatch):
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
+    monkeypatch.setattr(app, "_load_cached", lambda vehicle_id: {})
+    monkeypatch.setattr(app, "_save_cached", lambda vehicle_id, data: None)
+    monkeypatch.setattr(app, "_subscriber_daten_senden", lambda *args: None)
+    monkeypatch.setattr(app, "_aprs_spaeter_senden", lambda *args: None)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(
+        app,
+        "latest_data",
+        {
+            "veh-1": {
+                "vin": "TESTVIN",
+                "fleet_telemetry_raw": {
+                    "VehicleSpeed": 12,
+                    "DriverSeatOccupied": False,
+                },
+                "drive_state": {"speed": 12},
+                "vehicle_state": {"is_user_present": False},
+            },
+        },
+    )
+
+    assert app._fleet_telemetrie_v_felder_aktualisieren(
+        "TESTVIN",
+        [
+            ("VehicleSpeed", 12, 2000),
+            ("DriverSeatOccupied", False, 2001),
+        ],
+    )
+
+    daten = app.latest_data["veh-1"]
+    assert daten["fleet_telemetry_received_at"] == 2001
+    assert daten["fleet_telemetry_last_received_field"] == "DriverSeatOccupied"
+    assert daten["fleet_telemetry_field_received_at"]["VehicleSpeed"] == 2000
+    assert daten["fleet_telemetry_field_received_at"]["DriverSeatOccupied"] == 2001
+
+
 def test_fleet_telemetrie_connectivity_wertet_disconnected_als_offline(monkeypatch):
     gespeicherte_daten = []
     connected_at = "2026-06-14T14:00:00Z"
