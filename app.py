@@ -5545,6 +5545,13 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
         )
         aktivierbares_ziel = ziel
         if ziel == "live":
+            live_ausstehend = (
+                status.get("last_sent_profile") == "live"
+                and not _fleet_telemetrie_profile_sync_bestaetigt(
+                    status,
+                    "live",
+                )
+            )
             live_erweitert_ausstehend = (
                 status.get("last_sent_profile") == "live_extended"
                 and not _fleet_telemetrie_profile_sync_bestaetigt(
@@ -5552,7 +5559,9 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                     "live_extended",
                 )
             )
-            if live_erweitert_ausstehend:
+            if live_ausstehend:
+                aktivierbares_ziel = "live"
+            elif live_erweitert_ausstehend:
                 aktivierbares_ziel = "live_extended" if live_takt_stabil else "live"
             elif current == "live_extended":
                 aktivierbares_ziel = "live_extended" if live_takt_stabil else "live"

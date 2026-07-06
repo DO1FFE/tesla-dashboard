@@ -1951,6 +1951,58 @@ def test_fleet_telemetrie_profile_faellt_bei_instabilem_extended_auf_live(monkey
     assert app._fleet_telemetry_profile_status["live_stable_since"] == 0.0
 
 
+def test_fleet_telemetrie_profile_ueberschreibt_pending_live_nicht(monkeypatch):
+    angefordert = []
+
+    monkeypatch.setattr(app.time, "time", lambda: 2210.0)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        {
+            "current": "live_extended",
+            "target": "live",
+            "target_since": 2000.0,
+            "last_sent": 2200.0,
+            "last_sent_profile": "live",
+            "last_error": None,
+            "config_synced": False,
+            "config_key_paired": None,
+            "config_sync_state": "pending",
+            "config_sync_profile": "live",
+            "config_sync_checked_at": 2200.0,
+            "config_sync_updated_at": 2200.0,
+            "config_sync_error": None,
+            "config_sync_details": [],
+            "live_stable_since": 2200.0,
+            "updated_at": 2200.0,
+        },
+    )
+    daten = {
+        "fleet_telemetry_received_at": 2_209_000,
+        "fleet_telemetry_field_received_at": {
+            "PackCurrent": 2_209_000,
+            "PackVoltage": 2_209_000,
+        },
+        "fleet_telemetry_field_interval_ms": {
+            "PackCurrent": 1000,
+            "PackVoltage": 1000,
+        },
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "climate_state": {"is_climate_on": True},
+        "charge_state": {"charging_state": "Disconnected"},
+    }
+
+    app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    assert angefordert == []
+    assert app._fleet_telemetry_profile_status["config_sync_profile"] == "live"
+
+
 def test_fleet_telemetrie_profile_erfolg_setzt_current_erst_nach_sync(monkeypatch):
     monkeypatch.setattr(app.time, "time", lambda: 2000.0)
     monkeypatch.setattr(
