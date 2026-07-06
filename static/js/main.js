@@ -3503,7 +3503,9 @@ function zeichneVehicleState() {
 }
 
 function telemetryProfileParkCountdownSekunden() {
-    if (lastTelemetryProfile !== 'live' || lastTelemetryTarget !== 'parked') {
+    var liveProfil = lastTelemetryProfile === 'live' ||
+        lastTelemetryProfile === 'live_extended';
+    if (!liveProfil || lastTelemetryTarget !== 'parked') {
         return null;
     }
     if (lastTelemetryTargetSince == null || telemetryParkDelaySeconds == null) {
@@ -3513,15 +3515,25 @@ function telemetryProfileParkCountdownSekunden() {
     return Math.max(0, Math.ceil((zielMillis - Date.now()) / 1000));
 }
 
+function telemetryProfileAnzeigename(profile) {
+    if (profile === 'live_extended') {
+        return 'live+';
+    }
+    return profile || '';
+}
+
 function zeichneTelemetryProfile() {
     var $profil = $('#telemetry-profile');
     if (!lastTelemetryProfile) {
         $profil.text('');
         return;
     }
-    var text = 'Telemetry: ' + lastTelemetryProfile;
-    if (lastTelemetryTarget && lastTelemetryTarget !== lastTelemetryProfile) {
-        text += ' -> ' + lastTelemetryTarget;
+    var text = 'Telemetry: ' + telemetryProfileAnzeigename(lastTelemetryProfile);
+    var zielUnterschiedlich = lastTelemetryTarget &&
+        lastTelemetryTarget !== lastTelemetryProfile &&
+        !(lastTelemetryProfile === 'live_extended' && lastTelemetryTarget === 'live');
+    if (zielUnterschiedlich) {
+        text += ' -> ' + telemetryProfileAnzeigename(lastTelemetryTarget);
         var rest = telemetryProfileParkCountdownSekunden();
         if (rest != null) {
             text += ' (in ' + rest + ' ' +

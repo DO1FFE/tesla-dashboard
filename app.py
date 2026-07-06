@@ -1696,7 +1696,7 @@ _fleet_telemetry_cache_pending = {}
 _fleet_telemetry_cache_schreib_lock = threading.Lock()
 _fleet_telemetry_queue_verworfen = 0
 _fleet_telemetry_queue_warnung = 0.0
-FLEET_TELEMETRIE_PROFILE = {"live", "parked", "charging"}
+FLEET_TELEMETRIE_PROFILE = {"live", "live_extended", "parked", "charging"}
 FLEET_TELEMETRIE_PROFILE_STANDARD = "live"
 FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS = max(
     0.0,
@@ -1737,6 +1737,22 @@ FLEET_TELEMETRIE_PROFILE_RESEND_AFTER_SECONDS = max(
 FLEET_TELEMETRIE_PROFILE_FAST_RESEND_AFTER_SECONDS = max(
     30.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_FAST_RESEND_AFTER_SECONDS", "60")),
+)
+FLEET_TELEMETRIE_PROFILE_LIVE_EXTENDED_DELAY_SECONDS = max(
+    30.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_EXTENDED_DELAY_SECONDS", "90")),
+)
+FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ABSTAND_SECONDS = max(
+    1.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MAX_INTERVAL_SECONDS", "3")),
+)
+FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS = max(
+    5.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MAX_AGE_SECONDS", "15")),
+)
+FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_FELDER = max(
+    1,
+    int(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MIN_FIELDS", "2")),
 )
 FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER = frozenset()
 FLEET_TELEMETRIE_PROFILE_LIVE_1S_FELDER = frozenset({
@@ -1831,8 +1847,54 @@ FLEET_TELEMETRIE_PROFILE_LIVE_FELDER = frozenset({
     "Soc",
     "VehicleSpeed",
 })
+FLEET_TELEMETRIE_PROFILE_LIVE_ERWEITERT_60S_FELDER = frozenset({
+    "ChargePort",
+    "ChargePortDoorOpen",
+    "ChargePortLatch",
+    "ChargingCableType",
+    "DestinationName",
+    "FastChargerPresent",
+    "FastChargerType",
+    "HvacLeftTemperatureRequest",
+    "HvacRightTemperatureRequest",
+    "MediaAudioVolume",
+    "MediaNowPlayingAlbum",
+    "MediaNowPlayingArtist",
+    "MediaNowPlayingDuration",
+    "MediaNowPlayingElapsed",
+    "MediaNowPlayingStation",
+    "MediaNowPlayingTitle",
+    "MediaPlaybackSource",
+    "ModuleTempMax",
+    "ModuleTempMin",
+    "SentryMode",
+    "ServiceMode",
+    "TpmsHardWarnings",
+    "TpmsPressureFl",
+    "TpmsPressureFr",
+    "TpmsPressureRl",
+    "TpmsPressureRr",
+    "TpmsSoftWarnings",
+    "ValetModeEnabled",
+    "VehicleName",
+    "Version",
+})
+FLEET_TELEMETRIE_PROFILE_LIVE_EXTENDED_FELDER = (
+    FLEET_TELEMETRIE_PROFILE_LIVE_FELDER
+    | FLEET_TELEMETRIE_PROFILE_LIVE_5S_FELDER
+    | FLEET_TELEMETRIE_PROFILE_LIVE_10S_FELDER
+    | FLEET_TELEMETRIE_PROFILE_LIVE_30S_FELDER
+    | FLEET_TELEMETRIE_PROFILE_LIVE_ERWEITERT_60S_FELDER
+)
 FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNGSFELDER = (
     FLEET_TELEMETRIE_PROFILE_LIVE_1S_FELDER
+)
+FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_FELDER = (
+    "VehicleSpeed",
+    "PackCurrent",
+    "Location",
+    "PackVoltage",
+    "BrakePedalPos",
 )
 FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MAX_ABSTAND_SECONDS = max(
     2.0,
@@ -2030,6 +2092,7 @@ def _fleet_telemetrie_profile_status_standard():
         "config_sync_updated_at": 0.0,
         "config_sync_error": None,
         "config_sync_details": [],
+        "live_stable_since": 0.0,
         "updated_at": 0.0,
     }
 
@@ -2075,7 +2138,7 @@ def _fleet_telemetrie_profile_status_laden():
         value = geladen.get(key)
         if value in FLEET_TELEMETRIE_PROFILE:
             status[key] = value
-    for key in ("target_since", "last_sent", "updated_at"):
+    for key in ("target_since", "last_sent", "updated_at", "live_stable_since"):
         try:
             value = float(geladen.get(key))
         except Exception:
@@ -4596,12 +4659,35 @@ def _fleet_telemetrie_profile_live_takt_bestaetigt(data, status):
     return False
 
 
+def _fleet_telemetrie_profile_live_takt_stabil(data, jetzt=None):
+    """Prüfe, ob mehrere kritische Live-Felder aktuell schnell eintreffen."""
+
+    if not isinstance(data, dict):
+        return False
+    jetzt = time.time() if jetzt is None else float(jetzt)
+    empfangen = data.get("fleet_telemetry_field_received_at")
+    abstände = data.get("fleet_telemetry_field_interval_ms")
+    if not isinstance(empfangen, dict) or not isinstance(abstände, dict):
+        return False
+    stabile_felder = 0
+    for feld in FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_FELDER:
+        letzter = _fleet_telemetrie_timestamp_sekunden(empfangen.get(feld), jetzt)
+        intervall = _as_float(abstände.get(feld))
+        if letzter is None or intervall is None:
+            continue
+        if jetzt - letzter > FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS:
+            continue
+        if intervall <= FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ABSTAND_SECONDS * 1000:
+            stabile_felder += 1
+    return stabile_felder >= FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_FELDER
+
+
 def _fleet_telemetrie_profile_stream_bestaetigt(data, status, profil):
     """Prüfe, ob der Stream das gesendete Profil belastbar bestätigt."""
 
     if not _fleet_telemetrie_profile_stream_nach_config_aktiv(data, status):
         return False
-    if profil == "live":
+    if profil in {"live", "live_extended"}:
         return _fleet_telemetrie_profile_live_takt_bestaetigt(data, status)
     return True
 
@@ -4762,6 +4848,8 @@ def _fleet_telemetrie_profile_intervall(profil, feld):
         if feld in FLEET_TELEMETRIE_PROFILE_LIVE_30S_FELDER:
             return 30
         return 60
+    if profil == "live_extended":
+        return _fleet_telemetrie_profile_intervall("live", feld)
     if profil == "parked":
         if feld in FLEET_TELEMETRIE_PROFILE_PARKED_10S_FELDER:
             return 10
@@ -4794,6 +4882,10 @@ def _fleet_telemetrie_profile_config_erstellen(request_data, profil):
     if profil == "live":
         for feld in list(fields):
             if feld not in FLEET_TELEMETRIE_PROFILE_LIVE_FELDER:
+                fields.pop(feld, None)
+    if profil == "live_extended":
+        for feld in list(fields):
+            if feld not in FLEET_TELEMETRIE_PROFILE_LIVE_EXTENDED_FELDER:
                 fields.pop(feld, None)
     if profil == "parked":
         for feld in list(fields):
@@ -5416,11 +5508,13 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
         return _fleet_telemetrie_profile_status_an_daten(data)
     ziel = _fleet_telemetrie_profile_ziel(data)
     jetzt = time.time()
+    live_takt_stabil = _fleet_telemetrie_profile_live_takt_stabil(data, jetzt)
     profil_anfordern = None
     with _fleet_telemetry_profile_lock:
         status = _fleet_telemetry_profile_status
         status_geändert = False
-        if status.get("target") != ziel:
+        ziel_geändert = status.get("target") != ziel
+        if ziel_geändert:
             status["target"] = ziel
             status["target_since"] = jetzt
             status["updated_at"] = jetzt
@@ -5428,13 +5522,53 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
             status_geändert = True
         target_since = float(status.get("target_since") or jetzt)
         current = status.get("current") or FLEET_TELEMETRIE_PROFILE_STANDARD
+        live_stable_since = _as_float(status.get("live_stable_since"))
+        if ziel == "live" and live_takt_stabil:
+            if (
+                ziel_geändert
+                or live_stable_since is None
+                or live_stable_since <= 0
+            ):
+                live_stable_since = jetzt
+                status["live_stable_since"] = live_stable_since
+                status_geändert = True
+        else:
+            if live_stable_since is not None and live_stable_since > 0:
+                status["live_stable_since"] = 0.0
+                status_geändert = True
+            live_stable_since = None
+        live_stable_seconds = None
+        if live_stable_since is not None:
+            live_stable_seconds = jetzt - live_stable_since
+        live_stable_lang_genug = live_stable_seconds is not None and (
+            live_stable_seconds >= FLEET_TELEMETRIE_PROFILE_LIVE_EXTENDED_DELAY_SECONDS
+        )
         aktivierbares_ziel = ziel
+        if ziel == "live":
+            live_erweitert_ausstehend = (
+                status.get("last_sent_profile") == "live_extended"
+                and not _fleet_telemetrie_profile_sync_bestaetigt(
+                    status,
+                    "live_extended",
+                )
+            )
+            if live_erweitert_ausstehend:
+                aktivierbares_ziel = "live_extended" if live_takt_stabil else "live"
+            elif current == "live_extended":
+                aktivierbares_ziel = "live_extended" if live_takt_stabil else "live"
+            elif (
+                current == "live"
+                and _fleet_telemetrie_profile_sync_bestaetigt(status, "live")
+                and live_takt_stabil
+                and live_stable_lang_genug
+            ):
+                aktivierbares_ziel = "live_extended"
         if (
             ziel == "parked"
             and jetzt - target_since < FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS
         ):
             aktivierbares_ziel = current
-        dringlich = aktivierbares_ziel in {"live", "charging"}
+        dringlich = aktivierbares_ziel in {"live", "live_extended", "charging"}
         cooldown_abgelaufen = (
             jetzt - float(status.get("last_sent") or 0)
             >= FLEET_TELEMETRIE_PROFILE_SEND_COOLDOWN_SECONDS
