@@ -1728,7 +1728,7 @@ def test_fleet_telemetrie_profile_live_stabil_toleriert_parkende_luecke():
             "PackVoltage": 2_000_000,
         },
         "fleet_telemetry_field_interval_ms": {
-            "PackCurrent": 4000,
+            "PackCurrent": 8500,
             "PackVoltage": 1000,
         },
     }
