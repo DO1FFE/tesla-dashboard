@@ -1721,6 +1721,21 @@ def test_fleet_telemetrie_profile_live_bestaetigt_keinen_alten_10s_takt(monkeypa
     assert app._fleet_telemetry_profile_status["config_sync_state"] == "pending"
 
 
+def test_fleet_telemetrie_profile_live_stabil_toleriert_parkende_luecke():
+    daten = {
+        "fleet_telemetry_field_received_at": {
+            "PackCurrent": 2_000_000,
+            "PackVoltage": 2_000_000,
+        },
+        "fleet_telemetry_field_interval_ms": {
+            "PackCurrent": 4000,
+            "PackVoltage": 1000,
+        },
+    }
+
+    assert app._fleet_telemetrie_profile_live_takt_stabil(daten, 2000.0) is True
+
+
 def test_fleet_telemetrie_profile_erweitert_stabiles_live(monkeypatch):
     angefordert = []
 
