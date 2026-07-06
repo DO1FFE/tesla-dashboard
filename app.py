@@ -1798,6 +1798,34 @@ FLEET_TELEMETRIE_PROFILE_LIVE_30S_FELDER = frozenset({
     "SeatHeaterRight",
     "WiperHeatEnabled",
 })
+FLEET_TELEMETRIE_PROFILE_LIVE_FELDER = frozenset({
+    "BatteryLevel",
+    "BrakePedal",
+    "CenterDisplay",
+    "ChargeState",
+    "ClimateKeeperMode",
+    "DetailedChargeState",
+    "DoorState",
+    "DriverSeatOccupied",
+    "EstBatteryRange",
+    "Gear",
+    "GpsHeading",
+    "GpsState",
+    "HvacPower",
+    "IdealBatteryRange",
+    "InsideTemp",
+    "Location",
+    "Locked",
+    "MediaPlaybackStatus",
+    "Odometer",
+    "OutsideTemp",
+    "PackCurrent",
+    "PackVoltage",
+    "PedalPosition",
+    "RatedRange",
+    "Soc",
+    "VehicleSpeed",
+})
 FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNGSFELDER = (
     FLEET_TELEMETRIE_PROFILE_LIVE_1S_FELDER
 )
@@ -4758,6 +4786,10 @@ def _fleet_telemetrie_profile_config_erstellen(request_data, profil):
         return config_request
     for feld in FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER:
         fields.pop(feld, None)
+    if profil == "live":
+        for feld in list(fields):
+            if feld not in FLEET_TELEMETRIE_PROFILE_LIVE_FELDER:
+                fields.pop(feld, None)
     if profil == "parked":
         for feld in list(fields):
             if feld not in FLEET_TELEMETRIE_PROFILE_PARKED_FELDER:
