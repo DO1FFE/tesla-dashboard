@@ -1394,7 +1394,12 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
                 "Location": {"interval_seconds": 1, "minimum_delta": 0},
                 "MediaNowPlayingTitle": {"interval_seconds": 30},
                 "BatteryLevel": {"interval_seconds": 1, "minimum_delta": 0.1},
+                "BrakePedal": {"interval_seconds": 10},
+                "BrakePedalPos": {"interval_seconds": 10},
                 "ChargeState": {"interval_seconds": 1},
+                "LightsHazardsActive": {"interval_seconds": 10},
+                "LightsHighBeams": {"interval_seconds": 10},
+                "LightsTurnSignal": {"interval_seconds": 10},
                 "PackCurrent": {"interval_seconds": 1, "minimum_delta": 0.1},
                 "RouteLine": {"interval_seconds": 1},
                 "VehicleSpeed": {"interval_seconds": 1, "minimum_delta": 0.1},
@@ -1414,7 +1419,12 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "minimum_delta" not in live_fields["PackCurrent"]
     assert live_fields["BatteryLevel"]["interval_seconds"] == 5
     assert "minimum_delta" not in live_fields["BatteryLevel"]
+    assert live_fields["BrakePedal"]["interval_seconds"] == 1
+    assert live_fields["BrakePedalPos"]["interval_seconds"] == 1
     assert live_fields["ChargeState"]["interval_seconds"] == 10
+    assert live_fields["LightsHazardsActive"]["interval_seconds"] == 1
+    assert live_fields["LightsHighBeams"]["interval_seconds"] == 1
+    assert live_fields["LightsTurnSignal"]["interval_seconds"] == 1
     assert live_fields["InsideTemp"]["interval_seconds"] == 10
     assert "minimum_delta" not in live_fields["InsideTemp"]
     assert "MediaNowPlayingTitle" not in live_fields

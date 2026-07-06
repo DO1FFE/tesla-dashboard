@@ -1741,6 +1741,7 @@ FLEET_TELEMETRIE_PROFILE_FAST_RESEND_AFTER_SECONDS = max(
 FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER = frozenset()
 FLEET_TELEMETRIE_PROFILE_LIVE_1S_FELDER = frozenset({
     "BrakePedal",
+    "BrakePedalPos",
     "DestinationLocation",
     "Gear",
     "GpsHeading",
@@ -1801,6 +1802,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_30S_FELDER = frozenset({
 FLEET_TELEMETRIE_PROFILE_LIVE_FELDER = frozenset({
     "BatteryLevel",
     "BrakePedal",
+    "BrakePedalPos",
     "CenterDisplay",
     "ChargeState",
     "ClimateKeeperMode",
@@ -1814,6 +1816,9 @@ FLEET_TELEMETRIE_PROFILE_LIVE_FELDER = frozenset({
     "HvacPower",
     "IdealBatteryRange",
     "InsideTemp",
+    "LightsHazardsActive",
+    "LightsHighBeams",
+    "LightsTurnSignal",
     "Location",
     "Locked",
     "MediaPlaybackStatus",
