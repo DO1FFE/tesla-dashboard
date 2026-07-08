@@ -527,3 +527,23 @@ def test_compute_energy_stats_uses_latest_value_per_session(tmp_path, monkeypatc
 
     stats = app._compute_energy_stats()
     assert stats == {"2024-05-01": 10.5}
+
+
+def test_compute_energy_stats_ersetzt_spaete_kleine_korrektur(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+
+    energy_file = tmp_path / "energy.log"
+    energy_file.write_text(
+        "\n".join(
+            [
+                '2026-07-06 13:24:32,836 {"vehicle_id": "veh", "added_energy": 31.31305054247334}',
+                '2026-07-06 14:09:34,285 {"vehicle_id": "veh", "added_energy": 31.42215524819624}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    stats = app._compute_energy_stats()
+
+    assert stats == {"2026-07-06": 31.422155}

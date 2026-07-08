@@ -1193,6 +1193,18 @@ AGGREGATION_INTERVAL = float(os.getenv("AGGREGATION_INTERVAL_SECONDS", "300"))
 STATISTICS_STARTUP_DELAY = float(os.getenv("STATISTICS_STARTUP_DELAY_SECONDS", "10"))
 DISABLE_STATISTICS_AGGREGATION = os.getenv("DISABLE_STATISTICS_AGGREGATION") == "1"
 FORCE_STATISTICS_REBUILD = os.getenv("FORCE_STATISTICS_REBUILD") == "1"
+STATISTIK_ENERGIE_KORREKTUR_MAX_DELTA_KWH = max(
+    0.0,
+    float(os.getenv("STATISTIK_ENERGIE_KORREKTUR_MAX_DELTA_KWH", "0.5")),
+)
+STATISTIK_ENERGIE_KORREKTUR_MAX_RELATIV = max(
+    0.0,
+    float(os.getenv("STATISTIK_ENERGIE_KORREKTUR_MAX_RELATIV", "0.02")),
+)
+STATISTIK_ENERGIE_KORREKTUR_MAX_ABSTAND_SECONDS = max(
+    0.0,
+    float(os.getenv("STATISTIK_ENERGIE_KORREKTUR_MAX_ABSTAND_SECONDS", "43200")),
+)
 
 
 def _parse_cli_arguments():
@@ -2439,6 +2451,154 @@ def _set_meta(conn, key, value):
     conn.commit()
 
 
+def _statistik_energie_session_key(vehicle_id, ts_dt):
+    fahrzeug = str(vehicle_id) if vehicle_id is not None else "__default__"
+    return f"{fahrzeug}|{ts_dt.isoformat()}"
+
+
+def _statistik_energie_session_key_zerlegen(session_key):
+    fahrzeug, trenner, zeittext = str(session_key or "").partition("|")
+    if not trenner or not zeittext:
+        return None, None
+    try:
+        ts_dt = datetime.fromisoformat(zeittext)
+    except Exception:
+        return None, None
+    if ts_dt.tzinfo is None:
+        ts_dt = ts_dt.replace(tzinfo=LOCAL_TZ)
+    return fahrzeug, ts_dt.astimezone(LOCAL_TZ)
+
+
+def _statistik_energie_logeintrag(line):
+    idx = line.find("{")
+    if idx == -1:
+        return None
+    ts_str = line[:idx].strip()
+    ts_dt = _parse_log_time(ts_str)
+    if ts_dt is None:
+        return None
+    try:
+        entry = json.loads(line[idx:])
+        val = float(entry.get("added_energy", 0.0))
+    except Exception:
+        return None
+    if val <= 0.001:
+        return None
+    return ts_dt, entry.get("vehicle_id"), val
+
+
+def _statistik_energie_ist_korrektur(vorher, aktuell):
+    try:
+        vorher = float(vorher)
+        aktuell = float(aktuell)
+    except (TypeError, ValueError):
+        return False
+    except Exception:
+        return False
+    differenz = abs(aktuell - vorher)
+    if differenz <= 0.001:
+        return False
+    grenze = max(
+        STATISTIK_ENERGIE_KORREKTUR_MAX_DELTA_KWH,
+        max(abs(vorher), abs(aktuell)) * STATISTIK_ENERGIE_KORREKTUR_MAX_RELATIV,
+    )
+    return differenz <= grenze
+
+
+def _statistik_energie_korrektur_kandidat(sessions, vehicle_id, ts_dt, wert):
+    fahrzeug = str(vehicle_id) if vehicle_id is not None else "__default__"
+    kandidat = None
+    kandidat_abstand = None
+    for session in sessions.values():
+        if session.get("vehicle_id") != fahrzeug:
+            continue
+        session_ts = session.get("timestamp")
+        if not isinstance(session_ts, datetime):
+            continue
+        try:
+            abstand = (ts_dt - session_ts).total_seconds()
+        except Exception:
+            continue
+        if abstand < 0:
+            continue
+        if abstand > STATISTIK_ENERGIE_KORREKTUR_MAX_ABSTAND_SECONDS:
+            continue
+        if not _statistik_energie_ist_korrektur(session.get("value"), wert):
+            continue
+        if kandidat is None or abstand < kandidat_abstand:
+            kandidat = session
+            kandidat_abstand = abstand
+    return kandidat
+
+
+def _statistik_energie_session_eintragen(sessions, vehicle_id, ts_dt, wert):
+    key = _statistik_energie_session_key(vehicle_id, ts_dt)
+    fahrzeug = str(vehicle_id) if vehicle_id is not None else "__default__"
+    if key in sessions:
+        session = sessions[key]
+        vorher = session.get("value", 0.0)
+        session["value"] = wert
+        return session, vorher
+
+    kandidat = _statistik_energie_korrektur_kandidat(
+        sessions,
+        vehicle_id,
+        ts_dt,
+        wert,
+    )
+    if kandidat is not None:
+        vorher = kandidat.get("value", 0.0)
+        kandidat["value"] = wert
+        return kandidat, vorher
+
+    session = {
+        "key": key,
+        "vehicle_id": fahrzeug,
+        "timestamp": ts_dt,
+        "day": ts_dt.date().isoformat(),
+        "value": wert,
+    }
+    sessions[key] = session
+    return session, 0.0
+
+
+def _statistik_energie_sessions_aus_db(conn):
+    sessions = {}
+    for day, session_key, value in conn.execute(
+        "SELECT day, session_key, value FROM statistics_energy_sessions"
+    ).fetchall():
+        fahrzeug, ts_dt = _statistik_energie_session_key_zerlegen(session_key)
+        if fahrzeug is None or ts_dt is None:
+            continue
+        try:
+            wert = float(value or 0.0)
+        except Exception:
+            continue
+        sessions[session_key] = {
+            "key": session_key,
+            "vehicle_id": fahrzeug,
+            "timestamp": ts_dt,
+            "day": day,
+            "value": wert,
+        }
+    return sessions
+
+
+def _statistik_energie_tageswert(sessions, day):
+    total = 0.0
+    for session in sessions.values():
+        if session.get("day") != day:
+            continue
+        total += float(session.get("value") or 0.0)
+    return round(total, 6)
+
+
+def _statistik_energie_tageswert_setzen(conn, day, energy):
+    current = dict(_load_daily_from_db(conn).get(day, {}))
+    current["energy"] = round(float(energy or 0.0), 6)
+    _write_daily_row(conn, day, current)
+
+
 def _reset_statistics_state(conn):
     conn.execute("DELETE FROM statistics_aggregate")
     conn.execute("DELETE FROM statistics_energy_sessions")
@@ -2657,37 +2817,30 @@ def _seed_energy_sessions_from_log(conn, offset=0):
     if offset > size:
         offset = 0
 
+    sessions = {}
     try:
         with open(path, "r", encoding="utf-8") as handle:
             handle.seek(offset)
             for line in handle:
-                idx = line.find("{")
-                if idx == -1:
+                eintrag = _statistik_energie_logeintrag(line)
+                if eintrag is None:
                     continue
-                ts_str = line[:idx].strip()
-                ts_dt = _parse_log_time(ts_str)
-                if ts_dt is None:
-                    continue
-                try:
-                    entry = json.loads(line[idx:])
-                    vid = entry.get("vehicle_id")
-                    val = float(entry.get("added_energy", 0.0))
-                except Exception:
-                    continue
-
-                if val <= 0:
-                    continue
-                day = ts_dt.date().isoformat()
-                session_key = (vid if vid is not None else "__default__") + "|" + ts_dt.isoformat()
-                try:
-                    conn.execute(
-                        "INSERT OR IGNORE INTO statistics_energy_sessions(day, session_key, value) VALUES(?, ?, ?)",
-                        (day, session_key, val),
-                    )
-                except Exception:
-                    continue
+                ts_dt, vid, val = eintrag
+                _statistik_energie_session_eintragen(sessions, vid, ts_dt, val)
     except FileNotFoundError:
         pass
+    for session in sessions.values():
+        try:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO statistics_energy_sessions(
+                    day, session_key, value
+                ) VALUES(?, ?, ?)
+                """,
+                (session["day"], session["key"], session["value"]),
+            )
+        except Exception:
+            continue
     conn.commit()
     _set_meta(conn, "energy_offset", size)
 
@@ -2788,39 +2941,33 @@ def _process_energy_log_increment(conn):
     if offset > size:
         offset = 0
 
+    sessions = _statistik_energie_sessions_aus_db(conn)
     try:
         with open(path, "r", encoding="utf-8") as handle:
             handle.seek(offset)
             for line in handle:
-                idx = line.find("{")
-                if idx == -1:
+                eintrag = _statistik_energie_logeintrag(line)
+                if eintrag is None:
                     continue
-                ts_str = line[:idx].strip()
-                ts_dt = _parse_log_time(ts_str)
-                if ts_dt is None:
+                ts_dt, vid_val, val = eintrag
+                session, previous = _statistik_energie_session_eintragen(
+                    sessions,
+                    vid_val,
+                    ts_dt,
+                    val,
+                )
+                if abs(val - float(previous or 0.0)) <= 0.001:
                     continue
-                try:
-                    entry = json.loads(line[idx:])
-                    vid_val = entry.get("vehicle_id")
-                    val = float(entry.get("added_energy", 0.0))
-                except Exception:
-                    continue
-                if val <= 0:
-                    continue
-                session_key = (vid_val if vid_val is not None else "__default__") + "|" + ts_dt.isoformat()
-                day = ts_dt.date().isoformat()
-                cur = conn.execute(
-                    "SELECT value FROM statistics_energy_sessions WHERE session_key=?",
-                    (session_key,),
-                ).fetchone()
-                previous = float(cur[0]) if cur else 0.0
-                if val > previous:
-                    delta = val - previous
-                    _merge_daily_row(conn, day, {"energy": delta})
-                    conn.execute(
-                        "INSERT INTO statistics_energy_sessions(day, session_key, value) VALUES(?, ?, ?) ON CONFLICT(session_key) DO UPDATE SET value=excluded.value",
-                        (day, session_key, val),
-                    )
+                conn.execute(
+                    """
+                    INSERT INTO statistics_energy_sessions(day, session_key, value)
+                    VALUES(?, ?, ?)
+                    ON CONFLICT(session_key) DO UPDATE SET value=excluded.value
+                    """,
+                    (session["day"], session["key"], session["value"]),
+                )
+                tageswert = _statistik_energie_tageswert(sessions, session["day"])
+                _statistik_energie_tageswert_setzen(conn, session["day"], tageswert)
     except FileNotFoundError:
         pass
     except Exception:
@@ -8450,46 +8597,31 @@ def _compute_energy_stats(filename=None, vehicle_id=None):
         filename = resolve_log_path(vehicle_id, "energy.log")
 
     eps = 0.001
-    daily_sessions = {}
+    sessions = {}
 
     try:
         with open(filename, "r", encoding="utf-8") as f:
             for line in f:
-                idx = line.find("{")
-                if idx == -1:
+                eintrag = _statistik_energie_logeintrag(line)
+                if eintrag is None:
                     continue
-                ts_str = line[:idx].strip()
-                ts_dt = _parse_log_time(ts_str)
-                if ts_dt is None:
-                    continue
-                try:
-                    entry = json.loads(line[idx:])
-                    vid = entry.get("vehicle_id")
-                    val = float(entry.get("added_energy", 0.0))
-                except Exception:
-                    continue
-
-                if val <= eps:
-                    continue
-
-                day = ts_dt.date().isoformat()
-                session_key = (
-                    vid if vid is not None else "__default__",
-                    ts_dt.isoformat(),
-                )
-
-                sessions = daily_sessions.setdefault(day, {})
-                previous = sessions.get(session_key)
-                if previous is None or val > previous:
-                    sessions[session_key] = val
+                ts_dt, vid, val = eintrag
+                _statistik_energie_session_eintragen(sessions, vid, ts_dt, val)
     except Exception:
         pass
 
     energy = {}
-    for day, sessions in daily_sessions.items():
-        total = sum(sessions.values())
-        if total > eps:
-            energy[day] = round(total, 6)
+    for session in sessions.values():
+        wert = float(session.get("value") or 0.0)
+        if wert <= eps:
+            continue
+        day = session.get("day")
+        energy[day] = energy.get(day, 0.0) + wert
+    energy = {
+        day: round(total, 6)
+        for day, total in energy.items()
+        if total > eps
+    }
 
     return energy
 

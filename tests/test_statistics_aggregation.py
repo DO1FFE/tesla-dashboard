@@ -238,3 +238,47 @@ def test_state_backfill_und_increment_verteilen_offenen_zeitraum_nicht_doppelt(m
     assert second is not None
     assert second[0] == first[0]
     assert second[1:] == first[1:]
+
+
+def test_energy_increment_ersetzt_spaete_kleine_korrektur(monkeypatch, tmp_path):
+    db_path = tmp_path / "stats.db"
+    monkeypatch.setenv("STATISTICS_DB_PATH", str(db_path))
+    monkeypatch.setenv("DISABLE_STATISTICS_AGGREGATION", "1")
+
+    import app
+
+    importlib.reload(app)
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(app, "_default_vehicle_id", "veh")
+
+    energy_path = pathlib.Path(app.resolve_log_path("veh", "energy.log"))
+    energy_path.parent.mkdir(parents=True, exist_ok=True)
+    energy_path.write_text(
+        '2026-07-06 13:24:32,836 {"vehicle_id": "veh", "added_energy": 31.31305054247334}\n',
+        encoding="utf-8",
+    )
+
+    app._statistics_aggregation_tick()
+
+    with energy_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            '2026-07-06 14:09:34,285 {"vehicle_id": "veh", "added_energy": 31.42215524819624}\n'
+        )
+
+    app._statistics_aggregation_tick()
+
+    conn = app._statistics_conn()
+    try:
+        energy = conn.execute(
+            "SELECT energy FROM statistics_aggregate WHERE scope='daily' AND date='2026-07-06'"
+        ).fetchone()
+        sessions = conn.execute(
+            "SELECT COUNT(*), SUM(value) FROM statistics_energy_sessions WHERE day='2026-07-06'"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert energy is not None
+    assert round(float(energy[0]), 6) == 31.422155
+    assert sessions[0] == 1
+    assert round(float(sessions[1]), 6) == 31.422155
