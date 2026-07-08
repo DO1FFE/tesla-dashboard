@@ -1399,6 +1399,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
                 "BrakePedal": {"interval_seconds": 10},
                 "BrakePedalPos": {"interval_seconds": 10},
                 "ChargeState": {"interval_seconds": 1},
+                "HvacFanSpeed": {"interval_seconds": 60},
+                "HvacFanStatus": {"interval_seconds": 60},
                 "LightsHazardsActive": {"interval_seconds": 10},
                 "LightsHighBeams": {"interval_seconds": 10},
                 "LightsTurnSignal": {"interval_seconds": 10},
@@ -1424,6 +1426,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert live_fields["BrakePedal"]["interval_seconds"] == 1
     assert live_fields["BrakePedalPos"]["interval_seconds"] == 1
     assert live_fields["ChargeState"]["interval_seconds"] == 10
+    assert live_fields["HvacFanSpeed"]["interval_seconds"] == 30
+    assert live_fields["HvacFanStatus"]["interval_seconds"] == 30
     assert live_fields["LightsHazardsActive"]["interval_seconds"] == 1
     assert live_fields["LightsHighBeams"]["interval_seconds"] == 1
     assert live_fields["LightsTurnSignal"]["interval_seconds"] == 1

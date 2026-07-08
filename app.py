@@ -1846,6 +1846,8 @@ FLEET_TELEMETRIE_PROFILE_LIVE_FELDER = frozenset({
     "Gear",
     "GpsHeading",
     "GpsState",
+    "HvacFanSpeed",
+    "HvacFanStatus",
     "HvacPower",
     "IdealBatteryRange",
     "InsideTemp",
