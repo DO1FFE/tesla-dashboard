@@ -161,6 +161,10 @@ def test_technische_packdetails_sind_in_ui_eingebunden():
     assert "charge.pack_voltage" in js
     assert "charge.pack_current" in js
     assert "charge.pack_power" in js
+    assert "letzterDcdcEnableStatus" in js
+    assert "letzterDcdcEnableBekannt" in js
+    assert "wartet auf DC/DC-Telemetrie" in js
+    assert "12V-Versorgung:" in js
 
 
 def test_batterietemperatur_zeigt_durchschnitt_minimum_und_maximum():

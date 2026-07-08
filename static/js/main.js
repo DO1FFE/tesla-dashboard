@@ -2440,6 +2440,8 @@ var letzteBatterieTemperatur = null;
 var letzteBatterieTemperaturMinimum = null;
 var letzteBatterieTemperaturMaximum = null;
 var letzteTechnischeDetailsHtml = null;
+var letzterDcdcEnableStatus = null;
+var letzterDcdcEnableBekannt = false;
 
 function parseNumber(value) {
     if (value == null || value === '') {
@@ -3179,15 +3181,20 @@ function updateTechnischeDetails(charge) {
     if (!$info.length) {
         return;
     }
-    if (!configEnabled('technical-info') || !charge) {
+    if (!configEnabled('technical-info')) {
         $info.empty().hide();
         letzteTechnischeDetailsHtml = '';
         return;
     }
+    charge = charge || {};
 
     var packSpannung = parseNumber(charge.pack_voltage);
     var packStrom = parseNumber(charge.pack_current);
     var packLeistung = parseNumber(charge.pack_power);
+    if (charge.dcdc_enable != null) {
+        letzterDcdcEnableStatus = !!charge.dcdc_enable;
+        letzterDcdcEnableBekannt = true;
+    }
     if (packLeistung == null && packSpannung != null && packStrom != null) {
         packLeistung = packSpannung * packStrom / 1000;
     }
@@ -3214,18 +3221,13 @@ function updateTechnischeDetails(charge) {
         }
         rows.push('<tr><th>Richtung:</th><td>' + escapeHtml(richtung) + '</td></tr>');
     }
-    if (charge.dcdc_enable != null) {
-        var dcdcText = charge.dcdc_enable ?
+    var dcdcText = 'wartet auf DC/DC-Telemetrie';
+    if (letzterDcdcEnableBekannt) {
+        dcdcText = letzterDcdcEnableStatus ?
             'HV-Batterie stützt/lädt 12V-System' :
             'keine HV-Stützung des 12V-Systems';
-        rows.push('<tr><th>12V-Versorgung:</th><td>' + escapeHtml(dcdcText) + '</td></tr>');
     }
-
-    if (!rows.length) {
-        $info.empty().hide();
-        letzteTechnischeDetailsHtml = '';
-        return;
-    }
+    rows.push('<tr><th>12V-Versorgung:</th><td>' + escapeHtml(dcdcText) + '</td></tr>');
 
     var html = '<h3>Technische Details</h3>' +
         '<table>' + rows.join('') + '</table>';
