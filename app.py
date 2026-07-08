@@ -1270,9 +1270,9 @@ CONFIG_ITEMS = [
     {"id": "v2l-infos", "desc": "V2L-Hinweis"},
     {"id": "charging-info", "desc": "Ladeinformationen"},
     {"id": "ladeplanung-info", "desc": "Ladeplanung"},
+    {"id": "nav-bar", "desc": "Navigationsleiste"},
     {"id": "technical-info", "desc": "Technische Details"},
     {"id": "reifendruck-details", "desc": "Reifendruckdetails"},
-    {"id": "nav-bar", "desc": "Navigationsleiste"},
     {"id": "media-player", "desc": "Medienwiedergabe"},
     {"id": "park-since", "desc": "Parkdauer"},
 ]

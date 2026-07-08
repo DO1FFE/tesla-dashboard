@@ -35,3 +35,15 @@ def test_hauptseite_enthält_zusatzanzeigen(monkeypatch):
     assert 'id="preconditioning-info"' in html
     assert 'id="technical-info"' in html
     assert 'id="reifendruck-details"' in html
+
+
+def test_navigation_steht_vor_technischen_details(monkeypatch):
+    client = _test_client(monkeypatch)
+
+    response = client.get("/")
+    html = response.get_data(as_text=True)
+    ids = [item["id"] for item in app.CONFIG_ITEMS]
+
+    assert response.status_code == 200
+    assert html.index('id="nav-bar"') < html.index('id="technical-info"')
+    assert ids.index("nav-bar") < ids.index("technical-info")
