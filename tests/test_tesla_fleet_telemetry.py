@@ -398,6 +398,7 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
         "GpsState": b'"GpsStateActive"',
         "DCChargingEnergyIn": b"7.5",
         "DCChargingPower": b"11",
+        "DCDCEnable": b"true",
         "ChargeState": b'"Standby"',
         "PackVoltage": b"400",
         "PackCurrent": b"-12.5",
@@ -448,6 +449,7 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
     assert daten["charge_state"]["charge_energy_added"] == 7.5
     assert daten["charge_state"]["charger_power"] == 11
     assert daten["charge_state"]["charging_state"] == "Disconnected"
+    assert daten["charge_state"]["dcdc_enable"] is True
     assert daten["charge_state"]["pack_voltage"] == 400
     assert daten["charge_state"]["pack_current"] == -12.5
     assert daten["charge_state"]["pack_power"] == -5.0
@@ -1429,6 +1431,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "minimum_delta" not in live_fields["InsideTemp"]
     assert "MediaNowPlayingTitle" not in live_fields
     assert "RouteLine" not in live_fields
+    assert "DCDCEnable" not in live_fields
     assert "VehicleName" not in live_fields
 
     erweitert = app._fleet_telemetrie_profile_config_erstellen(
@@ -1439,6 +1442,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
 
     assert erweitert_fields["VehicleSpeed"]["interval_seconds"] == 1
     assert erweitert_fields["RouteLine"]["interval_seconds"] == 10
+    assert erweitert_fields["DCDCEnable"]["interval_seconds"] == 60
     assert erweitert_fields["MediaNowPlayingTitle"]["interval_seconds"] == 60
     assert erweitert_fields["VehicleName"]["interval_seconds"] == 60
 
@@ -1452,9 +1456,15 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "RouteLine" not in fields
     assert fields["BatteryLevel"]["interval_seconds"] == 60
     assert fields["BatteryLevel"]["minimum_delta"] == 1.0
+    assert fields["DCDCEnable"]["interval_seconds"] == 60
     assert fields["ChargeState"]["interval_seconds"] == 10
     assert fields["VehicleSpeed"]["interval_seconds"] == 10
     assert fields["VehicleSpeed"]["minimum_delta"] == 1.0
+
+    charging = app._fleet_telemetrie_profile_config_erstellen(basis, "charging")
+    charging_fields = charging["config"]["fields"]
+
+    assert charging_fields["DCDCEnable"]["interval_seconds"] == 30
 
 
 def test_fleet_telemetrie_profile_sync_pruefung_liefert_fahrzeugstatus(monkeypatch):

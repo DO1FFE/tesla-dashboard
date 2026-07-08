@@ -3214,6 +3214,10 @@ function updateTechnischeDetails(charge) {
         }
         rows.push('<tr><th>Richtung:</th><td>' + escapeHtml(richtung) + '</td></tr>');
     }
+    if (charge.dcdc_enable != null) {
+        var dcdcText = charge.dcdc_enable ? 'DC/DC aktiv' : 'DC/DC aus';
+        rows.push('<tr><th>12V-System:</th><td>' + escapeHtml(dcdcText) + '</td></tr>');
+    }
 
     if (!rows.length) {
         $info.empty().hide();

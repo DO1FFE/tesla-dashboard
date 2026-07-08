@@ -1767,6 +1767,9 @@ FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_FELDER = max(
     int(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MIN_FIELDS", "2")),
 )
 FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER = frozenset()
+FLEET_TELEMETRIE_PROFILE_OPTIONALE_FELDER = frozenset({
+    "DCDCEnable",
+})
 FLEET_TELEMETRIE_PROFILE_LIVE_1S_FELDER = frozenset({
     "BrakePedal",
     "BrakePedalPos",
@@ -1864,6 +1867,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_ERWEITERT_60S_FELDER = frozenset({
     "ChargePortDoorOpen",
     "ChargePortLatch",
     "ChargingCableType",
+    "DCDCEnable",
     "DestinationName",
     "FastChargerPresent",
     "FastChargerType",
@@ -1936,6 +1940,7 @@ FLEET_TELEMETRIE_PROFILE_PARKED_60S_FELDER = frozenset({
     "ChargeCurrentRequestMax",
     "ChargeEnableRequest",
     "ChargeLimitSoc",
+    "DCDCEnable",
     "FastChargerPresent",
     "DefrostForPreconditioning",
     "DefrostMode",
@@ -2001,6 +2006,7 @@ FLEET_TELEMETRIE_PROFILE_CHARGING_30S_FELDER = frozenset({
     "BrakePedal",
     "CenterDisplay",
     "ClimateKeeperMode",
+    "DCDCEnable",
     "DCChargingEnergyIn",
     "DefrostForPreconditioning",
     "DefrostMode",
@@ -5024,6 +5030,8 @@ def _fleet_telemetrie_profile_config_erstellen(request_data, profil):
     fields = config.setdefault("fields", {})
     if not isinstance(fields, dict):
         return config_request
+    for feld in FLEET_TELEMETRIE_PROFILE_OPTIONALE_FELDER:
+        fields.setdefault(feld, {})
     for feld in FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER:
         fields.pop(feld, None)
     if profil == "live":
@@ -6254,6 +6262,10 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
             charge["battery_temp"] = temp_min
         elif temp_max is not None:
             charge["battery_temp"] = temp_max
+        charge["timestamp"] = timestamp_ms
+        return True
+    if field == "DCDCEnable":
+        charge["dcdc_enable"] = _fleet_telemetrie_optional_wahr(value)
         charge["timestamp"] = timestamp_ms
         return True
     if field in {"PackVoltage", "PackCurrent"}:
