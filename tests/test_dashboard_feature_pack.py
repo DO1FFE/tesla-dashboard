@@ -165,6 +165,10 @@ def test_technische_packdetails_sind_in_ui_eingebunden():
     assert "letzterDcdcEnableBekannt" in js
     assert "wartet auf DC/DC-Telemetrie" in js
     assert "12V-Versorgung:" in js
+    assert "letzteLuefterStufe" in js
+    assert "letzteLuefterStufeBekannt" in js
+    assert "wartet auf Lüfter-Telemetrie" in js
+    assert "Lüfter:</th>" in js
 
 
 def test_batterietemperatur_zeigt_durchschnitt_minimum_und_maximum():

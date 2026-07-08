@@ -1595,15 +1595,19 @@ function updateClimateStatus(on) {
 }
 
 function updateFanStatus(speed) {
-    if (speed == null || isNaN(speed)) {
+    var luefter = parseNumber(speed);
+    if (luefter != null) {
+        letzteLuefterStufe = Math.max(0, Math.min(11, luefter));
+        letzteLuefterStufeBekannt = true;
+    }
+    if (!letzteLuefterStufeBekannt) {
         $('#fan-status').text('').attr('title', '').attr('aria-label', '');
         return;
     }
-    var val = Math.max(0, Math.min(11, Number(speed)));
     $('#fan-status')
-        .text('\uD83C\uDF00 ' + val)
-        .attr('title', 'L\u00FCfterstufe ' + val)
-        .attr('aria-label', 'L\u00FCfterstufe ' + val);
+        .text('\uD83C\uDF00 ' + letzteLuefterStufe)
+        .attr('title', 'L\u00FCfterstufe ' + letzteLuefterStufe)
+        .attr('aria-label', 'L\u00FCfterstufe ' + letzteLuefterStufe);
 }
 
 function updateClimateMode(mode) {
@@ -2442,6 +2446,8 @@ var letzteBatterieTemperaturMaximum = null;
 var letzteTechnischeDetailsHtml = null;
 var letzterDcdcEnableStatus = null;
 var letzterDcdcEnableBekannt = false;
+var letzteLuefterStufe = null;
+var letzteLuefterStufeBekannt = false;
 
 function parseNumber(value) {
     if (value == null || value === '') {
@@ -2708,9 +2714,14 @@ function updatePreconditioningInfo(climate, charge, drive, anzeigenErlaubt) {
         rows.push('<tr><th>Zieltemperatur:</th><td>' + escapeHtml(ziel) + '</td></tr>');
     }
     var luefter = parseNumber(climate.fan_status);
-    if (luefter != null && luefter > 0) {
-        rows.push('<tr><th>Lüfter:</th><td>Stufe ' + escapeHtml(String(luefter)) + '</td></tr>');
+    if (luefter != null) {
+        letzteLuefterStufe = Math.max(0, Math.min(11, luefter));
+        letzteLuefterStufeBekannt = true;
     }
+    var luefterText = letzteLuefterStufeBekannt ?
+        'Stufe ' + letzteLuefterStufe :
+        'wartet auf Lüfter-Telemetrie';
+    rows.push('<tr><th>Lüfter:</th><td>' + escapeHtml(luefterText) + '</td></tr>');
 
     var abfahrt = planAktiv ? geplanteAbfahrtszeit(charge) : null;
     if (abfahrt) {
