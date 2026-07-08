@@ -3215,8 +3215,10 @@ function updateTechnischeDetails(charge) {
         rows.push('<tr><th>Richtung:</th><td>' + escapeHtml(richtung) + '</td></tr>');
     }
     if (charge.dcdc_enable != null) {
-        var dcdcText = charge.dcdc_enable ? 'DC/DC aktiv' : 'DC/DC aus';
-        rows.push('<tr><th>12V-System:</th><td>' + escapeHtml(dcdcText) + '</td></tr>');
+        var dcdcText = charge.dcdc_enable ?
+            'HV-Batterie stützt/lädt 12V-System' :
+            'keine HV-Stützung des 12V-Systems';
+        rows.push('<tr><th>12V-Versorgung:</th><td>' + escapeHtml(dcdcText) + '</td></tr>');
     }
 
     if (!rows.length) {

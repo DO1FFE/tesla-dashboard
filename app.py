@@ -1815,6 +1815,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_10S_FELDER = frozenset({
 })
 FLEET_TELEMETRIE_PROFILE_LIVE_30S_FELDER = frozenset({
     "ClimateKeeperMode",
+    "DCDCEnable",
     "DefrostForPreconditioning",
     "DefrostMode",
     "HvacFanSpeed",
@@ -1837,6 +1838,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_FELDER = frozenset({
     "CenterDisplay",
     "ChargeState",
     "ClimateKeeperMode",
+    "DCDCEnable",
     "DetailedChargeState",
     "DoorState",
     "DriverSeatOccupied",
@@ -1867,7 +1869,6 @@ FLEET_TELEMETRIE_PROFILE_LIVE_ERWEITERT_60S_FELDER = frozenset({
     "ChargePortDoorOpen",
     "ChargePortLatch",
     "ChargingCableType",
-    "DCDCEnable",
     "DestinationName",
     "FastChargerPresent",
     "FastChargerType",

@@ -1431,7 +1431,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "minimum_delta" not in live_fields["InsideTemp"]
     assert "MediaNowPlayingTitle" not in live_fields
     assert "RouteLine" not in live_fields
-    assert "DCDCEnable" not in live_fields
+    assert live_fields["DCDCEnable"]["interval_seconds"] == 30
+    assert "minimum_delta" not in live_fields["DCDCEnable"]
     assert "VehicleName" not in live_fields
 
     erweitert = app._fleet_telemetrie_profile_config_erstellen(
@@ -1442,7 +1443,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
 
     assert erweitert_fields["VehicleSpeed"]["interval_seconds"] == 1
     assert erweitert_fields["RouteLine"]["interval_seconds"] == 10
-    assert erweitert_fields["DCDCEnable"]["interval_seconds"] == 60
+    assert erweitert_fields["DCDCEnable"]["interval_seconds"] == 30
     assert erweitert_fields["MediaNowPlayingTitle"]["interval_seconds"] == 60
     assert erweitert_fields["VehicleName"]["interval_seconds"] == 60
 
