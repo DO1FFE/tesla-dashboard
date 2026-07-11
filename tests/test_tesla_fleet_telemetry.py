@@ -1718,8 +1718,14 @@ def test_fleet_telemetrie_profile_stream_empfang_bestaetigt_legacy(monkeypatch):
     daten = {
         "vin": "TESTVIN",
         "fleet_telemetry_received_at": 1999_000,
-        "fleet_telemetry_field_received_at": {"VehicleSpeed": 1999_000},
-        "fleet_telemetry_field_previous_received_at": {"VehicleSpeed": 1998_000},
+        "fleet_telemetry_field_received_at": {
+            "VehicleSpeed": 1999_000,
+            "PackCurrent": 1999_000,
+        },
+        "fleet_telemetry_field_previous_received_at": {
+            "VehicleSpeed": 1998_000,
+            "PackCurrent": 1998_000,
+        },
         "drive_state": {"shift_state": "P", "speed": 0},
         "climate_state": {"is_climate_on": True},
         "charge_state": {"charging_state": "Disconnected"},
@@ -1737,6 +1743,25 @@ def test_fleet_telemetrie_profile_stream_empfang_bestaetigt_legacy(monkeypatch):
         "synced": True,
         "source": "telemetry_stream",
     }]
+
+
+def test_fleet_telemetrie_profile_live_bestaetigt_keinen_burst():
+    status = {
+        "last_sent": 1900.0,
+    }
+    daten = {
+        "fleet_telemetry_received_at": 1999_000,
+        "fleet_telemetry_field_received_at": {
+            "VehicleSpeed": 1999_000,
+            "PackCurrent": 1999_010,
+        },
+        "fleet_telemetry_field_previous_received_at": {
+            "VehicleSpeed": 1998_990,
+            "PackCurrent": 1999_000,
+        },
+    }
+
+    assert app._fleet_telemetrie_profile_live_takt_bestaetigt(daten, status) is False
 
 
 def test_fleet_telemetrie_profile_live_bestaetigt_keinen_alten_10s_takt(monkeypatch):

@@ -1758,6 +1758,10 @@ FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ABSTAND_SECONDS = max(
     1.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MAX_INTERVAL_SECONDS", "2")),
 )
+FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_ABSTAND_SECONDS = max(
+    0.1,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MIN_INTERVAL_SECONDS", "0.5")),
+)
 FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS = max(
     5.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MAX_AGE_SECONDS", "15")),
@@ -1925,6 +1929,14 @@ FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_FELDER = (
 FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MAX_ABSTAND_SECONDS = max(
     1.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_CONFIRM_MAX_INTERVAL_SECONDS", "2")),
+)
+FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MIN_ABSTAND_SECONDS = max(
+    0.1,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_CONFIRM_MIN_INTERVAL_SECONDS", "0.5")),
+)
+FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MIN_FELDER = max(
+    1,
+    int(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_CONFIRM_MIN_FIELDS", "2")),
 )
 FLEET_TELEMETRIE_PROFILE_PARKED_10S_FELDER = frozenset({
     "BrakePedal",
@@ -4800,6 +4812,7 @@ def _fleet_telemetrie_profile_live_takt_bestaetigt(data, status):
     vorher = data.get("fleet_telemetry_field_previous_received_at")
     if not isinstance(empfangen, dict) or not isinstance(vorher, dict):
         return False
+    schnelle_felder = 0
     for feld in FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNGSFELDER:
         letzter = _fleet_telemetrie_timestamp_sekunden(
             empfangen.get(feld),
@@ -4815,11 +4828,11 @@ def _fleet_telemetrie_profile_live_takt_bestaetigt(data, status):
             continue
         abstand = letzter - vorletzter
         if (
-            abstand > 0
+            abstand >= FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MIN_ABSTAND_SECONDS
             and abstand <= FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MAX_ABSTAND_SECONDS
         ):
-            return True
-    return False
+            schnelle_felder += 1
+    return schnelle_felder >= FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MIN_FELDER
 
 
 def _fleet_telemetrie_profile_live_takt_stabil(data, jetzt=None):
@@ -4840,7 +4853,11 @@ def _fleet_telemetrie_profile_live_takt_stabil(data, jetzt=None):
             continue
         if jetzt - letzter > FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS:
             continue
-        if intervall <= FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ABSTAND_SECONDS * 1000:
+        intervall_sekunden = intervall / 1000.0
+        if (
+            intervall_sekunden >= FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_ABSTAND_SECONDS
+            and intervall_sekunden <= FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ABSTAND_SECONDS
+        ):
             stabile_felder += 1
     return stabile_felder >= FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_FELDER
 
