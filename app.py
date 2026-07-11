@@ -5379,10 +5379,22 @@ def _fleet_telemetrie_profile_sync_bestaetigt(status, profil):
 
     if not isinstance(status, dict) or profil not in FLEET_TELEMETRIE_PROFILE:
         return False
-    return (
+    api_bestaetigt = (
         status.get("config_synced") is True
         and str(status.get("config_sync_state") or "").lower() == "synced"
         and status.get("config_sync_profile") == profil
+    )
+    if not api_bestaetigt:
+        return False
+    if profil not in {"live", "live_extended"}:
+        return True
+    details = status.get("config_sync_details")
+    if not isinstance(details, list):
+        return False
+    return any(
+        isinstance(detail, dict)
+        and detail.get("source") == "telemetry_stream"
+        for detail in details
     )
 
 

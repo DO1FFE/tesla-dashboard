@@ -26,6 +26,14 @@ def _routeline_protobuf(polyline):
     return base64.b64encode(payload).decode("ascii")
 
 
+def _telemetrie_stream_details(vin="TESTVIN"):
+    return [{
+        "vin": vin,
+        "synced": True,
+        "source": "telemetry_stream",
+    }]
+
+
 @pytest.fixture(autouse=True)
 def keine_echten_parking_logs(monkeypatch):
     """Verhindere echte Log-Einträge in Fleet-Telemetry-Tests."""
@@ -1932,7 +1940,7 @@ def test_fleet_telemetrie_profile_erweitert_stabiles_live(monkeypatch):
             "config_sync_checked_at": 2001.0,
             "config_sync_updated_at": 2001.0,
             "config_sync_error": None,
-            "config_sync_details": [],
+            "config_sync_details": _telemetrie_stream_details(),
             "live_stable_since": 2000.0,
             "updated_at": 2001.0,
         },
@@ -1990,7 +1998,7 @@ def test_fleet_telemetrie_profile_erweitert_wartet_auf_stabilitaet(monkeypatch):
             "config_sync_checked_at": 2001.0,
             "config_sync_updated_at": 2001.0,
             "config_sync_error": None,
-            "config_sync_details": [],
+            "config_sync_details": _telemetrie_stream_details(),
             "live_stable_since": 0.0,
             "updated_at": 2001.0,
         },
@@ -2093,7 +2101,7 @@ def test_fleet_telemetrie_profile_faellt_bei_instabilem_extended_auf_live(monkey
             "config_sync_checked_at": 2101.0,
             "config_sync_updated_at": 2101.0,
             "config_sync_error": None,
-            "config_sync_details": [],
+            "config_sync_details": _telemetrie_stream_details(),
             "live_stable_since": 2000.0,
             "updated_at": 2101.0,
         },
@@ -2213,6 +2221,17 @@ def test_fleet_telemetrie_profile_erfolg_setzt_current_erst_nach_sync(monkeypatc
         "state": "synced",
         "details": [{"vin": "TESTVIN", "synced": True}],
         "checked_at": 2001.0,
+        "error": None,
+    })
+
+    assert app._fleet_telemetry_profile_status["current"] == "charging"
+
+    app._fleet_telemetrie_profile_erfolg_setzen("live", {
+        "synced": True,
+        "key_paired": None,
+        "state": "synced",
+        "details": _telemetrie_stream_details(),
+        "checked_at": 2002.0,
         "error": None,
     })
 
@@ -2501,7 +2520,7 @@ def test_fleet_telemetrie_profile_prueft_bestaetigtes_profil_nicht(monkeypatch):
             "config_sync_checked_at": 1000.0,
             "config_sync_updated_at": 1000.0,
             "config_sync_error": None,
-            "config_sync_details": [],
+            "config_sync_details": _telemetrie_stream_details(),
             "updated_at": 1000.0,
         },
     )
@@ -2726,7 +2745,7 @@ def test_fleet_telemetrie_profile_verzoegert_parkprofil(monkeypatch):
             "config_sync_checked_at": 999.0,
             "config_sync_updated_at": 999.0,
             "config_sync_error": None,
-            "config_sync_details": [],
+            "config_sync_details": _telemetrie_stream_details(),
             "updated_at": 0.0,
         },
     )
