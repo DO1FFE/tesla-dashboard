@@ -3989,23 +3989,23 @@ def _soll_öffnungsstatus_live_prüfen(cached, latest, max_alter_sekunden):
         for raw_field, owner_key in FLEET_TELEMETRIE_FENSTER_FELDER.items():
             if not _wert_ist_offen(vehicle_state.get(owner_key)):
                 continue
-            alter = _fleet_telemetrie_feldalter_sekunden(
+            if _fleet_telemetrie_oeffnungsfeld_veraltet(
                 fahrzeugdaten,
                 raw_field,
                 jetzt_ms,
-            )
-            if alter is not None and alter >= max_alter:
+                max_alter,
+            ):
                 return True
         if any(
             _wert_ist_offen(vehicle_state.get(owner_key))
             for owner_key in FLEET_TELEMETRIE_TUER_FELDER
         ):
-            alter = _fleet_telemetrie_feldalter_sekunden(
+            if _fleet_telemetrie_oeffnungsfeld_veraltet(
                 fahrzeugdaten,
                 "DoorState",
                 jetzt_ms,
-            )
-            if alter is not None and alter >= max_alter:
+                max_alter,
+            ):
                 return True
 
     neuester_zeitstempel = None
@@ -4442,13 +4442,35 @@ def _fleet_telemetrie_feldalter_sekunden(data, field, jetzt_ms=None):
     return max(0.0, (float(jetzt_ms) - empfangen) / 1000.0)
 
 
-def _fleet_telemetrie_oeffnungsfeld_veraltet(data, field, jetzt_ms=None):
+def _fleet_telemetrie_feldintervall_sekunden(data, field):
+    """Liefere das letzte Empfangsintervall eines Telemetry-Felds in Sekunden."""
+
+    if not isinstance(data, dict):
+        return None
+    feld_abstand = data.get("fleet_telemetry_field_interval_ms")
+    if not isinstance(feld_abstand, dict):
+        return None
+    intervall = _as_float(feld_abstand.get(field))
+    if intervall is None or intervall < 0:
+        return None
+    return intervall / 1000.0
+
+
+def _fleet_telemetrie_oeffnungsfeld_veraltet(
+    data,
+    field,
+    jetzt_ms=None,
+    max_alter=None,
+):
     """Prüfe, ob ein Öffnungsfeld für eine aktive Anzeige zu alt ist."""
 
+    if max_alter is None:
+        max_alter = FLEET_TELEMETRIE_OEFFNUNG_MAX_ALTER_SECONDS
     alter = _fleet_telemetrie_feldalter_sekunden(data, field, jetzt_ms)
+    intervall = _fleet_telemetrie_feldintervall_sekunden(data, field)
     return (
-        alter is not None
-        and alter > FLEET_TELEMETRIE_OEFFNUNG_MAX_ALTER_SECONDS
+        (alter is not None and alter > max_alter)
+        or (intervall is not None and intervall > max_alter)
     )
 
 
@@ -4470,16 +4492,16 @@ def _fleet_telemetrie_veraltete_oeffnungen_bereinigen(data, jetzt_ms=None):
         if not _wert_ist_offen(vehicle_state.get(owner_key)):
             stale_fields.pop(raw_field, None)
             continue
-        alter = _fleet_telemetrie_feldalter_sekunden(data, raw_field, jetzt_ms)
-        if (
-            alter is not None
-            and alter > FLEET_TELEMETRIE_OEFFNUNG_MAX_ALTER_SECONDS
-        ):
+        if _fleet_telemetrie_oeffnungsfeld_veraltet(data, raw_field, jetzt_ms):
+            alter = _fleet_telemetrie_feldalter_sekunden(data, raw_field, jetzt_ms)
+            intervall = _fleet_telemetrie_feldintervall_sekunden(data, raw_field)
+            stale_info = {"assumed_closed": True}
+            if alter is not None:
+                stale_info["age_seconds"] = round(alter, 1)
+            if intervall is not None:
+                stale_info["interval_seconds"] = round(intervall, 1)
             vehicle_state[owner_key] = 0
-            stale_fields[raw_field] = {
-                "age_seconds": round(alter, 1),
-                "assumed_closed": True,
-            }
+            stale_fields[raw_field] = stale_info
             geändert = True
 
     if not stale_fields:

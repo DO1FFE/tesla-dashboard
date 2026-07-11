@@ -875,3 +875,34 @@ def test_veraltete_fensterwerte_werden_fuer_dashboard_geschlossen(monkeypatch):
         "age_seconds": 45.0,
         "assumed_closed": True,
     }
+
+
+def test_fensterwert_mit_langem_intervall_wird_als_veraltet_behandelt(monkeypatch):
+    jetzt_ms = 1_783_805_000_000
+
+    monkeypatch.setattr(app.time, "time", lambda: jetzt_ms / 1000)
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_OEFFNUNG_MAX_ALTER_SECONDS", 90.0)
+
+    daten = {
+        "vehicle_state": {
+            "fd_window": 1,
+        },
+        "fleet_telemetry_field_received_at": {
+            "FdWindow": jetzt_ms,
+        },
+        "fleet_telemetry_field_interval_ms": {
+            "FdWindow": 457_000,
+        },
+    }
+
+    assert app._soll_öffnungsstatus_live_prüfen(daten, None, 30) is True
+    assert app._fleet_telemetrie_veraltete_oeffnungen_bereinigen(
+        daten,
+        jetzt_ms,
+    ) is True
+    assert daten["vehicle_state"]["fd_window"] == 0
+    assert daten["fleet_telemetry_stale_opening_fields"]["FdWindow"] == {
+        "assumed_closed": True,
+        "age_seconds": 0.0,
+        "interval_seconds": 457.0,
+    }
