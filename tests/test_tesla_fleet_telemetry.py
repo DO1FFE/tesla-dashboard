@@ -367,6 +367,42 @@ def test_fleet_telemetrie_mqtt_normalisiert_oeffnungen(monkeypatch):
     assert vehicle_state["rp_window"] == 1
 
 
+def test_fleet_telemetrie_mqtt_stellt_bereinigtes_fenster_wieder_her(monkeypatch):
+    gespeicherte_daten = {}
+
+    monkeypatch.setattr(app, "_fleet_telemetrie_fahrzeuge", lambda: [{
+        "vin": "TESTVIN",
+        "id_s": "veh-1",
+    }])
+    monkeypatch.setattr(
+        app,
+        "_load_cached",
+        lambda vehicle_id: {
+            "fleet_telemetry_raw": {
+                "FdWindow": "WindowStatePartiallyOpen",
+            },
+            "vehicle_state": {
+                "fd_window": 0,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        app,
+        "_save_cached",
+        lambda vehicle_id, data: gespeicherte_daten.setdefault(vehicle_id, data),
+    )
+    monkeypatch.setattr(app, "latest_data", {})
+
+    app._fleet_telemetrie_mqtt_message(
+        "tesla/TESTVIN/v/FdWindow",
+        b'"WindowStatePartiallyOpen"',
+        {"topic_base": "tesla"},
+    )
+
+    vehicle_state = app.latest_data["veh-1"]["vehicle_state"]
+    assert vehicle_state["fd_window"] == 1
+
+
 def test_fleet_telemetrie_basisdaten_ueberschreibt_alias_id(monkeypatch):
     monkeypatch.setattr(app, "_fleet_telemetrie_fahrzeuge", lambda: [{
         "vin": "TESTVIN",

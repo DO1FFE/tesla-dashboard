@@ -3979,6 +3979,35 @@ def _soll_öffnungsstatus_live_prüfen(cached, latest, max_alter_sekunden):
     except Exception:
         max_alter = 28
 
+    jetzt_ms = time.time() * 1000
+    for fahrzeugdaten in (cached, latest):
+        if not isinstance(fahrzeugdaten, dict):
+            continue
+        vehicle_state = fahrzeugdaten.get("vehicle_state")
+        if not isinstance(vehicle_state, dict):
+            continue
+        for raw_field, owner_key in FLEET_TELEMETRIE_FENSTER_FELDER.items():
+            if not _wert_ist_offen(vehicle_state.get(owner_key)):
+                continue
+            alter = _fleet_telemetrie_feldalter_sekunden(
+                fahrzeugdaten,
+                raw_field,
+                jetzt_ms,
+            )
+            if alter is not None and alter >= max_alter:
+                return True
+        if any(
+            _wert_ist_offen(vehicle_state.get(owner_key))
+            for owner_key in FLEET_TELEMETRIE_TUER_FELDER
+        ):
+            alter = _fleet_telemetrie_feldalter_sekunden(
+                fahrzeugdaten,
+                "DoorState",
+                jetzt_ms,
+            )
+            if alter is not None and alter >= max_alter:
+                return True
+
     neuester_zeitstempel = None
     for fahrzeugdaten in (cached, latest):
         if not _hat_öffnungsstatusfelder(fahrzeugdaten):
@@ -4375,6 +4404,89 @@ def _fleet_telemetrie_fensterwert(value):
     return 0
 
 
+FLEET_TELEMETRIE_FENSTER_FELDER = {
+    "FdWindow": "fd_window",
+    "FpWindow": "fp_window",
+    "RdWindow": "rd_window",
+    "RpWindow": "rp_window",
+}
+FLEET_TELEMETRIE_TUER_FELDER = {
+    "df": "DriverFront",
+    "pf": "PassengerFront",
+    "dr": "DriverRear",
+    "pr": "PassengerRear",
+    "ft": "TrunkFront",
+    "rt": "TrunkRear",
+}
+FLEET_TELEMETRIE_OEFFNUNG_MAX_ALTER_SECONDS = max(
+    30.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_OPENING_MAX_AGE_SECONDS", "90")),
+)
+
+
+def _fleet_telemetrie_feldalter_sekunden(data, field, jetzt_ms=None):
+    """Liefere das Alter eines einzelnen Telemetry-Felds in Sekunden."""
+
+    if not isinstance(data, dict):
+        return None
+    feld_empfang = data.get("fleet_telemetry_field_received_at")
+    if not isinstance(feld_empfang, dict):
+        return None
+    empfangen = _as_float(feld_empfang.get(field))
+    if empfangen is None or empfangen <= 0:
+        return None
+    if empfangen < 1_000_000_000_000:
+        empfangen *= 1000
+    if jetzt_ms is None:
+        jetzt_ms = time.time() * 1000
+    return max(0.0, (float(jetzt_ms) - empfangen) / 1000.0)
+
+
+def _fleet_telemetrie_oeffnungsfeld_veraltet(data, field, jetzt_ms=None):
+    """Prüfe, ob ein Öffnungsfeld für eine aktive Anzeige zu alt ist."""
+
+    alter = _fleet_telemetrie_feldalter_sekunden(data, field, jetzt_ms)
+    return (
+        alter is not None
+        and alter > FLEET_TELEMETRIE_OEFFNUNG_MAX_ALTER_SECONDS
+    )
+
+
+def _fleet_telemetrie_veraltete_oeffnungen_bereinigen(data, jetzt_ms=None):
+    """Blende veraltete offene Öffnungswerte im Dashboard-Payload aus."""
+
+    if not isinstance(data, dict):
+        return False
+    vehicle_state = data.get("vehicle_state")
+    if not isinstance(vehicle_state, dict):
+        return False
+    geändert = False
+    stale_fields = data.setdefault("fleet_telemetry_stale_opening_fields", {})
+    if not isinstance(stale_fields, dict):
+        stale_fields = {}
+        data["fleet_telemetry_stale_opening_fields"] = stale_fields
+
+    for raw_field, owner_key in FLEET_TELEMETRIE_FENSTER_FELDER.items():
+        if not _wert_ist_offen(vehicle_state.get(owner_key)):
+            stale_fields.pop(raw_field, None)
+            continue
+        alter = _fleet_telemetrie_feldalter_sekunden(data, raw_field, jetzt_ms)
+        if (
+            alter is not None
+            and alter > FLEET_TELEMETRIE_OEFFNUNG_MAX_ALTER_SECONDS
+        ):
+            vehicle_state[owner_key] = 0
+            stale_fields[raw_field] = {
+                "age_seconds": round(alter, 1),
+                "assumed_closed": True,
+            }
+            geändert = True
+
+    if not stale_fields:
+        data.pop("fleet_telemetry_stale_opening_fields", None)
+    return geändert
+
+
 def _fleet_telemetrie_hvac_aktiv(value):
     """Gib zurück, ob ein HvacPower-Wert aktive Klimatisierung bedeutet."""
     text = _fleet_telemetrie_norm_text(value)
@@ -4448,6 +4560,12 @@ def _fleet_telemetrie_wert_unveraendert(data, field, value):
     rohwerte = data.get("fleet_telemetry_raw") if isinstance(data, dict) else None
     if not isinstance(rohwerte, dict) or field not in rohwerte:
         return False
+    if field in FLEET_TELEMETRIE_FENSTER_FELDER:
+        vehicle_state = data.get("vehicle_state")
+        if isinstance(vehicle_state, dict):
+            owner_key = FLEET_TELEMETRIE_FENSTER_FELDER[field]
+            if vehicle_state.get(owner_key) != _fleet_telemetrie_fensterwert(value):
+                return False
     alter_wert = _fleet_telemetrie_vergleichswert(rohwerte.get(field))
     neuer_wert = _fleet_telemetrie_vergleichswert(value)
     return alter_wert == neuer_wert
@@ -7001,9 +7119,14 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
                     data.pop("fleet_telemetry_updated_at", None)
                 data["_live"] = True
                 data = _fleet_telemetrie_profile_aktualisieren(cache_id, data)
+                stale_bereinigt = _fleet_telemetrie_veraltete_oeffnungen_bereinigen(
+                    data
+                )
                 data.pop("api_error", None)
                 latest_data[cache_id] = data
-                aktualisierte_daten.append((cache_id, data, False))
+                if stale_bereinigt:
+                    _fleet_telemetrie_cache_spaeter_speichern(cache_id, data)
+                aktualisierte_daten.append((cache_id, data, stale_bereinigt))
                 continue
             data["state_checked_at"] = letzter_zeitstempel
             data["fleet_telemetry_last_field"] = letztes_feld
@@ -7011,6 +7134,7 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
                 _vorklimatisierung_im_stand_erlaubt(data)
             )
             data = _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data)
+            _fleet_telemetrie_veraltete_oeffnungen_bereinigen(data)
             data = _fleet_telemetrie_profile_aktualisieren(cache_id, data)
             _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, data)
             data["_live"] = True
@@ -7488,6 +7612,7 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
             _fleet_telemetrie_tpms_sollwerte_ergänzen(cache_id, data)
             _fleet_telemetrie_routeline_in_daten_normalisieren(data)
             _fleet_telemetrie_statusbeginn_ergänzen(data)
+            _fleet_telemetrie_veraltete_oeffnungen_bereinigen(data)
             data = _fleet_telemetrie_profile_status_an_daten(data)
             data["_live"] = True
             return data

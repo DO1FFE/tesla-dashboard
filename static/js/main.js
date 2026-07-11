@@ -2198,7 +2198,14 @@ function updateOpenings(vehicle, charge) {
 
     parts.forEach(function(p) {
         var obj = p.src || vehicle;
-        if (!obj || obj[p.key] == null) return;
+        if (!obj || obj[p.key] == null) {
+            var $unknownEl = $('#' + p.id);
+            $unknownEl.attr('class', 'part-closed');
+            if (p.id.startsWith('window-')) {
+                $unknownEl.removeClass('window-open');
+            }
+            return;
+        }
         // Values are 0 when the part is closed and non-zero when open.
         // Use loose inequality to handle any non-zero value as "open".
         var open = Number(obj[p.key]) !== 0;

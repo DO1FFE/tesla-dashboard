@@ -826,3 +826,52 @@ def test_fetch_loop_schiebedach_offen_nutzt_normales_intervall(monkeypatch):
         app._fetch_loop("veh")
 
     assert schlaf_aufrufe == [5]
+
+
+def test_oeffnungsstatus_prueft_veraltetes_fenster_trotz_frischer_tuer(monkeypatch):
+    jetzt_ms = 1_783_805_000_000
+
+    monkeypatch.setattr(app.time, "time", lambda: jetzt_ms / 1000)
+
+    cached = {
+        "vehicle_state": {
+            "timestamp": jetzt_ms,
+            "df": 0,
+            "pf": 0,
+            "fd_window": 1,
+        },
+        "fleet_telemetry_field_received_at": {
+            "DoorState": jetzt_ms,
+            "FdWindow": jetzt_ms - 60_000,
+        },
+    }
+
+    assert app._soll_öffnungsstatus_live_prüfen(cached, None, 30) is True
+
+
+def test_veraltete_fensterwerte_werden_fuer_dashboard_geschlossen(monkeypatch):
+    jetzt_ms = 1_783_805_000_000
+
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_OEFFNUNG_MAX_ALTER_SECONDS", 30.0)
+
+    daten = {
+        "vehicle_state": {
+            "fd_window": 1,
+            "rp_window": 1,
+        },
+        "fleet_telemetry_field_received_at": {
+            "FdWindow": jetzt_ms - 45_000,
+            "RpWindow": jetzt_ms - 10_000,
+        },
+    }
+
+    assert app._fleet_telemetrie_veraltete_oeffnungen_bereinigen(
+        daten,
+        jetzt_ms,
+    ) is True
+    assert daten["vehicle_state"]["fd_window"] == 0
+    assert daten["vehicle_state"]["rp_window"] == 1
+    assert daten["fleet_telemetry_stale_opening_fields"]["FdWindow"] == {
+        "age_seconds": 45.0,
+        "assumed_closed": True,
+    }
