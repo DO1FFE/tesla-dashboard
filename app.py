@@ -5926,6 +5926,7 @@ FLEET_TELEMETRIE_NAVIGATIONSFELDER = (
     "active_route_line",
     "active_route_updated_at",
 )
+FLEET_TELEMETRIE_NAVIGATION_ROUTE_LINE_MAX_ALTER_MS = 60_000
 
 
 def _fleet_telemetrie_navigation_beenden(drive, timestamp_ms):
@@ -5938,12 +5939,14 @@ def _fleet_telemetrie_navigation_beenden(drive, timestamp_ms):
     drive["timestamp"] = timestamp_ms
 
 
-def _fleet_telemetrie_navigation_aktivieren(drive, timestamp_ms):
+def _fleet_telemetrie_navigation_aktivieren(drive, timestamp_ms, data=None):
     """Markiere eine aktiv gemeldete Fahrzeugnavigation."""
 
     drive["active_route_active"] = True
     drive.pop("active_route_ended_at", None)
     drive["active_route_updated_at"] = timestamp_ms
+    if data is not None:
+        _fleet_telemetrie_navigation_routeline_nachziehen(data, drive, timestamp_ms)
 
 
 def _fleet_telemetrie_navigation_hat_zielkern(drive):
@@ -6050,6 +6053,28 @@ def _fleet_telemetrie_routeline_in_daten_normalisieren(data):
         drive["active_route_line"] = normalisiert
 
 
+def _fleet_telemetrie_navigation_routeline_nachziehen(data, drive, timestamp_ms):
+    """Übernehme eine frisch empfangene RouteLine nach verspäteter Aktivierung."""
+
+    if drive.get("active_route_line"):
+        return
+    raw = data.get("fleet_telemetry_raw")
+    if not isinstance(raw, dict):
+        return
+    route_line = _fleet_telemetrie_routeline_normalisieren(raw.get("RouteLine"))
+    if not isinstance(route_line, str) or not route_line.strip():
+        return
+    feld_empfang = data.get("fleet_telemetry_field_received_at")
+    route_empfang = None
+    if isinstance(feld_empfang, dict):
+        route_empfang = _as_float(feld_empfang.get("RouteLine"))
+    if route_empfang is not None:
+        alter = abs(float(timestamp_ms) - route_empfang)
+        if alter > FLEET_TELEMETRIE_NAVIGATION_ROUTE_LINE_MAX_ALTER_MS:
+            return
+    drive["active_route_line"] = route_line
+
+
 def _fleet_telemetrie_navigation_cache_bereinigen(data):
     """Bereinige alte Navigationsreste aus geladenen Cache-Daten."""
 
@@ -6130,7 +6155,7 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
             _fleet_telemetrie_navigation_beenden(drive, timestamp_ms)
         else:
             drive["active_route_destination"] = value
-            _fleet_telemetrie_navigation_aktivieren(drive, timestamp_ms)
+            _fleet_telemetrie_navigation_aktivieren(drive, timestamp_ms, data)
         drive["timestamp"] = timestamp_ms
         return True
     if field == "ExpectedEnergyPercentAtTripArrival":
@@ -6146,7 +6171,7 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
                 return True
         else:
             drive["active_route_miles_to_arrival"] = value
-            _fleet_telemetrie_navigation_aktivieren(drive, timestamp_ms)
+            _fleet_telemetrie_navigation_aktivieren(drive, timestamp_ms, data)
         drive["timestamp"] = timestamp_ms
         return True
     if field == "MinutesToArrival":
@@ -6157,7 +6182,7 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
                 return True
         else:
             drive["active_route_minutes_to_arrival"] = value
-            _fleet_telemetrie_navigation_aktivieren(drive, timestamp_ms)
+            _fleet_telemetrie_navigation_aktivieren(drive, timestamp_ms, data)
         drive["timestamp"] = timestamp_ms
         return True
     if field == "RouteTrafficMinutesDelay":

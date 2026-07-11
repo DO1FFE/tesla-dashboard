@@ -755,6 +755,49 @@ def test_fleet_telemetrie_alte_routeline_nach_navigationsende_ignoriert():
     assert drive["active_route_active"] is False
 
 
+def test_fleet_telemetrie_zieht_frische_routeline_nach():
+    daten = {
+        "fleet_telemetry_raw": {"RouteLine": "abcdef"},
+        "fleet_telemetry_field_received_at": {"RouteLine": 1200},
+        "drive_state": {
+            "active_route_active": False,
+            "active_route_ended_at": 1000,
+        },
+    }
+
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "DestinationName",
+        "Ziel",
+        1210,
+    )
+
+    drive = daten["drive_state"]
+    assert drive["active_route_active"] is True
+    assert drive["active_route_destination"] == "Ziel"
+    assert drive["active_route_line"] == "abcdef"
+
+
+def test_fleet_telemetrie_zieht_alte_routeline_nicht_nach():
+    daten = {
+        "fleet_telemetry_raw": {"RouteLine": "abcdef"},
+        "fleet_telemetry_field_received_at": {"RouteLine": 1200},
+        "drive_state": {},
+    }
+
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "DestinationName",
+        "Ziel",
+        1200 + app.FLEET_TELEMETRIE_NAVIGATION_ROUTE_LINE_MAX_ALTER_MS + 1,
+    )
+
+    drive = daten["drive_state"]
+    assert drive["active_route_active"] is True
+    assert drive["active_route_destination"] == "Ziel"
+    assert "active_route_line" not in drive
+
+
 def test_fleet_telemetrie_entpackt_base64_protobuf_routeline():
     polyline = "{wrcaBczhlLr@fZbWc@TcOF{Sd@"
     routeline = _routeline_protobuf(polyline)
