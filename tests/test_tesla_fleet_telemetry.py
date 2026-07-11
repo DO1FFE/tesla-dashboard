@@ -1571,6 +1571,14 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     charging_fields = charging["config"]["fields"]
 
     assert charging_fields["DCDCEnable"]["interval_seconds"] == 30
+    assert charging_fields["BatteryLevel"]["interval_seconds"] == 10
+    assert charging_fields["BatteryLevel"]["minimum_delta"] == 0.1
+    assert charging_fields["VehicleSpeed"]["interval_seconds"] == 10
+    assert charging_fields["VehicleSpeed"]["minimum_delta"] == 1.0
+    assert "DestinationLocation" not in charging_fields
+    assert "DestinationName" not in charging_fields
+    assert "MediaNowPlayingTitle" not in charging_fields
+    assert "VehicleName" not in charging_fields
 
 
 def test_fleet_telemetrie_profile_sync_pruefung_liefert_fahrzeugstatus(monkeypatch):

@@ -2076,6 +2076,11 @@ FLEET_TELEMETRIE_PROFILE_CHARGING_60S_FELDER = frozenset({
     "TpmsPressureRr",
     "TpmsSoftWarnings",
 })
+FLEET_TELEMETRIE_PROFILE_CHARGING_FELDER = (
+    FLEET_TELEMETRIE_PROFILE_CHARGING_10S_FELDER
+    | FLEET_TELEMETRIE_PROFILE_CHARGING_30S_FELDER
+    | FLEET_TELEMETRIE_PROFILE_CHARGING_60S_FELDER
+)
 FLEET_TELEMETRIE_PROFILE_MINDELTAS = {
     "charging": {
         "ACChargingEnergyIn": 0.1,
@@ -5225,6 +5230,10 @@ def _fleet_telemetrie_profile_config_erstellen(request_data, profil):
     if profil == "parked":
         for feld in list(fields):
             if feld not in FLEET_TELEMETRIE_PROFILE_PARKED_FELDER:
+                fields.pop(feld, None)
+    if profil == "charging":
+        for feld in list(fields):
+            if feld not in FLEET_TELEMETRIE_PROFILE_CHARGING_FELDER:
                 fields.pop(feld, None)
     mindeltas = FLEET_TELEMETRIE_PROFILE_MINDELTAS.get(profil, {})
     for feld, feld_config in fields.items():
