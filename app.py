@@ -1756,7 +1756,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_EXTENDED_DELAY_SECONDS = max(
 )
 FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ABSTAND_SECONDS = max(
     1.0,
-    float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MAX_INTERVAL_SECONDS", "10")),
+    float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MAX_INTERVAL_SECONDS", "2")),
 )
 FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS = max(
     5.0,
@@ -1923,8 +1923,8 @@ FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_FELDER = (
     "BrakePedalPos",
 )
 FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MAX_ABSTAND_SECONDS = max(
-    2.0,
-    float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_CONFIRM_MAX_INTERVAL_SECONDS", "5")),
+    1.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_CONFIRM_MAX_INTERVAL_SECONDS", "2")),
 )
 FLEET_TELEMETRIE_PROFILE_PARKED_10S_FELDER = frozenset({
     "BrakePedal",
@@ -5742,6 +5742,25 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
             and jetzt - target_since < FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS
         ):
             aktivierbares_ziel = current
+        live_takt_erforderlich = (
+            ziel == "live"
+            and aktivierbares_ziel in {"live", "live_extended"}
+            and _fleet_telemetrie_profile_fahrzeug_fährt(data)
+        )
+        if (
+            live_takt_erforderlich
+            and not live_takt_stabil
+            and _fleet_telemetrie_profile_sync_bestaetigt(
+                status,
+                aktivierbares_ziel,
+            )
+        ):
+            status["config_synced"] = False
+            status["config_sync_state"] = "active"
+            status["config_sync_error"] = "Live-Datenstrom liefert noch keinen 1s-Takt"
+            status["config_sync_updated_at"] = jetzt
+            status["updated_at"] = jetzt
+            status_geändert = True
         dringlich = aktivierbares_ziel in {"live", "live_extended", "charging"}
         cooldown_abgelaufen = (
             jetzt - float(status.get("last_sent") or 0)
