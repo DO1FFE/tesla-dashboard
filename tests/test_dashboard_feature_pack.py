@@ -273,6 +273,7 @@ def test_livekarte_loescht_navigation_bei_inaktivem_status():
     assert "drive.active_route_active === true" in js
     assert "drive.active_route_line ||" not in js
     assert "var navigationInKarteAktiv = navigationFuerKarteAktiv(data, drive)" in js
+    assert "drive.active_route_destination || 'Navigation aktiv'" in js
     assert "navigationInKarteAktiv && (zeigtNavigationsLinie || zielKoordinatePlausibel)" in js
 
 

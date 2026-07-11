@@ -3252,13 +3252,14 @@ function updateTechnischeDetails(charge) {
 
 function updateNavBar(drive) {
     var $nav = $('#nav-bar');
-    if (!drive || !('active_route_destination' in drive) || !drive.active_route_destination) {
+    if (!drive || navigationFuerKarteAktiv(null, drive) === false) {
         $nav.html('<table><tr><td colspan="2"><span class="icon">🧭</span>Keine Navigation aktiv</td></tr></table>');
         return;
     }
 
     var rows = [];
-    rows.push('<tr><th><span class="icon">🧭</span>Ich düse gerade nach:</th><td>' + drive.active_route_destination + '</td></tr>');
+    var zielText = drive.active_route_destination || 'Navigation aktiv';
+    rows.push('<tr><th><span class="icon">🧭</span>Ich düse gerade nach:</th><td>' + escapeHtml(zielText) + '</td></tr>');
     if (drive.active_route_energy_at_arrival != null) {
         rows.push('<tr><th><span class="icon">🔋</span>Batteriestand bei Ankunft:</th><td>' + Math.round(drive.active_route_energy_at_arrival) + ' %</td></tr>');
     }

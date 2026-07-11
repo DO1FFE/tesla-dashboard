@@ -1399,13 +1399,19 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
                 "BrakePedal": {"interval_seconds": 10},
                 "BrakePedalPos": {"interval_seconds": 10},
                 "ChargeState": {"interval_seconds": 1},
+                "DestinationLocation": {"interval_seconds": 60},
+                "DestinationName": {"interval_seconds": 60},
+                "ExpectedEnergyPercentAtTripArrival": {"interval_seconds": 60},
                 "HvacFanSpeed": {"interval_seconds": 60},
                 "HvacFanStatus": {"interval_seconds": 60},
                 "LightsHazardsActive": {"interval_seconds": 10},
                 "LightsHighBeams": {"interval_seconds": 10},
                 "LightsTurnSignal": {"interval_seconds": 10},
+                "MilesToArrival": {"interval_seconds": 60},
+                "MinutesToArrival": {"interval_seconds": 60},
                 "PackCurrent": {"interval_seconds": 1, "minimum_delta": 0.1},
                 "RouteLine": {"interval_seconds": 1},
+                "RouteTrafficMinutesDelay": {"interval_seconds": 60},
                 "VehicleSpeed": {"interval_seconds": 1, "minimum_delta": 0.1},
                 "VehicleName": {"interval_seconds": 1},
             },
@@ -1426,6 +1432,9 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert live_fields["BrakePedal"]["interval_seconds"] == 1
     assert live_fields["BrakePedalPos"]["interval_seconds"] == 1
     assert live_fields["ChargeState"]["interval_seconds"] == 10
+    assert live_fields["DestinationLocation"]["interval_seconds"] == 1
+    assert live_fields["DestinationName"]["interval_seconds"] == 30
+    assert live_fields["ExpectedEnergyPercentAtTripArrival"]["interval_seconds"] == 5
     assert live_fields["HvacFanSpeed"]["interval_seconds"] == 30
     assert live_fields["HvacFanStatus"]["interval_seconds"] == 30
     assert live_fields["LightsHazardsActive"]["interval_seconds"] == 1
@@ -1433,8 +1442,11 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert live_fields["LightsTurnSignal"]["interval_seconds"] == 1
     assert live_fields["InsideTemp"]["interval_seconds"] == 10
     assert "minimum_delta" not in live_fields["InsideTemp"]
+    assert live_fields["MilesToArrival"]["interval_seconds"] == 5
+    assert live_fields["MinutesToArrival"]["interval_seconds"] == 5
+    assert live_fields["RouteLine"]["interval_seconds"] == 10
+    assert live_fields["RouteTrafficMinutesDelay"]["interval_seconds"] == 5
     assert "MediaNowPlayingTitle" not in live_fields
-    assert "RouteLine" not in live_fields
     assert live_fields["DCDCEnable"]["interval_seconds"] == 30
     assert "minimum_delta" not in live_fields["DCDCEnable"]
     assert "VehicleName" not in live_fields
@@ -1446,6 +1458,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     erweitert_fields = erweitert["config"]["fields"]
 
     assert erweitert_fields["VehicleSpeed"]["interval_seconds"] == 1
+    assert erweitert_fields["DestinationLocation"]["interval_seconds"] == 1
+    assert erweitert_fields["DestinationName"]["interval_seconds"] == 30
     assert erweitert_fields["RouteLine"]["interval_seconds"] == 10
     assert erweitert_fields["DCDCEnable"]["interval_seconds"] == 30
     assert erweitert_fields["MediaNowPlayingTitle"]["interval_seconds"] == 60
