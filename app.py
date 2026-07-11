@@ -1926,6 +1926,9 @@ FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_FELDER = (
     "PackVoltage",
     "BrakePedalPos",
 )
+FLEET_TELEMETRIE_PROFILE_LIVE_FAHR_FELDER = (
+    "Location",
+)
 FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MAX_ABSTAND_SECONDS = max(
     1.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_CONFIRM_MAX_INTERVAL_SECONDS", "2")),
@@ -4813,6 +4816,7 @@ def _fleet_telemetrie_profile_live_takt_bestaetigt(data, status):
     if not isinstance(empfangen, dict) or not isinstance(vorher, dict):
         return False
     schnelle_felder = 0
+    schnelle_fahrfelder = 0
     for feld in FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNGSFELDER:
         letzter = _fleet_telemetrie_timestamp_sekunden(
             empfangen.get(feld),
@@ -4832,6 +4836,10 @@ def _fleet_telemetrie_profile_live_takt_bestaetigt(data, status):
             and abstand <= FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MAX_ABSTAND_SECONDS
         ):
             schnelle_felder += 1
+            if feld in FLEET_TELEMETRIE_PROFILE_LIVE_FAHR_FELDER:
+                schnelle_fahrfelder += 1
+    if _fleet_telemetrie_profile_fahrzeug_fährt(data) and schnelle_fahrfelder < 1:
+        return False
     return schnelle_felder >= FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MIN_FELDER
 
 
@@ -4846,6 +4854,7 @@ def _fleet_telemetrie_profile_live_takt_stabil(data, jetzt=None):
     if not isinstance(empfangen, dict) or not isinstance(abstände, dict):
         return False
     stabile_felder = 0
+    stabile_fahrfelder = 0
     for feld in FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_FELDER:
         letzter = _fleet_telemetrie_timestamp_sekunden(empfangen.get(feld), jetzt)
         intervall = _as_float(abstände.get(feld))
@@ -4859,6 +4868,10 @@ def _fleet_telemetrie_profile_live_takt_stabil(data, jetzt=None):
             and intervall_sekunden <= FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ABSTAND_SECONDS
         ):
             stabile_felder += 1
+            if feld in FLEET_TELEMETRIE_PROFILE_LIVE_FAHR_FELDER:
+                stabile_fahrfelder += 1
+    if _fleet_telemetrie_profile_fahrzeug_fährt(data) and stabile_fahrfelder < 1:
+        return False
     return stabile_felder >= FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_FELDER
 
 

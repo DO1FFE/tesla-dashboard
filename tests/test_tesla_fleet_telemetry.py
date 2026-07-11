@@ -1772,6 +1772,31 @@ def test_fleet_telemetrie_profile_live_bestaetigt_keinen_burst():
     assert app._fleet_telemetrie_profile_live_takt_bestaetigt(daten, status) is False
 
 
+def test_fleet_telemetrie_profile_live_bestaetigt_fahrt_nur_mit_position():
+    status = {
+        "last_sent": 1900.0,
+    }
+    daten = {
+        "fleet_telemetry_received_at": 1999_000,
+        "fleet_telemetry_field_received_at": {
+            "PackCurrent": 1999_000,
+            "PackVoltage": 1999_000,
+        },
+        "fleet_telemetry_field_previous_received_at": {
+            "PackCurrent": 1998_000,
+            "PackVoltage": 1998_000,
+        },
+        "drive_state": {"shift_state": "D", "speed": 12},
+    }
+
+    assert app._fleet_telemetrie_profile_live_takt_bestaetigt(daten, status) is False
+
+    daten["fleet_telemetry_field_received_at"]["Location"] = 1999_000
+    daten["fleet_telemetry_field_previous_received_at"]["Location"] = 1998_000
+
+    assert app._fleet_telemetrie_profile_live_takt_bestaetigt(daten, status) is True
+
+
 def test_fleet_telemetrie_profile_live_bestaetigt_keinen_alten_10s_takt(monkeypatch):
     angefordert = []
 
@@ -1913,6 +1938,28 @@ def test_fleet_telemetrie_profile_live_stabil_verwirft_10s_takt():
     assert app._fleet_telemetrie_profile_live_takt_stabil(daten, 2000.0) is False
 
 
+def test_fleet_telemetrie_profile_live_stabil_verlangt_position_beim_fahren():
+    daten = {
+        "fleet_telemetry_field_received_at": {
+            "PackCurrent": 2_000_000,
+            "PackVoltage": 2_000_000,
+            "Location": 2_000_000,
+        },
+        "fleet_telemetry_field_interval_ms": {
+            "PackCurrent": 1000,
+            "PackVoltage": 1000,
+            "Location": 60_000,
+        },
+        "drive_state": {"shift_state": "D", "speed": 12},
+    }
+
+    assert app._fleet_telemetrie_profile_live_takt_stabil(daten, 2000.0) is False
+
+    daten["fleet_telemetry_field_interval_ms"]["Location"] = 1000
+
+    assert app._fleet_telemetrie_profile_live_takt_stabil(daten, 2000.0) is True
+
+
 def test_fleet_telemetrie_profile_erweitert_stabiles_live(monkeypatch):
     angefordert = []
 
@@ -1950,10 +1997,12 @@ def test_fleet_telemetrie_profile_erweitert_stabiles_live(monkeypatch):
         "fleet_telemetry_field_received_at": {
             "VehicleSpeed": 2_099_000,
             "PackCurrent": 2_099_000,
+            "Location": 2_099_000,
         },
         "fleet_telemetry_field_interval_ms": {
             "VehicleSpeed": 1000,
             "PackCurrent": 1000,
+            "Location": 1000,
         },
         "drive_state": {"shift_state": "D", "speed": 12},
         "charge_state": {"charging_state": "Disconnected"},
@@ -2008,10 +2057,12 @@ def test_fleet_telemetrie_profile_erweitert_wartet_auf_stabilitaet(monkeypatch):
         "fleet_telemetry_field_received_at": {
             "VehicleSpeed": 2_099_000,
             "PackCurrent": 2_099_000,
+            "Location": 2_099_000,
         },
         "fleet_telemetry_field_interval_ms": {
             "VehicleSpeed": 1000,
             "PackCurrent": 1000,
+            "Location": 1000,
         },
         "drive_state": {"shift_state": "D", "speed": 12},
         "charge_state": {"charging_state": "Disconnected"},
@@ -2060,10 +2111,12 @@ def test_fleet_telemetrie_profile_ueberschreibt_pending_extended_nicht(monkeypat
         "fleet_telemetry_field_received_at": {
             "VehicleSpeed": 2_109_000,
             "PackCurrent": 2_109_000,
+            "Location": 2_109_000,
         },
         "fleet_telemetry_field_interval_ms": {
             "VehicleSpeed": 1000,
             "PackCurrent": 1000,
+            "Location": 1000,
         },
         "drive_state": {"shift_state": "D", "speed": 12},
         "charge_state": {"charging_state": "Disconnected"},
