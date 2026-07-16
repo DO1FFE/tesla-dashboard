@@ -1482,6 +1482,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
                 "InsideTemp": {"interval_seconds": 1, "minimum_delta": 0.1},
                 "Location": {"interval_seconds": 1, "minimum_delta": 0},
                 "MediaNowPlayingTitle": {"interval_seconds": 30},
+                "BatteryHeaterOn": {"interval_seconds": 60},
                 "BatteryLevel": {"interval_seconds": 1, "minimum_delta": 0.1},
                 "BrakePedal": {"interval_seconds": 10},
                 "BrakePedalPos": {"interval_seconds": 10},
@@ -1516,6 +1517,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "minimum_delta" not in live_fields["PackCurrent"]
     assert live_fields["BatteryLevel"]["interval_seconds"] == 5
     assert "minimum_delta" not in live_fields["BatteryLevel"]
+    assert live_fields["BatteryHeaterOn"]["interval_seconds"] == 10
     assert live_fields["BrakePedal"]["interval_seconds"] == 1
     assert live_fields["BrakePedalPos"]["interval_seconds"] == 1
     assert live_fields["ChargeState"]["interval_seconds"] == 10
@@ -1537,6 +1539,10 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert live_fields["DCDCEnable"]["interval_seconds"] == 30
     assert "minimum_delta" not in live_fields["DCDCEnable"]
     assert "VehicleName" not in live_fields
+    assert all(
+        "minimum_delta" not in feld_config
+        for feld_config in live_fields.values()
+    )
 
     erweitert = app._fleet_telemetrie_profile_config_erstellen(
         basis,
@@ -1549,8 +1555,13 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert erweitert_fields["DestinationName"]["interval_seconds"] == 30
     assert erweitert_fields["RouteLine"]["interval_seconds"] == 10
     assert erweitert_fields["DCDCEnable"]["interval_seconds"] == 30
+    assert erweitert_fields["BatteryHeaterOn"]["interval_seconds"] == 10
     assert erweitert_fields["MediaNowPlayingTitle"]["interval_seconds"] == 60
     assert erweitert_fields["VehicleName"]["interval_seconds"] == 60
+    assert all(
+        "minimum_delta" not in feld_config
+        for feld_config in erweitert_fields.values()
+    )
 
     gedrosselt = app._fleet_telemetrie_profile_config_erstellen(basis, "parked")
     fields = gedrosselt["config"]["fields"]
@@ -1561,24 +1572,34 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "MediaNowPlayingTitle" not in fields
     assert "RouteLine" not in fields
     assert fields["BatteryLevel"]["interval_seconds"] == 60
-    assert fields["BatteryLevel"]["minimum_delta"] == 1.0
+    assert "minimum_delta" not in fields["BatteryLevel"]
+    assert fields["BatteryHeaterOn"]["interval_seconds"] == 60
     assert fields["DCDCEnable"]["interval_seconds"] == 60
     assert fields["ChargeState"]["interval_seconds"] == 10
     assert fields["VehicleSpeed"]["interval_seconds"] == 10
-    assert fields["VehicleSpeed"]["minimum_delta"] == 1.0
+    assert "minimum_delta" not in fields["VehicleSpeed"]
+    assert all(
+        "minimum_delta" not in feld_config
+        for feld_config in fields.values()
+    )
 
     charging = app._fleet_telemetrie_profile_config_erstellen(basis, "charging")
     charging_fields = charging["config"]["fields"]
 
     assert charging_fields["DCDCEnable"]["interval_seconds"] == 30
     assert charging_fields["BatteryLevel"]["interval_seconds"] == 10
-    assert charging_fields["BatteryLevel"]["minimum_delta"] == 0.1
+    assert "minimum_delta" not in charging_fields["BatteryLevel"]
+    assert charging_fields["BatteryHeaterOn"]["interval_seconds"] == 10
     assert charging_fields["VehicleSpeed"]["interval_seconds"] == 10
-    assert charging_fields["VehicleSpeed"]["minimum_delta"] == 1.0
+    assert "minimum_delta" not in charging_fields["VehicleSpeed"]
     assert "DestinationLocation" not in charging_fields
     assert "DestinationName" not in charging_fields
     assert "MediaNowPlayingTitle" not in charging_fields
     assert "VehicleName" not in charging_fields
+    assert all(
+        "minimum_delta" not in feld_config
+        for feld_config in charging_fields.values()
+    )
 
 
 def test_fleet_telemetrie_profile_sync_pruefung_liefert_fahrzeugstatus(monkeypatch):

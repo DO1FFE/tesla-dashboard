@@ -1803,6 +1803,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_5S_FELDER = frozenset({
     "Soc",
 })
 FLEET_TELEMETRIE_PROFILE_LIVE_10S_FELDER = frozenset({
+    "BatteryHeaterOn",
     "CenterDisplay",
     "ChargeState",
     "DetailedChargeState",
@@ -1837,6 +1838,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_30S_FELDER = frozenset({
     "WiperHeatEnabled",
 })
 FLEET_TELEMETRIE_PROFILE_LIVE_FELDER = frozenset({
+    "BatteryHeaterOn",
     "BatteryLevel",
     "BrakePedal",
     "BrakePedalPos",
@@ -2081,47 +2083,6 @@ FLEET_TELEMETRIE_PROFILE_CHARGING_FELDER = (
     | FLEET_TELEMETRIE_PROFILE_CHARGING_30S_FELDER
     | FLEET_TELEMETRIE_PROFILE_CHARGING_60S_FELDER
 )
-FLEET_TELEMETRIE_PROFILE_MINDELTAS = {
-    "charging": {
-        "ACChargingEnergyIn": 0.1,
-        "ACChargingPower": 0.1,
-        "BatteryLevel": 0.1,
-        "DCChargingEnergyIn": 0.1,
-        "DCChargingPower": 0.1,
-        "EstBatteryRange": 0.2,
-        "GpsHeading": 2.0,
-        "IdealBatteryRange": 0.2,
-        "InsideTemp": 0.2,
-        "Location": 50,
-        "ModuleTempMax": 0.2,
-        "ModuleTempMin": 0.2,
-        "Odometer": 0.1,
-        "OutsideTemp": 0.2,
-        "PackCurrent": 0.5,
-        "PackVoltage": 1.0,
-        "RatedRange": 0.2,
-        "Soc": 0.1,
-        "TpmsPressureFl": 0.05,
-        "TpmsPressureFr": 0.05,
-        "TpmsPressureRl": 0.05,
-        "TpmsPressureRr": 0.05,
-        "VehicleSpeed": 1.0,
-    },
-    "parked": {
-        "BatteryLevel": 1.0,
-        "EstBatteryRange": 1.0,
-        "IdealBatteryRange": 1.0,
-        "RatedRange": 1.0,
-        "Soc": 1.0,
-        "TpmsPressureFl": 0.05,
-        "TpmsPressureFr": 0.05,
-        "TpmsPressureRl": 0.05,
-        "TpmsPressureRr": 0.05,
-        "VehicleSpeed": 1.0,
-    },
-}
-
-
 def _fleet_telemetrie_profile_status_standard():
     """Erzeuge den Standardstatus für die Telemetry-Profilsteuerung."""
 
@@ -5235,7 +5196,6 @@ def _fleet_telemetrie_profile_config_erstellen(request_data, profil):
         for feld in list(fields):
             if feld not in FLEET_TELEMETRIE_PROFILE_CHARGING_FELDER:
                 fields.pop(feld, None)
-    mindeltas = FLEET_TELEMETRIE_PROFILE_MINDELTAS.get(profil, {})
     for feld, feld_config in fields.items():
         if not isinstance(feld_config, dict):
             continue
@@ -5243,11 +5203,7 @@ def _fleet_telemetrie_profile_config_erstellen(request_data, profil):
         if intervall is None:
             continue
         feld_config["interval_seconds"] = intervall
-        if profil == "live":
-            feld_config.pop("minimum_delta", None)
-            continue
-        if feld in mindeltas:
-            feld_config["minimum_delta"] = mindeltas[feld]
+        feld_config.pop("minimum_delta", None)
     return config_request
 
 
