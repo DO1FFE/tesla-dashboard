@@ -1497,6 +1497,14 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
                 "LightsTurnSignal": {"interval_seconds": 10},
                 "MilesToArrival": {"interval_seconds": 60},
                 "MinutesToArrival": {"interval_seconds": 60},
+                "ModuleTempMax": {
+                    "interval_seconds": 1,
+                    "minimum_delta": 0.1,
+                },
+                "ModuleTempMin": {
+                    "interval_seconds": 1,
+                    "minimum_delta": 0.1,
+                },
                 "PackCurrent": {"interval_seconds": 1, "minimum_delta": 0.1},
                 "RouteLine": {"interval_seconds": 1},
                 "RouteTrafficMinutesDelay": {"interval_seconds": 60},
@@ -1533,6 +1541,10 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "minimum_delta" not in live_fields["InsideTemp"]
     assert live_fields["MilesToArrival"]["interval_seconds"] == 5
     assert live_fields["MinutesToArrival"]["interval_seconds"] == 5
+    assert live_fields["ModuleTempMax"]["interval_seconds"] == 60
+    assert live_fields["ModuleTempMin"]["interval_seconds"] == 60
+    assert "minimum_delta" not in live_fields["ModuleTempMax"]
+    assert "minimum_delta" not in live_fields["ModuleTempMin"]
     assert live_fields["RouteLine"]["interval_seconds"] == 10
     assert live_fields["RouteTrafficMinutesDelay"]["interval_seconds"] == 5
     assert "MediaNowPlayingTitle" not in live_fields
@@ -1557,6 +1569,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert erweitert_fields["DCDCEnable"]["interval_seconds"] == 30
     assert erweitert_fields["BatteryHeaterOn"]["interval_seconds"] == 10
     assert erweitert_fields["MediaNowPlayingTitle"]["interval_seconds"] == 60
+    assert erweitert_fields["ModuleTempMax"]["interval_seconds"] == 60
+    assert erweitert_fields["ModuleTempMin"]["interval_seconds"] == 60
     assert erweitert_fields["VehicleName"]["interval_seconds"] == 60
     assert all(
         "minimum_delta" not in feld_config

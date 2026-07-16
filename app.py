@@ -1869,6 +1869,8 @@ FLEET_TELEMETRIE_PROFILE_LIVE_FELDER = frozenset({
     "MilesToArrival",
     "MediaPlaybackStatus",
     "MinutesToArrival",
+    "ModuleTempMax",
+    "ModuleTempMin",
     "Odometer",
     "OutsideTemp",
     "PackCurrent",
