@@ -1810,16 +1810,27 @@ select {
   transform: rotateY(180deg);
 }
 
-/* animated windows */
+/* Animierte Fenster */
 #window-fl,
 #window-fr,
 #window-rl,
 #window-rr {
-  transition: transform 0.5s ease;
+  transform: scaleX(1);
+  transition: transform 0.5s ease, fill 0.25s ease, stroke-opacity 0.25s ease;
   transform-box: fill-box;
   stroke: black;
   stroke-opacity: 0.3;
   stroke-width: 0.5px;
+}
+
+#window-fl,
+#window-rl {
+  transform-origin: left center;
+}
+
+#window-fr,
+#window-rr {
+  transform-origin: right center;
 }
 
 #sunroof {
@@ -1839,7 +1850,7 @@ select {
 #window-fr.window-open,
 #window-rl.window-open,
 #window-rr.window-open {
-  /* keep a visible outline when open */
+  transform: scaleX(0.18);
   fill: #4caf50;
   stroke: black;
   stroke-opacity: 1;

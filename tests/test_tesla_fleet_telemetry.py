@@ -1490,6 +1490,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
                 "DestinationLocation": {"interval_seconds": 60},
                 "DestinationName": {"interval_seconds": 60},
                 "ExpectedEnergyPercentAtTripArrival": {"interval_seconds": 60},
+                "FdWindow": {"interval_seconds": 60},
+                "FpWindow": {"interval_seconds": 60},
                 "HvacFanSpeed": {"interval_seconds": 60},
                 "HvacFanStatus": {"interval_seconds": 60},
                 "LightsHazardsActive": {"interval_seconds": 10},
@@ -1508,6 +1510,13 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
                 "PackCurrent": {"interval_seconds": 1, "minimum_delta": 0.1},
                 "RouteLine": {"interval_seconds": 1},
                 "RouteTrafficMinutesDelay": {"interval_seconds": 60},
+                "RdWindow": {"interval_seconds": 60},
+                "RpWindow": {"interval_seconds": 60},
+                "SeatHeaterLeft": {"interval_seconds": 60},
+                "SeatHeaterRearCenter": {"interval_seconds": 60},
+                "SeatHeaterRearLeft": {"interval_seconds": 60},
+                "SeatHeaterRearRight": {"interval_seconds": 60},
+                "SeatHeaterRight": {"interval_seconds": 60},
                 "VehicleSpeed": {"interval_seconds": 1, "minimum_delta": 0.1},
                 "VehicleName": {"interval_seconds": 1},
             },
@@ -1532,6 +1541,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert live_fields["DestinationLocation"]["interval_seconds"] == 1
     assert live_fields["DestinationName"]["interval_seconds"] == 30
     assert live_fields["ExpectedEnergyPercentAtTripArrival"]["interval_seconds"] == 5
+    assert live_fields["FdWindow"]["interval_seconds"] == 10
+    assert live_fields["FpWindow"]["interval_seconds"] == 10
     assert live_fields["HvacFanSpeed"]["interval_seconds"] == 30
     assert live_fields["HvacFanStatus"]["interval_seconds"] == 30
     assert live_fields["LightsHazardsActive"]["interval_seconds"] == 1
@@ -1547,6 +1558,13 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "minimum_delta" not in live_fields["ModuleTempMin"]
     assert live_fields["RouteLine"]["interval_seconds"] == 10
     assert live_fields["RouteTrafficMinutesDelay"]["interval_seconds"] == 5
+    assert live_fields["RdWindow"]["interval_seconds"] == 10
+    assert live_fields["RpWindow"]["interval_seconds"] == 10
+    assert live_fields["SeatHeaterLeft"]["interval_seconds"] == 10
+    assert live_fields["SeatHeaterRearCenter"]["interval_seconds"] == 10
+    assert live_fields["SeatHeaterRearLeft"]["interval_seconds"] == 10
+    assert live_fields["SeatHeaterRearRight"]["interval_seconds"] == 10
+    assert live_fields["SeatHeaterRight"]["interval_seconds"] == 10
     assert "MediaNowPlayingTitle" not in live_fields
     assert live_fields["DCDCEnable"]["interval_seconds"] == 30
     assert "minimum_delta" not in live_fields["DCDCEnable"]
@@ -1571,6 +1589,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert erweitert_fields["MediaNowPlayingTitle"]["interval_seconds"] == 60
     assert erweitert_fields["ModuleTempMax"]["interval_seconds"] == 60
     assert erweitert_fields["ModuleTempMin"]["interval_seconds"] == 60
+    assert erweitert_fields["FdWindow"]["interval_seconds"] == 10
+    assert erweitert_fields["SeatHeaterRearRight"]["interval_seconds"] == 10
     assert erweitert_fields["VehicleName"]["interval_seconds"] == 60
     assert all(
         "minimum_delta" not in feld_config
@@ -1590,6 +1610,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert fields["BatteryHeaterOn"]["interval_seconds"] == 60
     assert fields["DCDCEnable"]["interval_seconds"] == 60
     assert fields["ChargeState"]["interval_seconds"] == 10
+    assert fields["FdWindow"]["interval_seconds"] == 10
+    assert fields["SeatHeaterRearRight"]["interval_seconds"] == 10
     assert fields["VehicleSpeed"]["interval_seconds"] == 10
     assert "minimum_delta" not in fields["VehicleSpeed"]
     assert all(
@@ -1604,6 +1626,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert charging_fields["BatteryLevel"]["interval_seconds"] == 10
     assert "minimum_delta" not in charging_fields["BatteryLevel"]
     assert charging_fields["BatteryHeaterOn"]["interval_seconds"] == 10
+    assert charging_fields["FdWindow"]["interval_seconds"] == 10
+    assert charging_fields["SeatHeaterRearRight"]["interval_seconds"] == 10
     assert charging_fields["VehicleSpeed"]["interval_seconds"] == 10
     assert "minimum_delta" not in charging_fields["VehicleSpeed"]
     assert "DestinationLocation" not in charging_fields

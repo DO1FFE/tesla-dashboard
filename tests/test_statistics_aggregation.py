@@ -71,6 +71,7 @@ def test_api_statistics_includes_new_trip(monkeypatch, tmp_path):
     importlib.reload(app)
     monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(app, "_default_vehicle_id", "1")
+    monkeypatch.setattr(app, "STAT_FILE", str(tmp_path / "statistics.json"))
 
     app._statistics_aggregation_tick()
 
