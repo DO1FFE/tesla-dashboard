@@ -151,6 +151,211 @@ def test_fleet_telemetrie_stoesst_aprs_aus_live_daten_an(monkeypatch):
     assert aprs_daten[0]["drive_state"]["longitude"] == 7.0
 
 
+def test_fleet_telemetrie_positionswaechter_erkennt_nur_aktive_fahrt(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_POSITION_MAX_ALTER_SECONDS",
+        15.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_POSITION_STREAM_MAX_ALTER_SECONDS",
+        15.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_POSITION_MIN_GESCHWINDIGKEIT_MPH",
+        0.5,
+    )
+    daten = {
+        "state": "online",
+        "drive_state": {"shift_state": "D", "speed": 30},
+        "fleet_telemetry_received_at": 1_999_999_999_000,
+        "fleet_telemetry_field_received_at": {
+            "Location": 1_999_999_980_000,
+            "VehicleSpeed": 1_999_999_999_000,
+        },
+    }
+
+    assert app._fleet_telemetrie_position_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms=2_000_000_000_000,
+    )
+
+    daten["fleet_telemetry_position_fallback_at"] = 1_999_999_999_000
+    assert not app._fleet_telemetrie_position_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms=2_000_000_000_000,
+    )
+    daten.pop("fleet_telemetry_position_fallback_at")
+    daten["drive_state"]["speed"] = 0
+    assert not app._fleet_telemetrie_position_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms=2_000_000_000_000,
+    )
+    daten["drive_state"]["speed"] = 30
+    daten["state"] = "offline"
+    assert not app._fleet_telemetrie_position_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms=2_000_000_000_000,
+    )
+    daten["state"] = "online"
+    daten["fleet_telemetry_field_received_at"][
+        "VehicleSpeed"
+    ] = 1_999_999_900_000
+    assert not app._fleet_telemetrie_position_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms=2_000_000_000_000,
+    )
+
+
+def test_fleet_telemetrie_positionsabfrage_hat_sperrfrist(monkeypatch):
+    monkeypatch.setattr(app, "_fleet_telemetry_position_letzte_abfrage", {})
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_POSITION_WIEDERHOLUNG_SECONDS",
+        30.0,
+    )
+
+    assert app._fleet_telemetrie_position_abfrage_reservieren("TESTVIN", 100.0)
+    assert not app._fleet_telemetrie_position_abfrage_reservieren(
+        "TESTVIN",
+        129.9,
+    )
+    assert app._fleet_telemetrie_position_abfrage_reservieren("TESTVIN", 130.0)
+
+
+def test_fleet_telemetrie_positionsabfrage_nutzt_nur_location_data(monkeypatch):
+    class Antwort:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "response": {
+                    "drive_state": {
+                        "latitude": 51.45,
+                        "longitude": 7.09,
+                        "heading": 84,
+                    },
+                },
+            }
+
+    abfragen = []
+
+    def fake_get(url, **kwargs):
+        abfragen.append((url, kwargs))
+        return Antwort()
+
+    monkeypatch.setattr(app, "_fleet_telemetrie_oauth_token", lambda: "token")
+    monkeypatch.setattr(app.requests, "get", fake_get)
+    monkeypatch.setattr(
+        app,
+        "TESLA_FLEET_VEHICLE_COMMAND_URL",
+        "https://127.0.0.1:4443",
+    )
+
+    drive = app._fleet_telemetrie_position_abrufen("TESTVIN")
+
+    assert drive["latitude"] == 51.45
+    assert drive["longitude"] == 7.09
+    assert abfragen[0][0].endswith("/api/1/vehicles/TESTVIN/vehicle_data")
+    assert abfragen[0][1]["params"] == {"endpoints": "location_data"}
+    assert abfragen[0][1]["headers"] == {"Authorization": "Bearer token"}
+
+
+def test_fleet_telemetrie_positionsabfrage_aktualisiert_alle_caches(monkeypatch):
+    basis = {
+        "state": "online",
+        "drive_state": {
+            "latitude": 51.0,
+            "longitude": 7.0,
+            "heading": 10,
+            "speed": 30,
+            "shift_state": "D",
+            "timestamp": 1_999_990_000_000,
+        },
+        "fleet_telemetry_raw": {
+            "Location": {"latitude": 51.0, "longitude": 7.0},
+        },
+        "fleet_telemetry_field_received_at": {
+            "Location": 1_999_980_000_000,
+        },
+    }
+    caches = {
+        "default": json.loads(json.dumps(basis)),
+        "veh-1": json.loads(json.dumps(basis)),
+    }
+    gesendet = []
+    gespeichert = []
+    aprs = []
+
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_ids",
+        lambda _vin: ["default", "veh-1"],
+    )
+    monkeypatch.setattr(app, "latest_data", caches)
+    monkeypatch.setattr(app, "_load_cached", lambda _cache_id: None)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_dashboard_daten_anreichern",
+        lambda _cache_id, data: data,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_aktualisieren",
+        lambda _cache_id, data: data,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda cache_id, _data: gespeichert.append(cache_id),
+    )
+    monkeypatch.setattr(
+        app,
+        "_subscriber_daten_senden",
+        lambda cache_id, _data: gesendet.append(cache_id),
+    )
+    monkeypatch.setattr(app, "_aprs_spaeter_senden", lambda data: aprs.append(data))
+
+    assert app._fleet_telemetrie_position_uebernehmen(
+        "TESTVIN",
+        {
+            "latitude": 51.45,
+            "longitude": 7.09,
+            "heading": 84,
+            "gps_as_of": 2_000_000_000,
+            "timestamp": 2_000_000_100_000,
+        },
+        abgerufen_at_ms=2_000_000_200_000,
+    )
+
+    assert gespeichert == ["default", "veh-1"]
+    assert gesendet == ["default", "veh-1"]
+    assert len(aprs) == 2
+    for daten in caches.values():
+        drive = daten["drive_state"]
+        assert drive["latitude"] == 51.45
+        assert drive["longitude"] == 7.09
+        assert drive["heading"] == 84
+        assert drive["gps_as_of"] == 2_000_000_000_000
+        assert drive["timestamp"] == 2_000_000_100_000
+        assert daten["fleet_telemetry_raw"]["Location"] == {
+            "latitude": 51.45,
+            "longitude": 7.09,
+        }
+        assert (
+            daten["fleet_telemetry_position_fallback_at"]
+            == 2_000_000_200_000
+        )
+        assert daten["fleet_telemetry_position_source"] == "vehicle_data"
+        assert (
+            daten["fleet_telemetry_field_received_at"]["Location"]
+            == 1_999_980_000_000
+        )
+
+
 def test_fleet_telemetrie_mqtt_zeichnet_parkstatus_auf(monkeypatch):
     parking_aufrufe = []
 

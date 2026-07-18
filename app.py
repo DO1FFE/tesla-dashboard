@@ -706,6 +706,26 @@ TESLA_FLEET_OAUTH_TOKEN_FILE = os.path.join(
 TESLA_FLEET_TELEMETRY_STALE_SECONDS = float(
     os.getenv("TESLA_FLEET_TELEMETRY_STALE_SECONDS", "300")
 )
+FLEET_TELEMETRIE_POSITION_MAX_ALTER_SECONDS = max(
+    5.0,
+    float(os.getenv("TESLA_FLEET_POSITION_MAX_AGE_SECONDS", "15")),
+)
+FLEET_TELEMETRIE_POSITION_STREAM_MAX_ALTER_SECONDS = max(
+    5.0,
+    float(os.getenv("TESLA_FLEET_POSITION_STREAM_MAX_AGE_SECONDS", "15")),
+)
+FLEET_TELEMETRIE_POSITION_WIEDERHOLUNG_SECONDS = max(
+    FLEET_TELEMETRIE_POSITION_MAX_ALTER_SECONDS,
+    float(os.getenv("TESLA_FLEET_POSITION_RETRY_SECONDS", "30")),
+)
+FLEET_TELEMETRIE_POSITION_PRUEFINTERVALL_SECONDS = max(
+    1.0,
+    float(os.getenv("TESLA_FLEET_POSITION_CHECK_SECONDS", "5")),
+)
+FLEET_TELEMETRIE_POSITION_MIN_GESCHWINDIGKEIT_MPH = max(
+    0.1,
+    float(os.getenv("TESLA_FLEET_POSITION_MIN_SPEED_MPH", "0.5")),
+)
 TESLA_FLEET_VEHICLE_COMMAND_URL = os.getenv(
     "TESLA_FLEET_VEHICLE_COMMAND_URL",
     "https://127.0.0.1:4443",
@@ -1680,9 +1700,12 @@ _fleet_telemetry_worker_thread = None
 _fleet_telemetry_cache_thread = None
 _fleet_telemetry_profile_thread = None
 _fleet_telemetry_token_thread = None
+_fleet_telemetry_position_thread = None
 _fleet_telemetry_lock = threading.Lock()
 _fleet_telemetry_start_lock = threading.Lock()
 _fleet_telemetry_profile_lock = threading.Lock()
+_fleet_telemetry_position_lock = threading.Lock()
+_fleet_telemetry_position_letzte_abfrage = {}
 _fleet_telemetry_vehicle_cache = {"mtime": None, "vehicles": []}
 FLEET_TELEMETRY_MQTT_QUEUE_MAX = max(
     1000, int(os.getenv("TESLA_FLEET_TELEMETRY_MQTT_QUEUE_MAX", "20000"))
@@ -6284,6 +6307,7 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
                 drive["native_type"] = "wgs"
                 drive["gps_as_of"] = timestamp_ms
                 drive["timestamp"] = timestamp_ms
+                data["fleet_telemetry_position_source"] = "fleet_telemetry"
         return True
     if field == "DestinationLocation":
         if isinstance(value, dict):
@@ -7000,6 +7024,262 @@ def _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data):
     return data
 
 
+def _fleet_telemetrie_gueltige_fahrzeugkoordinaten(lat, lon):
+    """Liefere plausible Fahrzeugkoordinaten ohne gültige Nullmeridiane abzulehnen."""
+
+    from math import isfinite
+
+    lat = _as_float(lat)
+    lon = _as_float(lon)
+    if lat is None or lon is None or not isfinite(lat) or not isfinite(lon):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    if abs(lat) < 1e-6 and abs(lon) < 1e-6:
+        return None
+    return lat, lon
+
+
+def _fleet_telemetrie_position_soll_aktualisiert_werden(data, jetzt_ms=None):
+    """Erkenne eine veraltete Position bei nachweislich aktiver Fahrt."""
+
+    if not isinstance(data, dict):
+        return False
+    if _normalisiere_dashboard_state(data.get("state")) != "online":
+        return False
+    drive = data.get("drive_state")
+    if not isinstance(drive, dict):
+        return False
+    shift = _normalize_shift_state(drive.get("shift_state"))
+    speed = _as_float(drive.get("speed"))
+    if shift == "P" or speed is None:
+        return False
+    if abs(speed) < FLEET_TELEMETRIE_POSITION_MIN_GESCHWINDIGKEIT_MPH:
+        return False
+    if jetzt_ms is None:
+        jetzt_ms = time.time() * 1000
+
+    stream_empfangen = _fleet_telemetrie_zeitstempel_ms(
+        data.get("fleet_telemetry_received_at")
+        or data.get("fleet_telemetry_updated_at")
+    )
+    speed_alter = _fleet_telemetrie_feldalter_sekunden(
+        data,
+        "VehicleSpeed",
+        jetzt_ms,
+    )
+    if not isinstance(stream_empfangen, (int, float)):
+        return False
+    stream_alter = max(0.0, (float(jetzt_ms) - stream_empfangen) / 1000.0)
+    if (
+        stream_alter > FLEET_TELEMETRIE_POSITION_STREAM_MAX_ALTER_SECONDS
+        or speed_alter is None
+        or speed_alter > FLEET_TELEMETRIE_POSITION_STREAM_MAX_ALTER_SECONDS
+    ):
+        return False
+
+    feld_empfang = data.get("fleet_telemetry_field_received_at")
+    position_empfangen = None
+    if isinstance(feld_empfang, dict):
+        position_empfangen = _fleet_telemetrie_zeitstempel_ms(
+            feld_empfang.get("Location")
+        )
+    fallback_empfangen = _fleet_telemetrie_zeitstempel_ms(
+        data.get("fleet_telemetry_position_fallback_at")
+    )
+    bezugszeiten = [
+        float(value)
+        for value in (position_empfangen, fallback_empfangen)
+        if isinstance(value, (int, float)) and value > 0
+    ]
+    if not bezugszeiten:
+        return True
+    position_alter = max(0.0, (float(jetzt_ms) - max(bezugszeiten)) / 1000.0)
+    return position_alter > FLEET_TELEMETRIE_POSITION_MAX_ALTER_SECONDS
+
+
+def _fleet_telemetrie_position_abfrage_reservieren(vin, jetzt=None):
+    """Begrenze Positionsabfragen pro Fahrzeug auf das Wiederholungsintervall."""
+
+    if not vin:
+        return False
+    if jetzt is None:
+        jetzt = time.monotonic()
+    with _fleet_telemetry_position_lock:
+        letzte_abfrage = _fleet_telemetry_position_letzte_abfrage.get(str(vin))
+        if (
+            letzte_abfrage is not None
+            and jetzt - letzte_abfrage
+            < FLEET_TELEMETRIE_POSITION_WIEDERHOLUNG_SECONDS
+        ):
+            return False
+        _fleet_telemetry_position_letzte_abfrage[str(vin)] = jetzt
+    return True
+
+
+def _fleet_telemetrie_position_abrufen(vin):
+    """Rufe ausschließlich Teslas location_data für eine veraltete Position ab."""
+
+    token = _fleet_telemetrie_oauth_token()
+    if not token:
+        raise RuntimeError("Kein gültiger Fleet-OAuth-Zugriffstoken verfügbar")
+    url = (
+        TESLA_FLEET_VEHICLE_COMMAND_URL.rstrip("/")
+        + f"/api/1/vehicles/{vin}/vehicle_data"
+    )
+    response = requests.get(
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        params={"endpoints": "location_data"},
+        timeout=FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT,
+        verify=False,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    antwort = payload.get("response") if isinstance(payload, dict) else None
+    drive = antwort.get("drive_state") if isinstance(antwort, dict) else None
+    if not isinstance(drive, dict):
+        raise RuntimeError("Tesla lieferte keine Positionsdaten")
+    if _fleet_telemetrie_gueltige_fahrzeugkoordinaten(
+        drive.get("latitude"),
+        drive.get("longitude"),
+    ) is None:
+        raise RuntimeError("Tesla lieferte keine gültigen Fahrzeugkoordinaten")
+    return drive
+
+
+def _fleet_telemetrie_position_uebernehmen(vin, drive_data, abgerufen_at_ms=None):
+    """Übernehme eine gezielt abgefragte Position in alle Dashboard-Caches."""
+
+    if not isinstance(drive_data, dict):
+        return False
+    koordinaten = _fleet_telemetrie_gueltige_fahrzeugkoordinaten(
+        drive_data.get("latitude"),
+        drive_data.get("longitude"),
+    )
+    if koordinaten is None:
+        return False
+    lat, lon = koordinaten
+    if abgerufen_at_ms is None:
+        abgerufen_at_ms = int(time.time() * 1000)
+    gps_zeit = _fleet_telemetrie_zeitstempel_ms(drive_data.get("gps_as_of"))
+    drive_zeit = _fleet_telemetrie_zeitstempel_ms(drive_data.get("timestamp"))
+    positionszeit = gps_zeit or drive_zeit or abgerufen_at_ms
+    heading = _as_float(drive_data.get("heading"))
+    aktualisierte_daten = []
+
+    with _fleet_telemetry_lock:
+        for cache_id in _fleet_telemetrie_cache_ids(vin):
+            data = latest_data.get(cache_id)
+            if not isinstance(data, dict):
+                data = _load_cached(cache_id)
+            if not isinstance(data, dict):
+                continue
+            drive = data.setdefault("drive_state", {})
+            alte_lat = _as_float(drive.get("latitude"))
+            alte_lon = _as_float(drive.get("longitude"))
+            alte_richtung = _as_float(drive.get("heading"))
+            geändert = alte_lat != lat or alte_lon != lon
+
+            drive["latitude"] = lat
+            drive["longitude"] = lon
+            drive["native_latitude"] = lat
+            drive["native_longitude"] = lon
+            drive["native_location_supported"] = True
+            drive["native_type"] = "wgs"
+            drive["gps_as_of"] = positionszeit
+            bisherige_drive_zeit = _fleet_telemetrie_zeitstempel_ms(
+                drive.get("timestamp")
+            )
+            drive["timestamp"] = max(
+                value
+                for value in (bisherige_drive_zeit, drive_zeit, positionszeit)
+                if isinstance(value, (int, float))
+            )
+            if heading is not None:
+                drive["heading"] = heading
+                geändert = geändert or alte_richtung != heading
+
+            data.setdefault("fleet_telemetry_raw", {})["Location"] = {
+                "latitude": lat,
+                "longitude": lon,
+            }
+            data["fleet_telemetry_position_fallback_at"] = int(abgerufen_at_ms)
+            data["fleet_telemetry_position_source"] = "vehicle_data"
+            data["state_checked_at"] = int(abgerufen_at_ms)
+            data["_live"] = True
+            data.pop("api_error", None)
+            data = _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data)
+            data = _fleet_telemetrie_profile_aktualisieren(cache_id, data)
+            _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, data)
+            latest_data[cache_id] = data
+            _fleet_telemetrie_cache_spaeter_speichern(cache_id, data)
+            aktualisierte_daten.append((cache_id, data, geändert))
+
+    for cache_id, data, geändert in aktualisierte_daten:
+        if geändert:
+            _subscriber_daten_senden(cache_id, data)
+            _aprs_spaeter_senden(data)
+    return bool(aktualisierte_daten)
+
+
+def _fleet_telemetrie_position_snapshot(vin):
+    """Lese den frischesten Cache-Stand eines Fahrzeugs für den Positionswächter."""
+
+    kandidaten = []
+    with _fleet_telemetry_lock:
+        for cache_id in _fleet_telemetrie_cache_ids(vin):
+            data = latest_data.get(cache_id)
+            if not isinstance(data, dict):
+                continue
+            empfangen = _fleet_telemetrie_zeitstempel_ms(
+                data.get("fleet_telemetry_received_at")
+            )
+            kandidaten.append((empfangen or 0, _subscriber_daten_kopie(data)))
+    if not kandidaten:
+        return None
+    return max(kandidaten, key=lambda eintrag: eintrag[0])[1]
+
+
+def _fleet_telemetrie_position_worker_loop():
+    """Stoße eine festhängende Fleet-Position während aktiver Fahrt wieder an."""
+
+    while _fleet_telemetrie_aktiv():
+        gestartet = time.monotonic()
+        for vehicle in _fleet_telemetrie_fahrzeuge():
+            vin = str(vehicle.get("vin") or "").strip()
+            if not vin:
+                continue
+            data = _fleet_telemetrie_position_snapshot(vin)
+            if not _fleet_telemetrie_position_soll_aktualisiert_werden(data):
+                continue
+            if not _fleet_telemetrie_position_abfrage_reservieren(vin):
+                continue
+            try:
+                drive_data = _fleet_telemetrie_position_abrufen(vin)
+                übernommen = _fleet_telemetrie_position_uebernehmen(
+                    vin,
+                    drive_data,
+                )
+                if übernommen:
+                    logging.info(
+                        "Veraltete Fleet-Position über location_data aktualisiert: %s",
+                        vin,
+                    )
+            except Exception as exc:
+                logging.warning(
+                    "Fleet-Position konnte nicht aktualisiert werden (%s): %s",
+                    vin,
+                    exc,
+                )
+        vergangen = time.monotonic() - gestartet
+        pause = max(
+            0.1,
+            FLEET_TELEMETRIE_POSITION_PRUEFINTERVALL_SECONDS - vergangen,
+        )
+        time.sleep(pause)
+
+
 def _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, data, vehicle_id=None):
     """Zeichne Park-Samples aus Fleet-Telemetry-Daten auf."""
 
@@ -7516,6 +7796,7 @@ def _start_fleet_telemetry_listener():
     global _fleet_telemetry_cache_thread
     global _fleet_telemetry_profile_thread
     global _fleet_telemetry_token_thread
+    global _fleet_telemetry_position_thread
     if not _fleet_telemetrie_aktiv():
         return
     with _fleet_telemetry_start_lock:
@@ -7528,6 +7809,16 @@ def _start_fleet_telemetry_listener():
                 daemon=True,
             )
             _fleet_telemetry_token_thread.start()
+        if (
+            _fleet_telemetry_position_thread is None
+            or not _fleet_telemetry_position_thread.is_alive()
+        ):
+            _fleet_telemetry_position_thread = threading.Thread(
+                target=_fleet_telemetrie_position_worker_loop,
+                name="fleet_telemetrie_positionswaechter",
+                daemon=True,
+            )
+            _fleet_telemetry_position_thread.start()
         if (
             _fleet_telemetry_worker_thread is None
             or not _fleet_telemetry_worker_thread.is_alive()
