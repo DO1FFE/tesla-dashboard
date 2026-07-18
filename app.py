@@ -4452,37 +4452,29 @@ def _fleet_telemetrie_oeffnungsfeld_veraltet(
 
 
 def _fleet_telemetrie_veraltete_oeffnungen_bereinigen(data, jetzt_ms=None):
-    """Blende veraltete offene Öffnungswerte im Dashboard-Payload aus."""
+    """Gleiche Fensterwerte mit dem letzten Fleet-Rohwert ab."""
 
     if not isinstance(data, dict):
         return False
     vehicle_state = data.get("vehicle_state")
     if not isinstance(vehicle_state, dict):
         return False
+    rohwerte = data.get("fleet_telemetry_raw")
     geändert = False
-    stale_fields = data.setdefault("fleet_telemetry_stale_opening_fields", {})
-    if not isinstance(stale_fields, dict):
-        stale_fields = {}
-        data["fleet_telemetry_stale_opening_fields"] = stale_fields
+    if isinstance(rohwerte, dict):
+        for raw_field, owner_key in FLEET_TELEMETRIE_FENSTER_FELDER.items():
+            if raw_field not in rohwerte:
+                continue
+            rohwert = _fleet_telemetrie_wert(rohwerte.get(raw_field))
+            if rohwert is None:
+                continue
+            fensterwert = _fleet_telemetrie_fensterwert(rohwert)
+            if vehicle_state.get(owner_key) != fensterwert:
+                vehicle_state[owner_key] = fensterwert
+                geändert = True
 
-    for raw_field, owner_key in FLEET_TELEMETRIE_FENSTER_FELDER.items():
-        if not _wert_ist_offen(vehicle_state.get(owner_key)):
-            stale_fields.pop(raw_field, None)
-            continue
-        if _fleet_telemetrie_oeffnungsfeld_veraltet(data, raw_field, jetzt_ms):
-            alter = _fleet_telemetrie_feldalter_sekunden(data, raw_field, jetzt_ms)
-            intervall = _fleet_telemetrie_feldintervall_sekunden(data, raw_field)
-            stale_info = {"assumed_closed": True}
-            if alter is not None:
-                stale_info["age_seconds"] = round(alter, 1)
-            if intervall is not None:
-                stale_info["interval_seconds"] = round(intervall, 1)
-            vehicle_state[owner_key] = 0
-            stale_fields[raw_field] = stale_info
-            geändert = True
-
-    if not stale_fields:
-        data.pop("fleet_telemetry_stale_opening_fields", None)
+    if data.pop("fleet_telemetry_stale_opening_fields", None) is not None:
+        geändert = True
     return geändert
 
 

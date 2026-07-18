@@ -849,7 +849,7 @@ def test_oeffnungsstatus_prueft_veraltetes_fenster_trotz_frischer_tuer(monkeypat
     assert app._soll_öffnungsstatus_live_prüfen(cached, None, 30) is True
 
 
-def test_veraltete_fensterwerte_werden_fuer_dashboard_geschlossen(monkeypatch):
+def test_veraltete_fensterwerte_bleiben_im_dashboard_geoeffnet(monkeypatch):
     jetzt_ms = 1_783_805_000_000
 
     monkeypatch.setattr(app, "FLEET_TELEMETRIE_OEFFNUNG_MAX_ALTER_SECONDS", 30.0)
@@ -868,16 +868,13 @@ def test_veraltete_fensterwerte_werden_fuer_dashboard_geschlossen(monkeypatch):
     assert app._fleet_telemetrie_veraltete_oeffnungen_bereinigen(
         daten,
         jetzt_ms,
-    ) is True
-    assert daten["vehicle_state"]["fd_window"] == 0
+    ) is False
+    assert daten["vehicle_state"]["fd_window"] == 1
     assert daten["vehicle_state"]["rp_window"] == 1
-    assert daten["fleet_telemetry_stale_opening_fields"]["FdWindow"] == {
-        "age_seconds": 45.0,
-        "assumed_closed": True,
-    }
+    assert "fleet_telemetry_stale_opening_fields" not in daten
 
 
-def test_fensterwert_mit_langem_intervall_wird_als_veraltet_behandelt(monkeypatch):
+def test_fensterwert_mit_langem_intervall_bleibt_geoeffnet(monkeypatch):
     jetzt_ms = 1_783_805_000_000
 
     monkeypatch.setattr(app.time, "time", lambda: jetzt_ms / 1000)
@@ -899,10 +896,35 @@ def test_fensterwert_mit_langem_intervall_wird_als_veraltet_behandelt(monkeypatc
     assert app._fleet_telemetrie_veraltete_oeffnungen_bereinigen(
         daten,
         jetzt_ms,
-    ) is True
-    assert daten["vehicle_state"]["fd_window"] == 0
-    assert daten["fleet_telemetry_stale_opening_fields"]["FdWindow"] == {
-        "assumed_closed": True,
-        "age_seconds": 0.0,
-        "interval_seconds": 457.0,
+    ) is False
+    assert daten["vehicle_state"]["fd_window"] == 1
+    assert "fleet_telemetry_stale_opening_fields" not in daten
+
+
+def test_fensterwert_wird_aus_fleet_rohcache_wiederhergestellt():
+    daten = {
+        "vehicle_state": {
+            "fd_window": 0,
+            "fp_window": 1,
+            "rd_window": 0,
+            "rp_window": 0,
+        },
+        "fleet_telemetry_raw": {
+            "FdWindow": "WindowStatePartiallyOpen",
+            "FpWindow": "WindowStateClosed",
+            "RdWindow": "WindowStateClosed",
+            "RpWindow": "WindowStateClosed",
+        },
+        "fleet_telemetry_stale_opening_fields": {
+            "FdWindow": {"assumed_closed": True},
+        },
     }
+
+    assert app._fleet_telemetrie_veraltete_oeffnungen_bereinigen(daten) is True
+    assert daten["vehicle_state"] == {
+        "fd_window": 1,
+        "fp_window": 0,
+        "rd_window": 0,
+        "rp_window": 0,
+    }
+    assert "fleet_telemetry_stale_opening_fields" not in daten
