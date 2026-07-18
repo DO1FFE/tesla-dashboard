@@ -4990,6 +4990,8 @@ def _fleet_telemetrie_profile_stream_bestaetigt(data, status, profil):
     if not _fleet_telemetrie_profile_stream_nach_config_aktiv(data, status):
         return False
     if profil in {"live", "live_extended"}:
+        if _fleet_telemetrie_profile_api_sync_bestaetigt(status, profil):
+            return True
         return _fleet_telemetrie_profile_live_takt_bestaetigt(data, status)
     return True
 
@@ -5495,17 +5497,22 @@ def _fleet_telemetrie_profile_sync_resultat_setzen(status, profil, ergebnis):
     )
 
 
-def _fleet_telemetrie_profile_sync_bestaetigt(status, profil):
-    """Prüfe, ob genau dieses Profil von Tesla als synchron bestätigt wurde."""
+def _fleet_telemetrie_profile_api_sync_bestaetigt(status, profil):
+    """Prüfe Teslas API-Bestätigung für genau dieses Profil."""
 
     if not isinstance(status, dict) or profil not in FLEET_TELEMETRIE_PROFILE:
         return False
-    api_bestaetigt = (
+    return (
         status.get("config_synced") is True
         and str(status.get("config_sync_state") or "").lower() == "synced"
         and status.get("config_sync_profile") == profil
     )
-    if not api_bestaetigt:
+
+
+def _fleet_telemetrie_profile_sync_bestaetigt(status, profil):
+    """Prüfe, ob genau dieses Profil von Tesla als synchron bestätigt wurde."""
+
+    if not _fleet_telemetrie_profile_api_sync_bestaetigt(status, profil):
         return False
     if profil not in {"live", "live_extended"}:
         return True
@@ -5892,25 +5899,6 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
             and jetzt - target_since < FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS
         ):
             aktivierbares_ziel = current
-        live_takt_erforderlich = (
-            ziel == "live"
-            and aktivierbares_ziel in {"live", "live_extended"}
-            and _fleet_telemetrie_profile_fahrzeug_fährt(data)
-        )
-        if (
-            live_takt_erforderlich
-            and not live_takt_stabil
-            and _fleet_telemetrie_profile_sync_bestaetigt(
-                status,
-                aktivierbares_ziel,
-            )
-        ):
-            status["config_synced"] = False
-            status["config_sync_state"] = "active"
-            status["config_sync_error"] = "Live-Datenstrom liefert noch keinen 1s-Takt"
-            status["config_sync_updated_at"] = jetzt
-            status["updated_at"] = jetzt
-            status_geändert = True
         dringlich = aktivierbares_ziel in {"live", "live_extended", "charging"}
         cooldown_abgelaufen = (
             jetzt - float(status.get("last_sent") or 0)
