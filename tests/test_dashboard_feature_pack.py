@@ -152,7 +152,7 @@ def test_footer_zeigt_telemetrie_profile():
     assert ".telemetry-sync-active {\n  color: #ffd54f;" in css
 
 
-def test_fensterdarstellung_animiert_oeffnen_und_schliessen():
+def test_fensterdarstellung_markiert_offene_fenster_nur_gruen():
     html = pathlib.Path("templates/index.html").read_text(encoding="utf-8")
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
     css = pathlib.Path("static/css/style.css").read_text(encoding="utf-8")
@@ -160,11 +160,11 @@ def test_fensterdarstellung_animiert_oeffnen_und_schliessen():
     for fenster_id in ("window-fl", "window-fr", "window-rl", "window-rr"):
         assert f'id="{fenster_id}"' in html
     assert "$el.toggleClass('window-open', open);" in js
-    assert "transform: scaleX(1);" in css
-    assert "transform: scaleX(0.18);" in css
-    assert "transform-origin: left center;" in css
-    assert "transform-origin: right center;" in css
-    assert "transition: transform 0.5s ease" in css
+    assert "#window-fl.window-open," in css
+    assert "#window-rr.window-open {\n  fill: #4caf50;" in css
+    assert "transform: scaleX" not in css
+    assert "transform-origin: left center;" not in css
+    assert "transform-origin: right center;" not in css
 
 
 def test_technische_packdetails_sind_in_ui_eingebunden():
