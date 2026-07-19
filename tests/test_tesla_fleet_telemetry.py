@@ -209,6 +209,43 @@ def test_fleet_telemetrie_positionswaechter_erkennt_nur_aktive_fahrt(monkeypatch
     )
 
 
+@pytest.mark.parametrize(
+    "speed_empfangen",
+    [
+        1_999_999_999_000,
+        1_999_999_820_000,
+    ],
+)
+def test_fleet_telemetrie_positionswaechter_fragt_an_ampel_nicht_ab(
+    monkeypatch,
+    speed_empfangen,
+):
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_POSITION_MAX_ALTER_SECONDS",
+        15.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_POSITION_STREAM_MAX_ALTER_SECONDS",
+        15.0,
+    )
+    daten = {
+        "state": "online",
+        "drive_state": {"shift_state": "D", "speed": 0},
+        "fleet_telemetry_received_at": 1_999_999_999_000,
+        "fleet_telemetry_field_received_at": {
+            "Location": 1_999_999_820_000,
+            "VehicleSpeed": speed_empfangen,
+        },
+    }
+
+    assert not app._fleet_telemetrie_position_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms=2_000_000_000_000,
+    )
+
+
 def test_fleet_telemetrie_positionsabfrage_hat_sperrfrist(monkeypatch):
     monkeypatch.setattr(app, "_fleet_telemetry_position_letzte_abfrage", {})
     monkeypatch.setattr(
