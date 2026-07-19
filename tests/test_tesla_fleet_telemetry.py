@@ -697,6 +697,8 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
         "DefrostMode": b'"DefrostModeStateOn"',
         "RearDefrostEnabled": b"true",
         "WiperHeatEnabled": b"true",
+        "HvacLeftTemperatureRequest": b"19.0",
+        "HvacRightTemperatureRequest": b"20.5",
         "HvacSteeringWheelHeatLevel": b"2",
         "SeatHeaterLeft": b"3",
         "DriverSeatOccupied": b"true",
@@ -750,6 +752,8 @@ def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
     assert daten["climate_state"]["is_rear_defroster_on"] is True
     assert daten["climate_state"]["side_mirror_heaters"] is True
     assert daten["climate_state"]["wiper_blade_heater"] is True
+    assert daten["climate_state"]["driver_temp_setting"] == 19.0
+    assert daten["climate_state"]["passenger_temp_setting"] == 20.5
     assert daten["climate_state"]["steering_wheel_heater"] is True
     assert daten["climate_state"]["seat_heater_left"] == 3
     assert daten["vehicle_state"]["is_user_present"] is True
@@ -1736,6 +1740,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
                 "FpWindow": {"interval_seconds": 60},
                 "HvacFanSpeed": {"interval_seconds": 60},
                 "HvacFanStatus": {"interval_seconds": 60},
+                "HvacLeftTemperatureRequest": {"interval_seconds": 60},
+                "HvacRightTemperatureRequest": {"interval_seconds": 60},
                 "LightsHazardsActive": {"interval_seconds": 10},
                 "LightsHighBeams": {"interval_seconds": 10},
                 "LightsTurnSignal": {"interval_seconds": 10},
@@ -1787,6 +1793,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert live_fields["FpWindow"]["interval_seconds"] == 10
     assert live_fields["HvacFanSpeed"]["interval_seconds"] == 30
     assert live_fields["HvacFanStatus"]["interval_seconds"] == 30
+    assert live_fields["HvacLeftTemperatureRequest"]["interval_seconds"] == 1
+    assert live_fields["HvacRightTemperatureRequest"]["interval_seconds"] == 1
     assert live_fields["LightsHazardsActive"]["interval_seconds"] == 1
     assert live_fields["LightsHighBeams"]["interval_seconds"] == 1
     assert live_fields["LightsTurnSignal"]["interval_seconds"] == 1
@@ -1825,6 +1833,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert erweitert_fields["VehicleSpeed"]["interval_seconds"] == 1
     assert erweitert_fields["DestinationLocation"]["interval_seconds"] == 1
     assert erweitert_fields["DestinationName"]["interval_seconds"] == 30
+    assert erweitert_fields["HvacLeftTemperatureRequest"]["interval_seconds"] == 1
+    assert erweitert_fields["HvacRightTemperatureRequest"]["interval_seconds"] == 1
     assert erweitert_fields["RouteLine"]["interval_seconds"] == 10
     assert erweitert_fields["DCDCEnable"]["interval_seconds"] == 30
     assert erweitert_fields["BatteryHeaterOn"]["interval_seconds"] == 10
@@ -1844,6 +1854,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
 
     assert basis["config"]["fields"]["Location"]["interval_seconds"] == 1
     assert "InsideTemp" not in fields
+    assert "HvacLeftTemperatureRequest" not in fields
+    assert "HvacRightTemperatureRequest" not in fields
     assert "Location" not in fields
     assert "MediaNowPlayingTitle" not in fields
     assert "RouteLine" not in fields
@@ -1869,6 +1881,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "minimum_delta" not in charging_fields["BatteryLevel"]
     assert charging_fields["BatteryHeaterOn"]["interval_seconds"] == 10
     assert charging_fields["FdWindow"]["interval_seconds"] == 10
+    assert charging_fields["HvacLeftTemperatureRequest"]["interval_seconds"] == 10
+    assert charging_fields["HvacRightTemperatureRequest"]["interval_seconds"] == 10
     assert charging_fields["SeatHeaterRearRight"]["interval_seconds"] == 10
     assert charging_fields["VehicleSpeed"]["interval_seconds"] == 10
     assert "minimum_delta" not in charging_fields["VehicleSpeed"]
