@@ -1252,7 +1252,7 @@ function handleData(data) {
     );
     updateTPMS(vehicle);
     updateReifendruckDetails(vehicle);
-    updateOpenings(vehicle, charge);
+    updateOpenings(vehicle, charge, drive.shift_state);
     updateMediaPlayer(vehicle.media_info);
     var alarm = data.alarm_state;
     if (alarm == null && vehicle.alarm_state != null) {
@@ -2161,7 +2161,7 @@ function updateReifendruckDetails(vehicle) {
     $details.html(html).show();
 }
 
-function updateBrakeLights(vehicle) {
+function updateBrakeLights(vehicle, shiftState) {
     var $lights = $('#brake-lights');
     if (!$lights.length) {
         return;
@@ -2169,7 +2169,9 @@ function updateBrakeLights(vehicle) {
     vehicle = vehicle || {};
     var pedalAktiv = istAktiv(vehicle.brake_pedal);
     var bremsdruck = parseNumber(vehicle.brake_pedal_pos);
-    var aktiv = pedalAktiv || (bremsdruck != null && bremsdruck > 0.1);
+    var gang = normalizeShiftState(shiftState);
+    var druckbremseAktiv = gang !== 'P' && bremsdruck != null && bremsdruck > 0.1;
+    var aktiv = pedalAktiv || druckbremseAktiv;
     var titel = aktiv ? 'Bremslicht an' : 'Bremslicht aus';
     if (bremsdruck != null) {
         titel += ' · Bremsdruck ' + bremsdruck.toFixed(1);
@@ -2181,7 +2183,7 @@ function updateBrakeLights(vehicle) {
     $lights.find('title').text(titel);
 }
 
-function updateOpenings(vehicle, charge) {
+function updateOpenings(vehicle, charge, shiftState) {
     var parts = [
         {key: 'df', id: 'door-fl'},
         {key: 'dr', id: 'door-rl'},
@@ -2245,7 +2247,7 @@ function updateOpenings(vehicle, charge) {
 
     var charging = charge && charge.charging_state === 'Charging';
     $('#charge-cable').toggleClass('charging', charging);
-    updateBrakeLights(vehicle);
+    updateBrakeLights(vehicle, shiftState);
 }
 
 var MAX_SPEED = 250;
