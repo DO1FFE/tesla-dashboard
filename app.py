@@ -1789,6 +1789,10 @@ FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS = max(
     5.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MAX_AGE_SECONDS", "15")),
 )
+FLEET_TELEMETRIE_PROFILE_LIVE_TAKT_PRUEFVERZOEGERUNG_SECONDS = max(
+    FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_CADENCE_GRACE_SECONDS", "20")),
+)
 FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_FELDER = max(
     1,
     int(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MIN_FIELDS", "2")),
@@ -5011,13 +5015,48 @@ def _fleet_telemetrie_profile_live_takt_stabil(data, jetzt=None):
     return stabile_felder >= FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_FELDER
 
 
+def _fleet_telemetrie_profile_fahrzeug_bewegt_sich(data, jetzt=None):
+    """Erkenne eine Fahrt mit frischem, positivem Geschwindigkeitssignal."""
+
+    if not isinstance(data, dict):
+        return False
+    drive = data.get("drive_state")
+    if not isinstance(drive, dict):
+        return False
+    if _normalize_shift_state(drive.get("shift_state")) == "P":
+        return False
+    speed = _as_float(drive.get("speed"))
+    if (
+        speed is None
+        or abs(speed) <= FLEET_TELEMETRIE_POSITION_MIN_GESCHWINDIGKEIT_MPH
+    ):
+        return False
+    jetzt = time.time() if jetzt is None else float(jetzt)
+    empfangen = data.get("fleet_telemetry_field_received_at")
+    if not isinstance(empfangen, dict):
+        return False
+    speed_empfangen = _fleet_telemetrie_timestamp_sekunden(
+        empfangen.get("VehicleSpeed"),
+        jetzt,
+    )
+    if speed_empfangen is None:
+        return False
+    return (
+        0 <= jetzt - speed_empfangen
+        <= FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS
+    )
+
+
 def _fleet_telemetrie_profile_stream_bestaetigt(data, status, profil):
     """Prüfe, ob der Stream das gesendete Profil belastbar bestätigt."""
 
     if not _fleet_telemetrie_profile_stream_nach_config_aktiv(data, status):
         return False
     if profil in {"live", "live_extended"}:
-        if _fleet_telemetrie_profile_api_sync_bestaetigt(status, profil):
+        if (
+            status.get("current") != profil
+            and _fleet_telemetrie_profile_api_sync_bestaetigt(status, profil)
+        ):
             return True
         return _fleet_telemetrie_profile_live_takt_bestaetigt(data, status)
     return True
@@ -5926,6 +5965,28 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
             and jetzt - target_since < FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS
         ):
             aktivierbares_ziel = current
+        letzter_versand = float(status.get("last_sent") or 0)
+        live_takt_pruefbar = (
+            ziel == "live"
+            and current == aktivierbares_ziel
+            and current in {"live", "live_extended"}
+            and _fleet_telemetrie_profile_fahrzeug_bewegt_sich(data, jetzt)
+            and jetzt - max(target_since, letzter_versand)
+            >= FLEET_TELEMETRIE_PROFILE_LIVE_TAKT_PRUEFVERZOEGERUNG_SECONDS
+        )
+        if (
+            live_takt_pruefbar
+            and not live_takt_stabil
+            and _fleet_telemetrie_profile_api_sync_bestaetigt(status, current)
+        ):
+            status["config_synced"] = False
+            status["config_sync_state"] = "active"
+            status["config_sync_error"] = (
+                "Live-Datenstrom liefert keinen bestätigten 1s-Takt"
+            )
+            status["config_sync_updated_at"] = jetzt
+            status["updated_at"] = jetzt
+            status_geändert = True
         dringlich = aktivierbares_ziel in {"live", "live_extended", "charging"}
         cooldown_abgelaufen = (
             jetzt - float(status.get("last_sent") or 0)
