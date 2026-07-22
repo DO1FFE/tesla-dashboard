@@ -17,6 +17,7 @@ var PARKED_MAP_JITTER_METERS = 25;
 var ROUTENPUNKT_MAX_SPRUNG_METER = 500 * 1000;
 var NAVIGATIONS_ZIEL_NULL_EPSILON = 1e-6;
 var STREAM_WIEDERVERBINDUNG_MS = 250;
+var STREAM_MAX_VERZOEGERUNG_MS = 10000;
 var streamWiederverbindungsTimer = null;
 // Default view if no coordinates are available
 var DEFAULT_POS = [51.4556, 7.0116];
@@ -4063,6 +4064,37 @@ $('#vehicle-select').on('change', function() {
 });
 
 
+function streamIstVerzoegert(ts) {
+    var millis = leseZeitstempelMillis(ts);
+    return millis != null && Date.now() - millis > STREAM_MAX_VERZOEGERUNG_MS;
+}
+
+function verzoegertenStreamNeuStarten() {
+    var vehicle = currentVehicle;
+    if (!vehicle) {
+        return;
+    }
+    if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+    }
+    lastStreamTimestamp = null;
+    $.getJSON('/api/data/' + vehicle, function(data) {
+        if (vehicle === currentVehicle && data && !data.error) {
+            handleData(data);
+        }
+    });
+    if (!streamWiederverbindungsTimer) {
+        streamWiederverbindungsTimer = setTimeout(function() {
+            streamWiederverbindungsTimer = null;
+            if (vehicle === currentVehicle && !eventSource) {
+                startStream();
+            }
+        }, STREAM_WIEDERVERBINDUNG_MS);
+    }
+}
+
+
 function startStream() {
     if (!currentVehicle) {
         return;
@@ -4078,6 +4110,10 @@ function startStream() {
     eventSource = new EventSource('/stream/' + currentVehicle);
     eventSource.onmessage = function(e) {
         var data = JSON.parse(e.data);
+        if (streamIstVerzoegert(data.stream_sent_at)) {
+            verzoegertenStreamNeuStarten();
+            return;
+        }
         if (!data.error) {
             aktualisiereStreamSignal(Date.now());
             handleData(data);
@@ -4086,6 +4122,10 @@ function startStream() {
     eventSource.addEventListener('stream', function(e) {
         try {
             var data = JSON.parse(e.data);
+            if (streamIstVerzoegert(data.stream_heartbeat_at)) {
+                verzoegertenStreamNeuStarten();
+                return;
+            }
             aktualisiereStreamSignal(data.stream_heartbeat_at);
         } catch (err) {
             aktualisiereStreamSignal(Date.now());

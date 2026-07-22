@@ -726,6 +726,14 @@ FLEET_TELEMETRIE_POSITION_MIN_GESCHWINDIGKEIT_MPH = max(
     0.1,
     float(os.getenv("TESLA_FLEET_POSITION_MIN_SPEED_MPH", "0.5")),
 )
+FLEET_TELEMETRIE_PARKABGLEICH_VERZOEGERUNG_SECONDS = max(
+    1.0,
+    float(os.getenv("TESLA_FLEET_PARK_RECONCILE_DELAY_SECONDS", "10")),
+)
+FLEET_TELEMETRIE_PARKABGLEICH_WIEDERHOLUNG_SECONDS = max(
+    30.0,
+    float(os.getenv("TESLA_FLEET_PARK_RECONCILE_RETRY_SECONDS", "60")),
+)
 TESLA_FLEET_VEHICLE_COMMAND_URL = os.getenv(
     "TESLA_FLEET_VEHICLE_COMMAND_URL",
     "https://127.0.0.1:4443",
@@ -1706,6 +1714,7 @@ _fleet_telemetry_start_lock = threading.Lock()
 _fleet_telemetry_profile_lock = threading.Lock()
 _fleet_telemetry_position_lock = threading.Lock()
 _fleet_telemetry_position_letzte_abfrage = {}
+_fleet_telemetry_parkabgleich_letzte_abfrage = {}
 _fleet_telemetry_vehicle_cache = {"mtime": None, "vehicles": []}
 FLEET_TELEMETRY_MQTT_QUEUE_MAX = max(
     1000, int(os.getenv("TESLA_FLEET_TELEMETRY_MQTT_QUEUE_MAX", "20000"))
@@ -1725,10 +1734,22 @@ FLEET_TELEMETRY_STREAM_QUEUE_MAX = max(
 FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS = max(
     0.25, float(os.getenv("TESLA_FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS", "0.5"))
 )
+FLEET_TELEMETRY_STREAM_MIN_INTERVAL_SECONDS = max(
+    0.05, float(os.getenv("TESLA_FLEET_TELEMETRY_STREAM_MIN_INTERVAL_SECONDS", "0.25"))
+)
+FLEET_TELEMETRY_STREAM_DIAGNOSE_FELDER = (
+    "fleet_telemetry_raw",
+    "fleet_telemetry_field_received_at",
+    "fleet_telemetry_field_previous_received_at",
+    "fleet_telemetry_field_interval_ms",
+    "fleet_telemetry_last_field",
+    "fleet_telemetry_last_received_field",
+)
 _fleet_telemetry_message_queue = queue.Queue(maxsize=FLEET_TELEMETRY_MQTT_QUEUE_MAX)
 _fleet_telemetry_profile_queue = queue.Queue(maxsize=1)
 _fleet_telemetry_cache_pending = {}
 _fleet_telemetry_cache_schreib_lock = threading.Lock()
+_fleet_telemetry_profile_reconnect_sent_at = {}
 _fleet_telemetry_queue_verworfen = 0
 _fleet_telemetry_queue_warnung = 0.0
 FLEET_TELEMETRIE_PROFILE = {"live", "live_extended", "parked", "charging"}
@@ -1740,6 +1761,10 @@ FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS = max(
 FLEET_TELEMETRIE_PROFILE_SEND_COOLDOWN_SECONDS = max(
     0.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_PROFILE_COOLDOWN_SECONDS", "120")),
+)
+FLEET_TELEMETRIE_PROFILE_RECONNECT_COOLDOWN_SECONDS = max(
+    1.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_RECONNECT_COOLDOWN_SECONDS", "10")),
 )
 FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT = max(
     3.0,
@@ -2238,6 +2263,17 @@ def _subscriber_daten_kopie(data):
         return copy.deepcopy(data)
     except Exception:
         return dict(data)
+
+
+def _subscriber_stream_payload(data):
+    """Entferne reine Serverdiagnose aus einem Browser-Stream-Payload."""
+
+    payload = _subscriber_daten_kopie(data)
+    if not isinstance(payload, dict):
+        return payload
+    for feld in FLEET_TELEMETRY_STREAM_DIAGNOSE_FELDER:
+        payload.pop(feld, None)
+    return payload
 
 
 def _subscriber_daten_senden(cache_id, data):
@@ -5888,6 +5924,38 @@ def _fleet_telemetrie_profile_spaeter_anwenden(profil):
         pass
 
 
+def _fleet_telemetrie_profile_nach_neuverbindung_anfordern(vin, jetzt=None):
+    """Sende Live nach einer echten Telemetrie-Neuverbindung erneut."""
+
+    if not _fleet_telemetrie_profile_aktiviert():
+        return False
+    vin = str(vin or "").strip()
+    if not vin:
+        return False
+    jetzt = time.time() if jetzt is None else float(jetzt)
+    with _fleet_telemetry_profile_lock:
+        status = _fleet_telemetry_profile_status
+        if status.get("target") not in {"live", "live_extended"}:
+            return False
+        letzter_versand = _as_float(
+            _fleet_telemetry_profile_reconnect_sent_at.get(vin)
+        )
+        if (
+            letzter_versand is not None
+            and jetzt - letzter_versand
+            < FLEET_TELEMETRIE_PROFILE_RECONNECT_COOLDOWN_SECONDS
+        ):
+            return False
+        _fleet_telemetry_profile_reconnect_sent_at[vin] = jetzt
+        _fleet_telemetrie_profile_sync_ausstehend_setzen(status, "live", jetzt)
+        _fleet_telemetrie_profile_status_speichern()
+    _fleet_telemetrie_profile_spaeter_anwenden("live")
+    logging.info(
+        "Fleet-Telemetry-Live-Profil nach Neuverbindung erneut angefordert"
+    )
+    return True
+
+
 def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
     """Aktualisiere das gewünschte Telemetry-Profil aus Live-Daten."""
 
@@ -7182,6 +7250,147 @@ def _fleet_telemetrie_position_abfrage_reservieren(vin, jetzt=None):
     return True
 
 
+def _fleet_telemetrie_parkabgleich_soll_aktualisiert_werden(
+    data,
+    jetzt_ms=None,
+):
+    """Erkenne einen noch nicht abgeglichenen Parkbeginn."""
+
+    if not isinstance(data, dict):
+        return False
+    if _normalisiere_dashboard_state(data.get("state")) != "online":
+        return False
+    drive = data.get("drive_state")
+    if not isinstance(drive, dict):
+        return False
+    if _normalize_shift_state(drive.get("shift_state")) != "P":
+        return False
+    if jetzt_ms is None:
+        jetzt_ms = int(time.time() * 1000)
+    feld_empfang = data.get("fleet_telemetry_field_received_at")
+    gear_empfangen = None
+    if isinstance(feld_empfang, dict):
+        gear_empfangen = _fleet_telemetrie_zeitstempel_ms(
+            feld_empfang.get("Gear")
+        )
+    if gear_empfangen is None:
+        gear_empfangen = _fleet_telemetrie_zeitstempel_ms(data.get("park_start"))
+    if gear_empfangen is None:
+        return False
+    alter_seconds = max(0.0, (float(jetzt_ms) - gear_empfangen) / 1000.0)
+    if alter_seconds < FLEET_TELEMETRIE_PARKABGLEICH_VERZOEGERUNG_SECONDS:
+        return False
+    letzter_abgleich = _fleet_telemetrie_zeitstempel_ms(
+        data.get("fleet_telemetry_park_reconciled_at")
+    )
+    return letzter_abgleich is None or letzter_abgleich < gear_empfangen
+
+
+def _fleet_telemetrie_parkabgleich_reservieren(vin, jetzt=None):
+    """Drossele fehlgeschlagene Parkabgleiche pro Fahrzeug."""
+
+    if not vin:
+        return False
+    if jetzt is None:
+        jetzt = time.monotonic()
+    with _fleet_telemetry_position_lock:
+        letzte_abfrage = _fleet_telemetry_parkabgleich_letzte_abfrage.get(str(vin))
+        if (
+            letzte_abfrage is not None
+            and jetzt - letzte_abfrage
+            < FLEET_TELEMETRIE_PARKABGLEICH_WIEDERHOLUNG_SECONDS
+        ):
+            return False
+        _fleet_telemetry_parkabgleich_letzte_abfrage[str(vin)] = jetzt
+    return True
+
+
+def _fleet_telemetrie_parkdaten_abrufen(vin):
+    """Rufe einmalig den vollständigen Fahrzeugstand nach dem Parken ab."""
+
+    token = _fleet_telemetrie_oauth_token()
+    if not token:
+        raise RuntimeError("Kein gültiger Fleet-OAuth-Zugriffstoken verfügbar")
+    url = (
+        TESLA_FLEET_VEHICLE_COMMAND_URL.rstrip("/")
+        + f"/api/1/vehicles/{vin}/vehicle_data"
+    )
+    response = requests.get(
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT,
+        verify=False,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    antwort = payload.get("response") if isinstance(payload, dict) else None
+    if not isinstance(antwort, dict):
+        raise RuntimeError("Tesla lieferte keine Fahrzeugdaten")
+    return antwort
+
+
+def _fleet_telemetrie_parkdaten_uebernehmen(
+    vin,
+    parkdaten,
+    abgerufen_at_ms=None,
+):
+    """Korrigiere ausgebliebene Abschaltmeldungen nach dem Parken."""
+
+    if not isinstance(parkdaten, dict):
+        return False
+    if abgerufen_at_ms is None:
+        abgerufen_at_ms = int(time.time() * 1000)
+    aktualisierte_daten = []
+    with _fleet_telemetry_lock:
+        for cache_id in _fleet_telemetrie_cache_ids(vin):
+            data = latest_data.get(cache_id)
+            if not isinstance(data, dict):
+                data = _load_cached(cache_id)
+            if not isinstance(data, dict):
+                continue
+            drive = data.get("drive_state")
+            if (
+                not isinstance(drive, dict)
+                or _normalize_shift_state(drive.get("shift_state")) != "P"
+            ):
+                continue
+            for abschnitt in ("vehicle_state", "climate_state", "charge_state"):
+                quelle = parkdaten.get(abschnitt)
+                if not isinstance(quelle, dict):
+                    continue
+                ziel = data.setdefault(abschnitt, {})
+                for key, value in quelle.items():
+                    if value is not None:
+                        ziel[key] = copy.deepcopy(value)
+            vehicle = data.setdefault("vehicle_state", {})
+            climate = data.setdefault("climate_state", {})
+            if (
+                vehicle.get("locked") is True
+                and vehicle.get("is_user_present") is False
+                and climate.get("is_climate_on") is False
+            ):
+                vehicle["center_display_state"] = "Off"
+                vehicle["brake_pedal"] = False
+                vehicle["brake_pedal_pos"] = 0
+                vehicle["pedal_position"] = 0
+            state = _normalisiere_dashboard_state(parkdaten.get("state"))
+            if state is not None:
+                data["state"] = state
+            data["state_checked_at"] = int(abgerufen_at_ms)
+            data["fleet_telemetry_park_reconciled_at"] = int(abgerufen_at_ms)
+            data["_live"] = True
+            data.pop("api_error", None)
+            data = _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data)
+            data = _fleet_telemetrie_profile_aktualisieren(cache_id, data)
+            _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, data)
+            latest_data[cache_id] = data
+            _fleet_telemetrie_cache_spaeter_speichern(cache_id, data)
+            aktualisierte_daten.append((cache_id, data))
+    for cache_id, data in aktualisierte_daten:
+        _subscriber_daten_senden(cache_id, data)
+    return bool(aktualisierte_daten)
+
+
 def _fleet_telemetrie_position_abrufen(vin):
     """Rufe ausschließlich Teslas location_data für eine veraltete Position ab."""
 
@@ -7316,6 +7525,27 @@ def _fleet_telemetrie_position_worker_loop():
             if not vin:
                 continue
             data = _fleet_telemetrie_position_snapshot(vin)
+            if _fleet_telemetrie_parkabgleich_soll_aktualisiert_werden(data):
+                if _fleet_telemetrie_parkabgleich_reservieren(vin):
+                    try:
+                        parkdaten = _fleet_telemetrie_parkdaten_abrufen(vin)
+                        übernommen = _fleet_telemetrie_parkdaten_uebernehmen(
+                            vin,
+                            parkdaten,
+                        )
+                        if übernommen:
+                            logging.info(
+                                "Fleet-Parkzustand über vehicle_data abgeglichen: %s",
+                                vin,
+                            )
+                    except Exception as exc:
+                        logging.warning(
+                            "Fleet-Parkzustand konnte nicht abgeglichen werden "
+                            "(%s): %s",
+                            vin,
+                            exc,
+                        )
+                data = _fleet_telemetrie_position_snapshot(vin)
             if not _fleet_telemetrie_position_soll_aktualisiert_werden(data):
                 continue
             if not _fleet_telemetrie_position_abfrage_reservieren(vin):
@@ -7494,6 +7724,43 @@ def _fleet_telemetrie_verbindungsstatus_state(status):
     return None
 
 
+def _fleet_telemetrie_verbindungskennung(payload):
+    """Lese die eindeutige Kennung einer Telemetrie-Verbindung."""
+
+    if not isinstance(payload, dict):
+        return None
+    for key in ("ConnectionId", "ConnectionID", "connection_id"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _fleet_telemetrie_ist_neuverbindung(vorher, aktuell):
+    """Erkenne eine echte Verbindung nach Abbruch oder Kennungswechsel."""
+
+    if not isinstance(vorher, dict) or not isinstance(aktuell, dict):
+        return False
+    aktueller_status = str(
+        aktuell.get("Status") or aktuell.get("status") or ""
+    ).strip().lower()
+    if aktueller_status != "connected":
+        return False
+    vorheriger_status = str(
+        vorher.get("Status") or vorher.get("status") or ""
+    ).strip().lower()
+    if vorheriger_status == "disconnected":
+        return True
+    vorherige_kennung = _fleet_telemetrie_verbindungskennung(vorher)
+    aktuelle_kennung = _fleet_telemetrie_verbindungskennung(aktuell)
+    return bool(
+        vorheriger_status == "connected"
+        and vorherige_kennung
+        and aktuelle_kennung
+        and vorherige_kennung != aktuelle_kennung
+    )
+
+
 def _fleet_telemetrie_statusbeginn_ms(payload, fallback_ms):
     """Lese den Beginn eines Fleet-Telemetry-Verbindungsstatus."""
     if not isinstance(payload, dict):
@@ -7540,10 +7807,22 @@ def _fleet_telemetrie_verbindung_aktualisieren(vin, payload, timestamp_ms=None):
         return False
     aktualisierte_daten = []
     with _fleet_telemetry_lock:
+        cache_daten = []
         for cache_id in _fleet_telemetrie_cache_ids(vin):
             data = latest_data.get(cache_id)
             if not isinstance(data, dict):
                 data = _load_cached(cache_id) or {}
+            cache_daten.append((cache_id, data))
+        neuverbindung = any(
+            _fleet_telemetrie_ist_neuverbindung(
+                data.get("fleet_telemetry_connectivity"),
+                payload,
+            )
+            for _, data in cache_daten
+        )
+        if neuverbindung:
+            _fleet_telemetrie_profile_nach_neuverbindung_anfordern(vin)
+        for cache_id, data in cache_daten:
             vorheriger_state = _normalisiere_dashboard_state(data.get("state"))
             fallback_since_ms = timestamp_ms
             if vorheriger_state == state and data.get("state_since_ms") is not None:
@@ -11952,22 +12231,41 @@ def stream_vehicle(vehicle_id="default"):
         q = eventlet_queue.Queue(maxsize=FLEET_TELEMETRY_STREAM_QUEUE_MAX)
         subscribers.setdefault(vehicle_id, []).append(q)
         last_path_len = 0
+        letzter_datenversand = 0.0
         try:
             yield ": verbunden\n\n"
             # Send the latest data immediately if available
             if vehicle_id in latest_data:
-                initial = latest_data[vehicle_id]
+                initial = _subscriber_stream_payload(latest_data[vehicle_id])
                 if isinstance(initial, dict):
                     path = initial.get("path")
                     if isinstance(path, list):
                         last_path_len = len(path)
+                    initial["stream_sent_at"] = int(time.time() * 1000)
+                letzter_datenversand = time.monotonic()
                 yield f"data: {json.dumps(initial)}\n\n"
             while True:
                 try:
                     data = q.get(timeout=FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS)
-                    payload = data
+                    versand_ab = (
+                        letzter_datenversand
+                        + FLEET_TELEMETRY_STREAM_MIN_INTERVAL_SECONDS
+                    )
+                    while True:
+                        rest = versand_ab - time.monotonic()
+                        if rest <= 0:
+                            break
+                        try:
+                            data = q.get(timeout=rest)
+                        except queue.Empty:
+                            break
+                    try:
+                        while True:
+                            data = q.get_nowait()
+                    except queue.Empty:
+                        pass
+                    payload = _subscriber_stream_payload(data)
                     if isinstance(data, dict):
-                        payload = dict(data)
                         path = payload.get("path")
                         if isinstance(path, list):
                             previous_len = last_path_len
@@ -11990,6 +12288,8 @@ def stream_vehicle(vehicle_id="default"):
                         else:
                             payload.pop("path", None)
                             last_path_len = 0
+                        payload["stream_sent_at"] = int(time.time() * 1000)
+                    letzter_datenversand = time.monotonic()
                     msg = f"data: {json.dumps(payload)}\n\n"
                 except queue.Empty:
                     heartbeat = {"stream_heartbeat_at": int(time.time() * 1000)}

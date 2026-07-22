@@ -79,6 +79,8 @@ def keine_echten_parking_logs(monkeypatch):
             "updated_at": 0.0,
         },
     )
+    monkeypatch.setattr(app, "_fleet_telemetry_profile_reconnect_sent_at", {})
+    monkeypatch.setattr(app, "_fleet_telemetry_parkabgleich_letzte_abfrage", {})
 
 
 def test_fleet_telemetrie_mqtt_aktualisiert_dashboard_cache(monkeypatch):
@@ -244,6 +246,156 @@ def test_fleet_telemetrie_positionswaechter_fragt_an_ampel_nicht_ab(
         daten,
         jetzt_ms=2_000_000_000_000,
     )
+
+
+def test_fleet_telemetrie_parkabgleich_startet_nur_nach_p(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PARKABGLEICH_VERZOEGERUNG_SECONDS",
+        10.0,
+    )
+    daten = {
+        "state": "online",
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "fleet_telemetry_field_received_at": {"Gear": 1_999_999_980_000},
+    }
+
+    assert app._fleet_telemetrie_parkabgleich_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms=2_000_000_000_000,
+    )
+
+    daten["drive_state"]["shift_state"] = "D"
+    assert not app._fleet_telemetrie_parkabgleich_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms=2_000_000_000_000,
+    )
+    daten["drive_state"]["shift_state"] = "P"
+    daten["fleet_telemetry_park_reconciled_at"] = 1_999_999_990_000
+    assert not app._fleet_telemetrie_parkabgleich_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms=2_000_000_000_000,
+    )
+
+
+def test_fleet_telemetrie_parkabgleich_korrigiert_veraltete_abschaltwerte(
+    monkeypatch,
+):
+    gesendet = []
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_dashboard_daten_anreichern",
+        lambda _, data: data,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_aktualisieren",
+        lambda _, data: data,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_parkstatus_aufzeichnen",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(
+        app,
+        "_subscriber_daten_senden",
+        lambda cache_id, data: gesendet.append((cache_id, data)),
+    )
+    monkeypatch.setattr(app, "latest_data", {
+        "veh-1": {
+            "state": "online",
+            "drive_state": {
+                "shift_state": "P",
+                "speed": 0,
+                "latitude": 51.45,
+                "longitude": 7.03,
+            },
+            "vehicle_state": {
+                "is_user_present": True,
+                "locked": False,
+                "center_display_state": "On",
+                "brake_pedal": True,
+                "pedal_position": 12,
+            },
+            "climate_state": {"is_climate_on": True, "fan_status": 4},
+            "charge_state": {
+                "charging_state": "Disconnected",
+                "charger_power": 9,
+            },
+        },
+    })
+    parkdaten = {
+        "state": "online",
+        "drive_state": {
+            "shift_state": None,
+            "speed": None,
+            "latitude": None,
+            "longitude": None,
+        },
+        "vehicle_state": {"is_user_present": False, "locked": True},
+        "climate_state": {"is_climate_on": False, "fan_status": 0},
+        "charge_state": {
+            "charging_state": "Disconnected",
+            "charger_power": 0,
+        },
+    }
+
+    assert app._fleet_telemetrie_parkdaten_uebernehmen(
+        "TESTVIN",
+        parkdaten,
+        2_000_000_000_000,
+    )
+
+    daten = app.latest_data["veh-1"]
+    assert daten["drive_state"]["shift_state"] == "P"
+    assert daten["drive_state"]["latitude"] == 51.45
+    assert daten["vehicle_state"]["is_user_present"] is False
+    assert daten["vehicle_state"]["locked"] is True
+    assert daten["vehicle_state"]["center_display_state"] == "Off"
+    assert daten["vehicle_state"]["brake_pedal"] is False
+    assert daten["vehicle_state"]["pedal_position"] == 0
+    assert daten["climate_state"]["is_climate_on"] is False
+    assert daten["climate_state"]["fan_status"] == 0
+    assert daten["charge_state"]["charger_power"] == 0
+    assert daten["fleet_telemetry_park_reconciled_at"] == 2_000_000_000_000
+    assert gesendet[-1][0] == "veh-1"
+
+
+def test_fleet_telemetrie_parkabgleich_ruft_vollstaendige_daten_ab(monkeypatch):
+    class Antwort:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"response": {"state": "online", "vehicle_state": {}}}
+
+    abfragen = []
+
+    def fake_get(url, **kwargs):
+        abfragen.append((url, kwargs))
+        return Antwort()
+
+    monkeypatch.setattr(app, "_fleet_telemetrie_oauth_token", lambda: "token")
+    monkeypatch.setattr(app.requests, "get", fake_get)
+    monkeypatch.setattr(
+        app,
+        "TESLA_FLEET_VEHICLE_COMMAND_URL",
+        "https://127.0.0.1:4443",
+    )
+
+    daten = app._fleet_telemetrie_parkdaten_abrufen("TESTVIN")
+
+    assert daten["state"] == "online"
+    assert abfragen[0][0].endswith("/api/1/vehicles/TESTVIN/vehicle_data")
+    assert "params" not in abfragen[0][1]
+    assert abfragen[0][1]["headers"] == {"Authorization": "Bearer token"}
 
 
 def test_fleet_telemetrie_positionsabfrage_hat_sperrfrist(monkeypatch):
@@ -572,6 +724,162 @@ def test_fleet_telemetrie_connectivity_wertet_disconnected_als_offline(monkeypat
     assert sammler.daten[-1]["state_since_ms"] == disconnected_ms
 
 
+def test_fleet_telemetrie_neuverbindung_fordert_live_sofort_an(monkeypatch):
+    angefordert = []
+    monkeypatch.setattr(app.time, "time", lambda: 2100.0)
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: True)
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    app._fleet_telemetry_profile_status.update({
+        "current": "live_extended",
+        "target": "live",
+        "last_sent": 2098.0,
+        "last_sent_profile": "live_extended",
+        "config_synced": True,
+        "config_sync_state": "synced",
+        "config_sync_profile": "live_extended",
+        "config_sync_details": _telemetrie_stream_details(),
+    })
+    monkeypatch.setattr(app, "latest_data", {
+        "veh-1": {
+            "state": "offline",
+            "fleet_telemetry_connectivity": {
+                "Status": "DISCONNECTED",
+                "ConnectionId": "alt",
+            },
+        },
+    })
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(app, "_subscriber_daten_senden", lambda *args: None)
+
+    assert app._fleet_telemetrie_verbindung_aktualisieren(
+        "TESTVIN",
+        {"Status": "CONNECTED", "ConnectionId": "neu"},
+        2_100_000,
+    )
+
+    assert angefordert == ["live"]
+    assert app._fleet_telemetry_profile_status["last_sent"] == 2100.0
+    assert app._fleet_telemetry_profile_status["last_sent_profile"] == "live"
+    assert app._fleet_telemetry_profile_status["config_sync_state"] == "pending"
+    assert app.latest_data["veh-1"]["telemetry_config_sync_state"] == "pending"
+
+
+def test_fleet_telemetrie_doppelte_verbindung_sendet_live_nicht(monkeypatch):
+    angefordert = []
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: True)
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    app._fleet_telemetry_profile_status.update({
+        "current": "live",
+        "target": "live",
+    })
+    monkeypatch.setattr(app, "latest_data", {
+        "veh-1": {
+            "state": "online",
+            "fleet_telemetry_connectivity": {
+                "Status": "CONNECTED",
+                "ConnectionId": "gleich",
+            },
+        },
+    })
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(app, "_subscriber_daten_senden", lambda *args: None)
+
+    assert app._fleet_telemetrie_verbindung_aktualisieren(
+        "TESTVIN",
+        {"Status": "CONNECTED", "ConnectionId": "gleich"},
+        2_100_000,
+    )
+
+    assert angefordert == []
+
+
+def test_fleet_telemetrie_neuverbindung_laesst_parkprofil_unveraendert(monkeypatch):
+    angefordert = []
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: True)
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    app._fleet_telemetry_profile_status.update({
+        "current": "parked",
+        "target": "parked",
+    })
+    monkeypatch.setattr(app, "latest_data", {
+        "veh-1": {
+            "state": "offline",
+            "fleet_telemetry_connectivity": {
+                "Status": "DISCONNECTED",
+                "ConnectionID": "alt",
+            },
+        },
+    })
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(app, "_subscriber_daten_senden", lambda *args: None)
+
+    assert app._fleet_telemetrie_verbindung_aktualisieren(
+        "TESTVIN",
+        {"Status": "CONNECTED", "ConnectionID": "neu"},
+        2_100_000,
+    )
+
+    assert angefordert == []
+    assert app._fleet_telemetry_profile_status["current"] == "parked"
+
+
+def test_fleet_telemetrie_neuverbindung_drosselt_live_neuversand(monkeypatch):
+    angefordert = []
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: True)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_RECONNECT_COOLDOWN_SECONDS",
+        10.0,
+    )
+    app._fleet_telemetry_profile_status.update({
+        "current": "live",
+        "target": "live",
+    })
+
+    assert app._fleet_telemetrie_profile_nach_neuverbindung_anfordern(
+        "TESTVIN",
+        2100.0,
+    )
+    assert not app._fleet_telemetrie_profile_nach_neuverbindung_anfordern(
+        "TESTVIN",
+        2105.0,
+    )
+
+    assert angefordert == ["live"]
+
+
 def test_fleet_telemetrie_mqtt_normalisiert_oeffnungen(monkeypatch):
     monkeypatch.setattr(app, "_fleet_telemetrie_fahrzeuge", lambda: [{
         "vin": "TESTVIN",
@@ -784,6 +1092,11 @@ def test_fleet_telemetrie_mqtt_batch_default_ist_200_und_stream_latest_only():
     assert 'os.getenv("TESLA_FLEET_TELEMETRY_STREAM_QUEUE_MAX", "1")' in inhalt
     assert "FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS = max(" in inhalt
     assert 'os.getenv("TESLA_FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS", "0.5")' in inhalt
+    assert "FLEET_TELEMETRY_STREAM_MIN_INTERVAL_SECONDS = max(" in inhalt
+    assert (
+        'os.getenv("TESLA_FLEET_TELEMETRY_STREAM_MIN_INTERVAL_SECONDS", "0.25")'
+        in inhalt
+    )
     assert "q = eventlet_queue.Queue(maxsize=FLEET_TELEMETRY_STREAM_QUEUE_MAX)" in inhalt
 
 
@@ -852,6 +1165,38 @@ def test_stream_liefert_subscriber_snapshot_direkt_aus(monkeypatch):
         daten = json.loads(payload.removeprefix("data: ").strip())
         assert daten["fleet_telemetry_received_at"] == 1234
         assert daten["drive_state"]["speed"] == 1
+        assert isinstance(daten["stream_sent_at"], int)
+    finally:
+        response.close()
+
+
+def test_stream_entfernt_reine_telemetrie_diagnose(monkeypatch):
+    monkeypatch.setattr(app, "_start_thread", lambda vehicle_id: None)
+    monkeypatch.setattr(app, "subscribers", {})
+    monkeypatch.setattr(app, "latest_data", {
+        "veh-1": {
+            "fleet_telemetry_received_at": 1234,
+            "fleet_telemetry_raw": {"VehicleSpeed": 12},
+            "fleet_telemetry_field_received_at": {"VehicleSpeed": 1234},
+            "fleet_telemetry_field_previous_received_at": {"VehicleSpeed": 1000},
+            "fleet_telemetry_field_interval_ms": {"VehicleSpeed": 234},
+            "fleet_telemetry_last_field": "VehicleSpeed",
+            "fleet_telemetry_last_received_field": "VehicleSpeed",
+            "drive_state": {"speed": 12},
+        },
+    })
+
+    response = app.app.test_client().get("/stream/veh-1", buffered=False)
+
+    try:
+        assert next(response.response).decode("utf-8") == ": verbunden\n\n"
+        payload = next(response.response).decode("utf-8")
+        daten = json.loads(payload.removeprefix("data: ").strip())
+        assert daten["fleet_telemetry_received_at"] == 1234
+        assert daten["drive_state"]["speed"] == 12
+        assert isinstance(daten["stream_sent_at"], int)
+        for feld in app.FLEET_TELEMETRY_STREAM_DIAGNOSE_FELDER:
+            assert feld not in daten
     finally:
         response.close()
 

@@ -333,6 +333,17 @@ def test_stream_heartbeat_wird_im_browser_als_signal_genutzt():
     assert "Letztes Signal vor " in js
 
 
+def test_verzoegerter_stream_wird_durch_aktuellen_snapshot_ersetzt():
+    js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+
+    assert "var STREAM_MAX_VERZOEGERUNG_MS = 10000" in js
+    assert "function streamIstVerzoegert(ts)" in js
+    assert "function verzoegertenStreamNeuStarten()" in js
+    assert "streamIstVerzoegert(data.stream_sent_at)" in js
+    assert "streamIstVerzoegert(data.stream_heartbeat_at)" in js
+    assert "$.getJSON('/api/data/' + vehicle" in js
+
+
 def test_online_und_offline_state_zaehlen_seit_dauer_hoch():
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
 
