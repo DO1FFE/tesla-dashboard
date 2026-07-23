@@ -1766,6 +1766,15 @@ FLEET_TELEMETRIE_PROFILE_RECONNECT_COOLDOWN_SECONDS = max(
     1.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_RECONNECT_COOLDOWN_SECONDS", "10")),
 )
+FLEET_TELEMETRIE_PROFILE_ERWARTETE_NEUVERBINDUNG_SECONDS = max(
+    5.0,
+    float(
+        os.getenv(
+            "TESLA_FLEET_TELEMETRY_EXPECTED_RECONNECT_SECONDS",
+            "30",
+        )
+    ),
+)
 FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT = max(
     3.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_PROFILE_TIMEOUT", "15")),
@@ -5924,6 +5933,23 @@ def _fleet_telemetrie_profile_spaeter_anwenden(profil):
         pass
 
 
+def _fleet_telemetrie_profile_neuverbindung_erwartet(status, jetzt):
+    """Erkenne den erwarteten Websocket-Neustart nach einer Live+-Config."""
+
+    if not isinstance(status, dict):
+        return False
+    if status.get("last_sent_profile") != "live_extended":
+        return False
+    letzter_versand = _as_float(status.get("last_sent"))
+    if letzter_versand is None:
+        return False
+    alter = float(jetzt) - letzter_versand
+    return (
+        0 <= alter
+        <= FLEET_TELEMETRIE_PROFILE_ERWARTETE_NEUVERBINDUNG_SECONDS
+    )
+
+
 def _fleet_telemetrie_profile_nach_neuverbindung_anfordern(vin, jetzt=None):
     """Sende Live nach einer echten Telemetrie-Neuverbindung erneut."""
 
@@ -5936,6 +5962,8 @@ def _fleet_telemetrie_profile_nach_neuverbindung_anfordern(vin, jetzt=None):
     with _fleet_telemetry_profile_lock:
         status = _fleet_telemetry_profile_status
         if status.get("target") not in {"live", "live_extended"}:
+            return False
+        if _fleet_telemetrie_profile_neuverbindung_erwartet(status, jetzt):
             return False
         letzter_versand = _as_float(
             _fleet_telemetry_profile_reconnect_sent_at.get(vin)
@@ -6015,12 +6043,32 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                     "live_extended",
                 )
             )
+            live_erweitert_neuverbindung_erwartet = (
+                _fleet_telemetrie_profile_neuverbindung_erwartet(
+                    status,
+                    jetzt,
+                )
+            )
             if live_ausstehend:
                 aktivierbares_ziel = "live"
             elif live_erweitert_ausstehend:
-                aktivierbares_ziel = "live_extended" if live_takt_stabil else "live"
+                aktivierbares_ziel = (
+                    "live_extended"
+                    if (
+                        live_takt_stabil
+                        or live_erweitert_neuverbindung_erwartet
+                    )
+                    else "live"
+                )
             elif current == "live_extended":
-                aktivierbares_ziel = "live_extended" if live_takt_stabil else "live"
+                aktivierbares_ziel = (
+                    "live_extended"
+                    if (
+                        live_takt_stabil
+                        or live_erweitert_neuverbindung_erwartet
+                    )
+                    else "live"
+                )
             elif (
                 current == "live"
                 and _fleet_telemetrie_profile_sync_bestaetigt(status, "live")

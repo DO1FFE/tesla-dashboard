@@ -735,13 +735,13 @@ def test_fleet_telemetrie_neuverbindung_fordert_live_sofort_an(monkeypatch):
         lambda profil: angefordert.append(profil),
     )
     app._fleet_telemetry_profile_status.update({
-        "current": "live_extended",
+        "current": "live",
         "target": "live",
-        "last_sent": 2098.0,
-        "last_sent_profile": "live_extended",
+        "last_sent": 2080.0,
+        "last_sent_profile": "live",
         "config_synced": True,
         "config_sync_state": "synced",
-        "config_sync_profile": "live_extended",
+        "config_sync_profile": "live",
         "config_sync_details": _telemetrie_stream_details(),
     })
     monkeypatch.setattr(app, "latest_data", {
@@ -878,6 +878,42 @@ def test_fleet_telemetrie_neuverbindung_drosselt_live_neuversand(monkeypatch):
     )
 
     assert angefordert == ["live"]
+
+
+def test_fleet_telemetrie_erwartete_live_plus_neuverbindung_stuft_nicht_zurueck(
+    monkeypatch,
+):
+    angefordert = []
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: True)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_ERWARTETE_NEUVERBINDUNG_SECONDS",
+        30.0,
+    )
+    app._fleet_telemetry_profile_status.update({
+        "current": "live",
+        "target": "live",
+        "last_sent": 2095.0,
+        "last_sent_profile": "live_extended",
+        "config_synced": False,
+        "config_sync_state": "pending",
+        "config_sync_profile": "live_extended",
+    })
+
+    assert not app._fleet_telemetrie_profile_nach_neuverbindung_anfordern(
+        "TESTVIN",
+        2100.0,
+    )
+
+    assert angefordert == []
+    assert app._fleet_telemetry_profile_status["last_sent_profile"] == (
+        "live_extended"
+    )
 
 
 def test_fleet_telemetrie_mqtt_normalisiert_oeffnungen(monkeypatch):
@@ -3024,6 +3060,136 @@ def test_fleet_telemetrie_profile_ueberschreibt_pending_extended_nicht(monkeypat
 
     assert angefordert == []
     assert app._fleet_telemetry_profile_status["config_sync_profile"] == "live_extended"
+
+
+def test_fleet_telemetrie_profile_haelt_pending_extended_waehrend_neuverbindung(
+    monkeypatch,
+):
+    angefordert = []
+
+    monkeypatch.setattr(app.time, "time", lambda: 2110.0)
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_ERWARTETE_NEUVERBINDUNG_SECONDS",
+        30.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        {
+            "current": "live",
+            "target": "live",
+            "target_since": 2000.0,
+            "last_sent": 2100.0,
+            "last_sent_profile": "live_extended",
+            "last_error": None,
+            "config_synced": False,
+            "config_key_paired": None,
+            "config_sync_state": "pending",
+            "config_sync_profile": "live_extended",
+            "config_sync_checked_at": 2100.0,
+            "config_sync_updated_at": 2100.0,
+            "config_sync_error": None,
+            "config_sync_details": [],
+            "live_stable_since": 2000.0,
+            "updated_at": 2100.0,
+        },
+    )
+    daten = {
+        "fleet_telemetry_received_at": 2_109_000,
+        "fleet_telemetry_field_received_at": {
+            "VehicleSpeed": 2_109_000,
+            "PackCurrent": 2_109_000,
+            "Location": 2_109_000,
+        },
+        "fleet_telemetry_field_interval_ms": {
+            "VehicleSpeed": 10_000,
+            "PackCurrent": 10_000,
+            "Location": 10_000,
+        },
+        "drive_state": {"shift_state": "D", "speed": 12},
+        "charge_state": {"charging_state": "Disconnected"},
+    }
+
+    app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    assert angefordert == []
+    assert app._fleet_telemetry_profile_status["last_sent_profile"] == (
+        "live_extended"
+    )
+    assert app._fleet_telemetry_profile_status["config_sync_profile"] == (
+        "live_extended"
+    )
+
+
+def test_fleet_telemetrie_profile_haelt_bestaetigtes_extended_beim_neustart(
+    monkeypatch,
+):
+    angefordert = []
+
+    monkeypatch.setattr(app.time, "time", lambda: 2110.0)
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_ERWARTETE_NEUVERBINDUNG_SECONDS",
+        30.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        {
+            "current": "live_extended",
+            "target": "live",
+            "target_since": 2000.0,
+            "last_sent": 2100.0,
+            "last_sent_profile": "live_extended",
+            "last_error": None,
+            "config_synced": True,
+            "config_key_paired": None,
+            "config_sync_state": "synced",
+            "config_sync_profile": "live_extended",
+            "config_sync_checked_at": 2101.0,
+            "config_sync_updated_at": 2101.0,
+            "config_sync_error": None,
+            "config_sync_details": _telemetrie_stream_details(),
+            "live_stable_since": 2000.0,
+            "updated_at": 2101.0,
+        },
+    )
+    daten = {
+        "fleet_telemetry_received_at": 2_109_000,
+        "fleet_telemetry_field_received_at": {
+            "VehicleSpeed": 2_109_000,
+            "PackCurrent": 2_109_000,
+            "Location": 2_109_000,
+        },
+        "fleet_telemetry_field_interval_ms": {
+            "VehicleSpeed": 10_000,
+            "PackCurrent": 10_000,
+            "Location": 10_000,
+        },
+        "drive_state": {"shift_state": "D", "speed": 12},
+        "charge_state": {"charging_state": "Disconnected"},
+    }
+
+    app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    assert angefordert == []
+    assert app._fleet_telemetry_profile_status["last_sent_profile"] == (
+        "live_extended"
+    )
+    assert app._fleet_telemetry_profile_status["config_sync_profile"] == (
+        "live_extended"
+    )
 
 
 def test_fleet_telemetrie_profile_faellt_bei_instabilem_extended_auf_live(monkeypatch):
