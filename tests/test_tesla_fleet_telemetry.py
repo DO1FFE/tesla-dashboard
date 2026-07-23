@@ -724,6 +724,61 @@ def test_fleet_telemetrie_connectivity_wertet_disconnected_als_offline(monkeypat
     assert sammler.daten[-1]["state_since_ms"] == disconnected_ms
 
 
+def test_fleet_telemetrie_ignoriert_retained_fahrzeugfelder(monkeypatch):
+    monkeypatch.setattr(app, "latest_data", {})
+
+    assert not app._fleet_telemetrie_mqtt_message(
+        "tesla/TESTVIN/v/VehicleSpeed",
+        b"42",
+        {"topic_base": "tesla"},
+        timestamp_ms=2_000_000,
+        retained=True,
+    )
+
+    assert app.latest_data == {}
+
+
+def test_fleet_telemetrie_retained_connectivity_nur_offline_mit_quellzeit(
+    monkeypatch,
+):
+    disconnected_at = "2026-07-23T06:44:40Z"
+    disconnected_ms = int(
+        datetime(2026, 7, 23, 6, 44, 40, tzinfo=timezone.utc).timestamp()
+        * 1000
+    )
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
+    monkeypatch.setattr(app, "_load_cached", lambda vehicle_id: {})
+    monkeypatch.setattr(app, "latest_data", {
+        "veh-1": {
+            "state": "online",
+            "state_since_ms": 1_000_000,
+        },
+    })
+
+    assert not app._fleet_telemetrie_mqtt_message(
+        "tesla/TESTVIN/connectivity",
+        b'{"Status": "CONNECTED", "CreatedAt": "2026-07-23T06:40:00Z"}',
+        {"topic_base": "tesla"},
+        timestamp_ms=2_000_000,
+        retained=True,
+    )
+    assert app.latest_data["veh-1"]["state"] == "online"
+
+    assert app._fleet_telemetrie_mqtt_message(
+        "tesla/TESTVIN/connectivity",
+        (
+            f'{{"Status": "DISCONNECTED", "CreatedAt": "{disconnected_at}"}}'
+        ).encode("utf-8"),
+        {"topic_base": "tesla"},
+        timestamp_ms=2_000_000,
+        retained=True,
+    )
+
+    assert app.latest_data["veh-1"]["state"] == "offline"
+    assert app.latest_data["veh-1"]["state_checked_at"] == disconnected_ms
+    assert app.latest_data["veh-1"]["state_since_ms"] == disconnected_ms
+
+
 def test_fleet_telemetrie_neuverbindung_fordert_live_sofort_an(monkeypatch):
     angefordert = []
     monkeypatch.setattr(app.time, "time", lambda: 2100.0)

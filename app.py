@@ -7915,7 +7915,13 @@ def _fleet_telemetrie_decode_payload(payload):
         return payload
 
 
-def _fleet_telemetrie_mqtt_event(topic, payload, cfg=None, timestamp_ms=None):
+def _fleet_telemetrie_mqtt_event(
+    topic,
+    payload,
+    cfg=None,
+    timestamp_ms=None,
+    retained=False,
+):
     """Lese Topic und Nutzdaten einer MQTT-Nachricht."""
 
     if cfg is None:
@@ -7929,6 +7935,19 @@ def _fleet_telemetrie_mqtt_event(topic, payload, cfg=None, timestamp_ms=None):
     vin = parts[1]
     typ = parts[2]
     value = _fleet_telemetrie_decode_payload(payload)
+    if retained:
+        if typ == "v":
+            return None
+        if typ == "connectivity":
+            status = None
+            if isinstance(value, dict):
+                status = value.get("Status") or value.get("status")
+            if _fleet_telemetrie_verbindungsstatus_state(status) != "offline":
+                return None
+            timestamp_ms = _fleet_telemetrie_statusbeginn_ms(
+                value,
+                timestamp_ms,
+            )
     if typ == "v" and len(parts) >= 4:
         field = "/".join(parts[3:])
         return {
@@ -7972,10 +7991,22 @@ def _fleet_telemetrie_event_verarbeiten(event):
     return False
 
 
-def _fleet_telemetrie_mqtt_message(topic, payload, cfg=None, timestamp_ms=None):
+def _fleet_telemetrie_mqtt_message(
+    topic,
+    payload,
+    cfg=None,
+    timestamp_ms=None,
+    retained=False,
+):
     """Verarbeite eine einzelne MQTT-Nachricht aus Fleet Telemetry."""
 
-    event = _fleet_telemetrie_mqtt_event(topic, payload, cfg, timestamp_ms)
+    event = _fleet_telemetrie_mqtt_event(
+        topic,
+        payload,
+        cfg,
+        timestamp_ms,
+        retained=retained,
+    )
     aktualisiert = _fleet_telemetrie_event_verarbeiten(event)
     if aktualisiert:
         _fleet_telemetrie_cache_pending_schreiben()
@@ -8130,10 +8161,26 @@ def _fleet_telemetrie_listener_loop():
 
     def _on_message(_client, _userdata, message):
         try:
+            payload = bytes(message.payload)
+            timestamp_ms = int(time.time() * 1000)
+            if bool(getattr(message, "retain", False)):
+                retained_event = _fleet_telemetrie_mqtt_event(
+                    message.topic,
+                    payload,
+                    cfg,
+                    timestamp_ms,
+                    retained=True,
+                )
+                if retained_event is None:
+                    return
+                timestamp_ms = retained_event.get(
+                    "timestamp_ms",
+                    timestamp_ms,
+                )
             _fleet_telemetrie_mqtt_einreihen(
                 message.topic,
-                bytes(message.payload),
-                int(time.time() * 1000),
+                payload,
+                timestamp_ms,
             )
         except Exception:
             logging.exception(
