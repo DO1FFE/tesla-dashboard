@@ -4882,6 +4882,14 @@ def _fleet_telemetrie_rohdaten_anreichern(data):
         climate["side_mirror_heaters"] = _fleet_telemetrie_wahr(
             raw.get("RearDefrostEnabled")
         )
+    if climate.get("fan_status") is None:
+        for feld in ("HvacFanSpeed", "HvacFanStatus"):
+            if feld not in raw:
+                continue
+            lüfterstufe = _fleet_telemetrie_wert(raw.get(feld))
+            if lüfterstufe is not None:
+                climate["fan_status"] = lüfterstufe
+                break
     if "BatteryHeaterOn" in raw:
         batterieheizung = _fleet_telemetrie_optional_wahr(raw.get("BatteryHeaterOn"))
         charge["battery_heater_on"] = batterieheizung

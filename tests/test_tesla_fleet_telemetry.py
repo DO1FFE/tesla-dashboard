@@ -1663,6 +1663,22 @@ def test_fleet_telemetrie_reichert_tpms_und_spiegel_aus_rohdaten_an():
     assert daten["climate_state"]["side_mirror_heaters"] is True
 
 
+def test_fleet_telemetrie_reichert_lüfterstufe_null_aus_rohdaten_an():
+    daten = {
+        "fleet_telemetry_raw": {
+            "HvacFanSpeed": 0,
+        },
+        "climate_state": {
+            "is_climate_on": False,
+            "fan_status": None,
+        },
+    }
+
+    app._fleet_telemetrie_rohdaten_anreichern(daten)
+
+    assert daten["climate_state"]["fan_status"] == 0
+
+
 def test_fleet_telemetrie_reichert_tpms_sollwerte_aus_schwester_cache_an(monkeypatch):
     monkeypatch.setattr(
         app,
