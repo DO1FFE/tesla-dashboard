@@ -1385,13 +1385,15 @@ def test_stream_setzt_fahrtpfad_ohne_neue_telemetrie_zurück(monkeypatch):
             "shift_state": "P",
             "timestamp": parkbeginn,
         },
+        "park_start": parkbeginn,
         "path": pfad,
     }
     monkeypatch.setattr(app, "_start_thread", lambda vehicle_id: None)
     monkeypatch.setattr(app, "trip_path", pfad)
     monkeypatch.setattr(app, "current_trip_file", "/tmp/trip.csv")
     monkeypatch.setattr(app, "current_trip_date", "20260725")
-    monkeypatch.setattr(app, "drive_pause_ms", parkbeginn)
+    monkeypatch.setattr(app, "drive_pause_ms", None)
+    monkeypatch.setattr(app, "park_start_ms", parkbeginn)
     monkeypatch.setattr(app, "latest_data", {"veh-1": daten})
     monkeypatch.setattr(app, "subscribers", {})
     monkeypatch.setattr(app.time, "time", lambda: jetzt[0] / 1000)

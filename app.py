@@ -3457,6 +3457,8 @@ def _fahrtpfad_zurücksetzen(vehicle_data=None):
     global current_trip_file, current_trip_date
 
     geändert = bool(trip_path or current_trip_file or current_trip_date)
+    if isinstance(vehicle_data, dict) and vehicle_data.get("path"):
+        geändert = True
     trip_path.clear()
     current_trip_file = None
     current_trip_date = None
@@ -3465,6 +3467,8 @@ def _fahrtpfad_zurücksetzen(vehicle_data=None):
         vehicle_data["path"] = trip_path
     for cache_data in list(latest_data.values()):
         if isinstance(cache_data, dict):
+            if cache_data.get("path"):
+                geändert = True
             cache_data["path"] = trip_path
     return geändert
 
@@ -3472,11 +3476,20 @@ def _fahrtpfad_zurücksetzen(vehicle_data=None):
 def _fahrtpfad_nach_parkzeit_bereinigen(vehicle_data=None, jetzt_ms=None):
     """Entferne den letzten Fahrtpfad zehn Minuten nach Fahrtende."""
 
-    if drive_pause_ms is None:
+    parkbeginn_ms = drive_pause_ms
+    if parkbeginn_ms is None and isinstance(vehicle_data, dict):
+        parkbeginn_ms = vehicle_data.get("park_start")
+    if parkbeginn_ms is None:
+        parkbeginn_ms = park_start_ms
+    try:
+        parkbeginn_ms = float(parkbeginn_ms)
+    except (TypeError, ValueError):
         return False
+    if parkbeginn_ms < 1e12:
+        parkbeginn_ms *= 1000
     if jetzt_ms is None:
         jetzt_ms = int(time.time() * 1000)
-    if int(jetzt_ms) - int(drive_pause_ms) < FAHRTPFAD_NACH_PARKEN_MS:
+    if int(jetzt_ms) - int(parkbeginn_ms) < FAHRTPFAD_NACH_PARKEN_MS:
         return False
     return _fahrtpfad_zurücksetzen(vehicle_data)
 
