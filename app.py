@@ -1691,6 +1691,7 @@ trip_path = []
 current_trip_file = None
 current_trip_date = None
 drive_pause_ms = None
+FAHRTPFAD_NACH_PARKEN_MS = 10 * 60 * 1000
 latest_data = {}
 address_cache = {}
 _fleet_telemetry_address_queue = queue.Queue(maxsize=100)
@@ -3450,9 +3451,39 @@ def _log_trip_point(
         pass
 
 
+def _fahrtpfad_zurücksetzen(vehicle_data=None):
+    """Leere den sichtbaren Fahrtpfad und seine Dateizuordnung."""
+
+    global current_trip_file, current_trip_date
+
+    geändert = bool(trip_path or current_trip_file or current_trip_date)
+    trip_path.clear()
+    current_trip_file = None
+    current_trip_date = None
+
+    if isinstance(vehicle_data, dict):
+        vehicle_data["path"] = trip_path
+    for cache_data in list(latest_data.values()):
+        if isinstance(cache_data, dict):
+            cache_data["path"] = trip_path
+    return geändert
+
+
+def _fahrtpfad_nach_parkzeit_bereinigen(vehicle_data=None, jetzt_ms=None):
+    """Entferne den letzten Fahrtpfad zehn Minuten nach Fahrtende."""
+
+    if drive_pause_ms is None:
+        return False
+    if jetzt_ms is None:
+        jetzt_ms = int(time.time() * 1000)
+    if int(jetzt_ms) - int(drive_pause_ms) < FAHRTPFAD_NACH_PARKEN_MS:
+        return False
+    return _fahrtpfad_zurücksetzen(vehicle_data)
+
+
 def track_drive_path(vehicle_data):
     """Maintain the current trip path and log points when driving."""
-    global trip_path, current_trip_file, current_trip_date, drive_pause_ms
+    global current_trip_file, current_trip_date, drive_pause_ms
     drive = (
         vehicle_data.get("drive_state", {}) if isinstance(vehicle_data, dict) else {}
     )
@@ -3482,20 +3513,10 @@ def track_drive_path(vehicle_data):
                     current_trip_file,
                 )
         else:
-            if ts is None:
-                ts = int(time.time() * 1000)
-            if ts - drive_pause_ms > 600000:
-                trip_path = []
-                current_trip_file = None
-                current_trip_date = None
+            _fahrtpfad_nach_parkzeit_bereinigen(vehicle_data)
         return
     if drive_pause_ms is not None:
-        if ts is None:
-            ts = int(time.time() * 1000)
-        if ts - drive_pause_ms > 600000:
-            trip_path = []
-            current_trip_file = None
-            current_trip_date = None
+        _fahrtpfad_nach_parkzeit_bereinigen(vehicle_data)
         drive_pause_ms = None
     if lat is not None and lon is not None:
         if ts is None:
@@ -12338,6 +12359,7 @@ def api_data():
     data = latest_data.get("default")
     if data is None:
         data = _fetch_data_once("default")
+    _fahrtpfad_nach_parkzeit_bereinigen(data)
     return jsonify(data)
 
 
@@ -12349,6 +12371,7 @@ def api_data_vehicle(vehicle_id):
     data = latest_data.get(vehicle_id)
     if data is None:
         data = _fetch_data_once(vehicle_id)
+    _fahrtpfad_nach_parkzeit_bereinigen(data)
     return jsonify(data)
 
 
@@ -12442,6 +12465,7 @@ def stream_vehicle(vehicle_id="default"):
             yield ": verbunden\n\n"
             # Send the latest data immediately if available
             if vehicle_id in latest_data:
+                _fahrtpfad_nach_parkzeit_bereinigen(latest_data[vehicle_id])
                 initial = _subscriber_stream_payload(latest_data[vehicle_id])
                 if isinstance(initial, dict):
                     path = initial.get("path")
@@ -12498,8 +12522,31 @@ def stream_vehicle(vehicle_id="default"):
                     letzter_datenversand = time.monotonic()
                     msg = f"data: {json.dumps(payload)}\n\n"
                 except queue.Empty:
-                    heartbeat = {"stream_heartbeat_at": int(time.time() * 1000)}
-                    msg = f"event: stream\ndata: {json.dumps(heartbeat)}\n\n"
+                    aktuelle_daten = latest_data.get(vehicle_id)
+                    _fahrtpfad_nach_parkzeit_bereinigen(aktuelle_daten)
+                    aktueller_pfad = (
+                        aktuelle_daten.get("path")
+                        if isinstance(aktuelle_daten, dict)
+                        else None
+                    )
+                    if (
+                        isinstance(aktueller_pfad, list)
+                        and len(aktueller_pfad) < last_path_len
+                    ):
+                        payload = _subscriber_stream_payload(aktuelle_daten)
+                        payload["path_reset"] = True
+                        payload["path"] = aktueller_pfad
+                        payload["stream_sent_at"] = int(time.time() * 1000)
+                        last_path_len = len(aktueller_pfad)
+                        msg = f"data: {json.dumps(payload)}\n\n"
+                    else:
+                        heartbeat = {
+                            "stream_heartbeat_at": int(time.time() * 1000)
+                        }
+                        msg = (
+                            "event: stream\n"
+                            f"data: {json.dumps(heartbeat)}\n\n"
+                        )
                 try:
                     yield msg
                 except GeneratorExit:

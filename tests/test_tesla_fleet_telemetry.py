@@ -1343,6 +1343,80 @@ def test_subscriber_stream_ersetzt_rueckstand_durch_neuesten_snapshot(monkeypatc
     assert ziel_queue.empty()
 
 
+def test_fahrtpfad_nutzt_serverzeit_für_zehn_minuten(monkeypatch):
+    parkbeginn = 1_700_000_000_000
+    pfad = [[51.0, 7.0], [51.1, 7.1]]
+    cache = {"path": pfad}
+    daten = {
+        "drive_state": {
+            "shift_state": "P",
+            "timestamp": parkbeginn + 1000,
+        },
+        "path": pfad,
+    }
+    monkeypatch.setattr(app, "trip_path", pfad)
+    monkeypatch.setattr(app, "current_trip_file", "/tmp/trip.csv")
+    monkeypatch.setattr(app, "current_trip_date", "20260725")
+    monkeypatch.setattr(app, "drive_pause_ms", parkbeginn)
+    monkeypatch.setattr(app, "latest_data", {"veh-1": cache})
+    monkeypatch.setattr(
+        app.time,
+        "time",
+        lambda: (
+            parkbeginn + app.FAHRTPFAD_NACH_PARKEN_MS
+        ) / 1000,
+    )
+
+    app.track_drive_path(daten)
+
+    assert app.trip_path == []
+    assert daten["path"] == []
+    assert cache["path"] == []
+    assert app.current_trip_file is None
+    assert app.current_trip_date is None
+
+
+def test_stream_setzt_fahrtpfad_ohne_neue_telemetrie_zurück(monkeypatch):
+    parkbeginn = 1_700_000_000_000
+    jetzt = [parkbeginn + app.FAHRTPFAD_NACH_PARKEN_MS - 1000]
+    pfad = [[51.0, 7.0], [51.1, 7.1]]
+    daten = {
+        "drive_state": {
+            "shift_state": "P",
+            "timestamp": parkbeginn,
+        },
+        "path": pfad,
+    }
+    monkeypatch.setattr(app, "_start_thread", lambda vehicle_id: None)
+    monkeypatch.setattr(app, "trip_path", pfad)
+    monkeypatch.setattr(app, "current_trip_file", "/tmp/trip.csv")
+    monkeypatch.setattr(app, "current_trip_date", "20260725")
+    monkeypatch.setattr(app, "drive_pause_ms", parkbeginn)
+    monkeypatch.setattr(app, "latest_data", {"veh-1": daten})
+    monkeypatch.setattr(app, "subscribers", {})
+    monkeypatch.setattr(app.time, "time", lambda: jetzt[0] / 1000)
+
+    response = app.app.test_client().get("/stream/veh-1", buffered=False)
+
+    try:
+        assert next(response.response).decode("utf-8") == ": verbunden\n\n"
+        initial = json.loads(
+            next(response.response).decode("utf-8").removeprefix("data: ")
+        )
+        assert initial["path"] == pfad
+
+        jetzt[0] = parkbeginn + app.FAHRTPFAD_NACH_PARKEN_MS
+        reset = json.loads(
+            next(response.response).decode("utf-8").removeprefix("data: ")
+        )
+
+        assert reset["path_reset"] is True
+        assert reset["path"] == []
+        assert app.trip_path == []
+    finally:
+        response.close()
+
+
 def test_fleet_telemetrie_adressauflösung_blockiert_livepfad_nicht(monkeypatch):
     geplant = []
     monkeypatch.setattr(app, "address_cache", {})
