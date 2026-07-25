@@ -22,6 +22,8 @@ import time
 import logging
 import glob
 import socket
+import subprocess
+import sys
 import uuid
 import secrets
 import sqlite3
@@ -1220,6 +1222,10 @@ TAXI_DB = os.path.join(DATA_DIR, "taximeter.db")
 STATISTICS_DB = os.getenv("STATISTICS_DB_PATH") or os.path.join(DATA_DIR, "statistics.db")
 AGGREGATION_INTERVAL = float(os.getenv("AGGREGATION_INTERVAL_SECONDS", "300"))
 STATISTICS_STARTUP_DELAY = float(os.getenv("STATISTICS_STARTUP_DELAY_SECONDS", "10"))
+STATISTICS_AGGREGATION_PROCESS_TIMEOUT = max(
+    60.0,
+    float(os.getenv("STATISTICS_AGGREGATION_PROCESS_TIMEOUT_SECONDS", "240")),
+)
 DISABLE_STATISTICS_AGGREGATION = os.getenv("DISABLE_STATISTICS_AGGREGATION") == "1"
 FORCE_STATISTICS_REBUILD = os.getenv("FORCE_STATISTICS_REBUILD") == "1"
 STATISTIK_ENERGIE_KORREKTUR_MAX_DELTA_KWH = max(
@@ -1253,6 +1259,11 @@ def _parse_cli_arguments():
         type=float,
         help="Seconds to wait before the first background statistics run",
     )
+    parser.add_argument(
+        "--statistics-once",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     args, _unknown = parser.parse_known_args()
     if args.aggregation_interval:
         global AGGREGATION_INTERVAL
@@ -1263,6 +1274,7 @@ def _parse_cli_arguments():
     if args.rebuild_statistics:
         global FORCE_STATISTICS_REBUILD
         FORCE_STATISTICS_REBUILD = True
+    return args
 
 # Elements on the dashboard that can be toggled via the config page
 CONFIG_ITEMS = [
@@ -3312,12 +3324,46 @@ def _statistics_aggregation_tick():
                 conn.close()
 
 
+def _statistikaggregation_in_eigenem_prozess():
+    global FORCE_STATISTICS_REBUILD
+
+    neuaufbau_erzwungen = FORCE_STATISTICS_REBUILD
+    befehl = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--statistics-once",
+    ]
+    if neuaufbau_erzwungen:
+        befehl.append("--rebuild-statistics")
+
+    umgebung = os.environ.copy()
+    umgebung["FORCE_STATISTICS_REBUILD"] = "0"
+    ergebnis = subprocess.run(
+        befehl,
+        capture_output=True,
+        text=True,
+        timeout=STATISTICS_AGGREGATION_PROCESS_TIMEOUT,
+        check=False,
+        env=umgebung,
+    )
+    if ergebnis.returncode != 0:
+        fehlertext = (ergebnis.stderr or ergebnis.stdout or "").strip()
+        if len(fehlertext) > 2000:
+            fehlertext = fehlertext[-2000:]
+        raise RuntimeError(
+            f"Statistikprozess endete mit Code {ergebnis.returncode}: "
+            f"{fehlertext or 'keine Fehlerausgabe'}"
+        )
+    if neuaufbau_erzwungen:
+        FORCE_STATISTICS_REBUILD = False
+
+
 def _statistics_aggregation_loop(interval, startup_delay=0.0):
     if startup_delay > 0:
         time.sleep(startup_delay)
     while True:
         try:
-            eventlet_tpool.execute(_statistics_aggregation_tick)
+            eventlet_tpool.execute(_statistikaggregation_in_eigenem_prozess)
         except Exception:
             logging.exception("Statistics aggregation failed")
         time.sleep(max(1.0, interval))
@@ -14584,9 +14630,12 @@ def handle_disconnect():
 
 
 if __name__ == "__main__":
-    _parse_cli_arguments()
-    port = int(os.getenv("PORT", "8013"))
-    debug = (os.getenv("FLASK_DEBUG") or "0").lower() in {"1", "true", "yes", "on"}
-    socketio.run(app, host="0.0.0.0", port=port, debug=debug)
+    cli_argumente = _parse_cli_arguments()
+    if cli_argumente.statistics_once:
+        _statistics_aggregation_tick()
+    else:
+        port = int(os.getenv("PORT", "8013"))
+        debug = (os.getenv("FLASK_DEBUG") or "0").lower() in {"1", "true", "yes", "on"}
+        socketio.run(app, host="0.0.0.0", port=port, debug=debug)
 
 # © 2026 Erik Schauer, do1ffe@darc.de

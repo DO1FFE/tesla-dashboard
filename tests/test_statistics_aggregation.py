@@ -145,19 +145,19 @@ def test_import_startet_statistik_nicht_synchron(monkeypatch, tmp_path):
     assert app._aggregation_thread is None
 
 
-def test_statistikaggregation_nutzt_eventlet_threadpool(monkeypatch):
+def test_statistikaggregation_startet_prozess_im_eventlet_threadpool(monkeypatch):
     import app
 
     ausgeführt = []
 
-    def tick():
-        ausgeführt.append("tick")
+    def prozess():
+        ausgeführt.append("prozess")
 
     def execute(funktion):
         ausgeführt.append("threadpool")
         return funktion()
 
-    monkeypatch.setattr(app, "_statistics_aggregation_tick", tick)
+    monkeypatch.setattr(app, "_statistikaggregation_in_eigenem_prozess", prozess)
     monkeypatch.setattr(app.eventlet_tpool, "execute", execute)
     monkeypatch.setattr(app.time, "sleep", lambda _seconds: (_ for _ in ()).throw(
         KeyboardInterrupt
@@ -168,7 +168,43 @@ def test_statistikaggregation_nutzt_eventlet_threadpool(monkeypatch):
     except KeyboardInterrupt:
         pass
 
-    assert ausgeführt == ["threadpool", "tick"]
+    assert ausgeführt == ["threadpool", "prozess"]
+
+
+def test_statistikaggregation_läuft_in_eigenem_prozess(monkeypatch):
+    import app
+
+    aufruf = {}
+
+    class Ergebnis:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def run(befehl, **optionen):
+        aufruf["befehl"] = befehl
+        aufruf["optionen"] = optionen
+        return Ergebnis()
+
+    monkeypatch.setattr(app.subprocess, "run", run)
+    monkeypatch.setattr(app, "FORCE_STATISTICS_REBUILD", True)
+    monkeypatch.setattr(app, "STATISTICS_AGGREGATION_PROCESS_TIMEOUT", 123.0)
+    monkeypatch.setenv("FORCE_STATISTICS_REBUILD", "1")
+
+    app._statistikaggregation_in_eigenem_prozess()
+
+    assert aufruf["befehl"][0] == app.sys.executable
+    assert aufruf["befehl"][1] == str(app.Path(app.__file__).resolve())
+    assert aufruf["befehl"][2:] == [
+        "--statistics-once",
+        "--rebuild-statistics",
+    ]
+    assert aufruf["optionen"]["capture_output"] is True
+    assert aufruf["optionen"]["text"] is True
+    assert aufruf["optionen"]["timeout"] == 123.0
+    assert aufruf["optionen"]["check"] is False
+    assert aufruf["optionen"]["env"]["FORCE_STATISTICS_REBUILD"] == "0"
+    assert app.FORCE_STATISTICS_REBUILD is False
 
 
 def test_api_statistics_liest_db_ohne_synchronen_tick(monkeypatch, tmp_path):
