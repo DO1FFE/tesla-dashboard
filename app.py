@@ -1824,6 +1824,15 @@ FLEET_TELEMETRIE_PROFILE_LIVE_POSITION_MAX_ABSTAND_SECONDS = max(
         )
     ),
 )
+FLEET_TELEMETRIE_PROFILE_LIVE_POSITION_WIEDERAUFNAHME_SECONDS = max(
+    0.5,
+    float(
+        os.getenv(
+            "TESLA_FLEET_TELEMETRY_LIVE_POSITION_RESUME_SECONDS",
+            "2",
+        )
+    ),
+)
 FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_ABSTAND_SECONDS = max(
     0.1,
     float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MIN_INTERVAL_SECONDS", "0.5")),
@@ -5054,7 +5063,8 @@ def _fleet_telemetrie_profile_live_takt_stabil(data, jetzt=None):
         intervall = _as_float(abstände.get(feld))
         if letzter is None or intervall is None:
             continue
-        if jetzt - letzter > FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS:
+        alter = jetzt - letzter
+        if alter > FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS:
             continue
         intervall_sekunden = intervall / 1000.0
         max_abstand = FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ABSTAND_SECONDS
@@ -5062,10 +5072,16 @@ def _fleet_telemetrie_profile_live_takt_stabil(data, jetzt=None):
             max_abstand = (
                 FLEET_TELEMETRIE_PROFILE_LIVE_POSITION_MAX_ABSTAND_SECONDS
             )
-        if (
+        intervall_stabil = (
             intervall_sekunden >= FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_ABSTAND_SECONDS
             and intervall_sekunden <= max_abstand
-        ):
+        )
+        position_wiederaufgenommen = (
+            feld in FLEET_TELEMETRIE_PROFILE_LIVE_FAHR_FELDER
+            and 0 <= alter
+            <= FLEET_TELEMETRIE_PROFILE_LIVE_POSITION_WIEDERAUFNAHME_SECONDS
+        )
+        if intervall_stabil or position_wiederaufgenommen:
             stabile_felder += 1
             if feld in FLEET_TELEMETRIE_PROFILE_LIVE_FAHR_FELDER:
                 stabile_fahrfelder += 1

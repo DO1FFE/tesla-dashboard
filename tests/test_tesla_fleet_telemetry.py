@@ -2949,7 +2949,7 @@ def test_fleet_telemetrie_profile_live_stabil_verlangt_position_beim_fahren():
             "VehicleSpeed": 2_000_000,
             "PackCurrent": 2_000_000,
             "PackVoltage": 2_000_000,
-            "Location": 2_000_000,
+            "Location": 1_997_000,
         },
         "fleet_telemetry_field_interval_ms": {
             "VehicleSpeed": 1000,
@@ -2965,6 +2965,25 @@ def test_fleet_telemetrie_profile_live_stabil_verlangt_position_beim_fahren():
     daten["fleet_telemetry_field_interval_ms"]["Location"] = 1000
 
     assert app._fleet_telemetrie_profile_live_takt_stabil(daten, 2000.0) is True
+
+
+def test_fleet_telemetrie_profile_live_stabil_erkennt_wiederanfahrt():
+    daten = {
+        "fleet_telemetry_field_received_at": {
+            "VehicleSpeed": 2_000_000,
+            "PackCurrent": 2_000_000,
+            "Location": 2_000_000,
+        },
+        "fleet_telemetry_field_interval_ms": {
+            "VehicleSpeed": 1000,
+            "PackCurrent": 1000,
+            "Location": 10_009,
+        },
+        "drive_state": {"shift_state": "D", "speed": 12},
+    }
+
+    assert app._fleet_telemetrie_profile_live_takt_stabil(daten, 2000.0) is True
+    assert app._fleet_telemetrie_profile_live_takt_stabil(daten, 2002.1) is False
 
 
 def test_fleet_telemetrie_profile_live_stabil_toleriert_positionsjitter():
@@ -2986,7 +3005,7 @@ def test_fleet_telemetrie_profile_live_stabil_toleriert_positionsjitter():
 
     daten["fleet_telemetry_field_interval_ms"]["Location"] = 5001
 
-    assert app._fleet_telemetrie_profile_live_takt_stabil(daten, 2000.0) is False
+    assert app._fleet_telemetrie_profile_live_takt_stabil(daten, 2002.1) is False
 
 
 def test_fleet_telemetrie_profile_erweitert_stabiles_live(monkeypatch):
