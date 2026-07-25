@@ -145,6 +145,32 @@ def test_import_startet_statistik_nicht_synchron(monkeypatch, tmp_path):
     assert app._aggregation_thread is None
 
 
+def test_statistikaggregation_nutzt_eventlet_threadpool(monkeypatch):
+    import app
+
+    ausgeführt = []
+
+    def tick():
+        ausgeführt.append("tick")
+
+    def execute(funktion):
+        ausgeführt.append("threadpool")
+        return funktion()
+
+    monkeypatch.setattr(app, "_statistics_aggregation_tick", tick)
+    monkeypatch.setattr(app.eventlet_tpool, "execute", execute)
+    monkeypatch.setattr(app.time, "sleep", lambda _seconds: (_ for _ in ()).throw(
+        KeyboardInterrupt
+    ))
+
+    try:
+        app._statistics_aggregation_loop(300)
+    except KeyboardInterrupt:
+        pass
+
+    assert ausgeführt == ["threadpool", "tick"]
+
+
 def test_api_statistics_liest_db_ohne_synchronen_tick(monkeypatch, tmp_path):
     db_path = tmp_path / "stats.db"
     monkeypatch.setenv("STATISTICS_DB_PATH", str(db_path))

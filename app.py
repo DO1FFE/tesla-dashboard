@@ -8,6 +8,7 @@ except RuntimeError:
     eventlet.hubs.use_hub("eventlet.hubs.asyncio")
 eventlet.monkey_patch()
 from eventlet import queue as eventlet_queue
+from eventlet import tpool as eventlet_tpool
 
 import os
 import base64
@@ -1845,6 +1846,10 @@ FLEET_TELEMETRIE_PROFILE_LIVE_TAKT_PRUEFVERZOEGERUNG_SECONDS = max(
     FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS,
     float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_CADENCE_GRACE_SECONDS", "20")),
 )
+FLEET_TELEMETRIE_PROFILE_LIVE_INSTABIL_TOLERANZ_SECONDS = max(
+    1.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_UNSTABLE_GRACE_SECONDS", "5")),
+)
 FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_FELDER = max(
     1,
     int(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MIN_FIELDS", "2")),
@@ -2196,6 +2201,7 @@ def _fleet_telemetrie_profile_status_standard():
         "config_sync_error": None,
         "config_sync_details": [],
         "live_stable_since": 0.0,
+        "live_unstable_since": 0.0,
         "updated_at": 0.0,
     }
 
@@ -3311,7 +3317,7 @@ def _statistics_aggregation_loop(interval, startup_delay=0.0):
         time.sleep(startup_delay)
     while True:
         try:
-            _statistics_aggregation_tick()
+            eventlet_tpool.execute(_statistics_aggregation_tick)
         except Exception:
             logging.exception("Statistics aggregation failed")
         time.sleep(max(1.0, interval))
@@ -6040,7 +6046,12 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
         target_since = float(status.get("target_since") or jetzt)
         current = status.get("current") or FLEET_TELEMETRIE_PROFILE_STANDARD
         live_stable_since = _as_float(status.get("live_stable_since"))
+        live_unstable_since = _as_float(status.get("live_unstable_since"))
+        live_takt_toleriert = False
         if ziel == "live" and live_takt_stabil:
+            if live_unstable_since is not None and live_unstable_since > 0:
+                status["live_unstable_since"] = 0.0
+                status_geändert = True
             if (
                 ziel_geändert
                 or live_stable_since is None
@@ -6049,11 +6060,32 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                 live_stable_since = jetzt
                 status["live_stable_since"] = live_stable_since
                 status_geändert = True
+        elif ziel == "live" and current in {"live", "live_extended"}:
+            if live_unstable_since is None or live_unstable_since <= 0:
+                live_unstable_since = jetzt
+                status["live_unstable_since"] = live_unstable_since
+                status_geändert = True
+            live_takt_toleriert = (
+                jetzt - live_unstable_since
+                < FLEET_TELEMETRIE_PROFILE_LIVE_INSTABIL_TOLERANZ_SECONDS
+            )
+            if (
+                not live_takt_toleriert
+                and live_stable_since is not None
+                and live_stable_since > 0
+            ):
+                status["live_stable_since"] = 0.0
+                status_geändert = True
+                live_stable_since = None
         else:
+            if live_unstable_since is not None and live_unstable_since > 0:
+                status["live_unstable_since"] = 0.0
+                status_geändert = True
             if live_stable_since is not None and live_stable_since > 0:
                 status["live_stable_since"] = 0.0
                 status_geändert = True
             live_stable_since = None
+        live_takt_akzeptiert = live_takt_stabil or live_takt_toleriert
         live_stable_seconds = None
         if live_stable_since is not None:
             live_stable_seconds = jetzt - live_stable_since
@@ -6088,7 +6120,7 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                 aktivierbares_ziel = (
                     "live_extended"
                     if (
-                        live_takt_stabil
+                        live_takt_akzeptiert
                         or live_erweitert_neuverbindung_erwartet
                     )
                     else "live"
@@ -6097,7 +6129,7 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                 aktivierbares_ziel = (
                     "live_extended"
                     if (
-                        live_takt_stabil
+                        live_takt_akzeptiert
                         or live_erweitert_neuverbindung_erwartet
                     )
                     else "live"
@@ -6125,7 +6157,7 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
         )
         if (
             live_takt_pruefbar
-            and not live_takt_stabil
+            and not live_takt_akzeptiert
             and _fleet_telemetrie_profile_api_sync_bestaetigt(status, current)
         ):
             status["config_synced"] = False
