@@ -2896,6 +2896,22 @@ def test_fleet_telemetrie_profile_live_stabil_toleriert_parkende_luecke():
     assert app._fleet_telemetrie_profile_live_takt_stabil(daten, 2000.0) is True
 
 
+def test_fleet_telemetrie_profile_live_stabil_toleriert_ampelstillstand():
+    daten = {
+        "fleet_telemetry_field_received_at": {
+            "PackCurrent": 2_000_000,
+            "PackVoltage": 2_000_000,
+        },
+        "fleet_telemetry_field_interval_ms": {
+            "PackCurrent": 1000,
+            "PackVoltage": 1000,
+        },
+        "drive_state": {"shift_state": "D", "speed": 0},
+    }
+
+    assert app._fleet_telemetrie_profile_live_takt_stabil(daten, 2000.0) is True
+
+
 def test_fleet_telemetrie_profile_live_stabil_verwirft_10s_takt():
     daten = {
         "fleet_telemetry_field_received_at": {
@@ -2930,11 +2946,13 @@ def test_fleet_telemetrie_profile_bewegung_verlangt_frische_geschwindigkeit():
 def test_fleet_telemetrie_profile_live_stabil_verlangt_position_beim_fahren():
     daten = {
         "fleet_telemetry_field_received_at": {
+            "VehicleSpeed": 2_000_000,
             "PackCurrent": 2_000_000,
             "PackVoltage": 2_000_000,
             "Location": 2_000_000,
         },
         "fleet_telemetry_field_interval_ms": {
+            "VehicleSpeed": 1000,
             "PackCurrent": 1000,
             "PackVoltage": 1000,
             "Location": 60_000,

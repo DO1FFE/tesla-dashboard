@@ -5069,7 +5069,10 @@ def _fleet_telemetrie_profile_live_takt_stabil(data, jetzt=None):
             stabile_felder += 1
             if feld in FLEET_TELEMETRIE_PROFILE_LIVE_FAHR_FELDER:
                 stabile_fahrfelder += 1
-    if _fleet_telemetrie_profile_fahrzeug_fährt(data) and stabile_fahrfelder < 1:
+    if (
+        _fleet_telemetrie_profile_fahrzeug_bewegt_sich(data, jetzt)
+        and stabile_fahrfelder < 1
+    ):
         return False
     return stabile_felder >= FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_FELDER
 
