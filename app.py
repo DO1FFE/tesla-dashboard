@@ -2317,6 +2317,7 @@ def _subscriber_stream_payload(data):
     payload = _subscriber_daten_kopie(data)
     if not isinstance(payload, dict):
         return payload
+    _fleet_telemetrie_rohdaten_anreichern(payload)
     for feld in FLEET_TELEMETRY_STREAM_DIAGNOSE_FELDER:
         payload.pop(feld, None)
     return payload
@@ -12380,6 +12381,7 @@ def api_data():
     data = latest_data.get("default")
     if data is None:
         data = _fetch_data_once("default")
+    _fleet_telemetrie_rohdaten_anreichern(data)
     _fahrtpfad_nach_parkzeit_bereinigen(data)
     return jsonify(data)
 
@@ -12392,6 +12394,7 @@ def api_data_vehicle(vehicle_id):
     data = latest_data.get(vehicle_id)
     if data is None:
         data = _fetch_data_once(vehicle_id)
+    _fleet_telemetrie_rohdaten_anreichern(data)
     _fahrtpfad_nach_parkzeit_bereinigen(data)
     return jsonify(data)
 

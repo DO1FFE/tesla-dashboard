@@ -1679,6 +1679,42 @@ def test_fleet_telemetrie_reichert_lüfterstufe_null_aus_rohdaten_an():
     assert daten["climate_state"]["fan_status"] == 0
 
 
+def test_api_liefert_lüfterstufe_null_aus_geladenem_cache(monkeypatch):
+    daten = {
+        "fleet_telemetry_raw": {
+            "HvacFanSpeed": 0,
+        },
+        "climate_state": {
+            "is_climate_on": False,
+            "fan_status": None,
+        },
+    }
+    monkeypatch.setattr(app, "_start_thread", lambda vehicle_id: None)
+    monkeypatch.setattr(app, "latest_data", {"default": daten})
+
+    response = app.app.test_client().get("/api/data")
+
+    assert response.status_code == 200
+    assert response.get_json()["climate_state"]["fan_status"] == 0
+
+
+def test_stream_liefert_lüfterstufe_null_aus_geladenem_cache():
+    daten = {
+        "fleet_telemetry_raw": {
+            "HvacFanSpeed": 0,
+        },
+        "climate_state": {
+            "is_climate_on": False,
+            "fan_status": None,
+        },
+    }
+
+    payload = app._subscriber_stream_payload(daten)
+
+    assert payload["climate_state"]["fan_status"] == 0
+    assert daten["climate_state"]["fan_status"] is None
+
+
 def test_fleet_telemetrie_reichert_tpms_sollwerte_aus_schwester_cache_an(monkeypatch):
     monkeypatch.setattr(
         app,
