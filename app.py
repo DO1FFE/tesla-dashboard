@@ -13,6 +13,8 @@ from eventlet import tpool as eventlet_tpool
 import os
 import base64
 import csv
+import hashlib
+import ipaddress
 import json
 import queue
 import copy
@@ -295,8 +297,8 @@ def inject_ga_id():
 @app.before_request
 def assign_client_id():
     """Ensure every client has a persistent identifier."""
-    cid = request.cookies.get("client_id")
-    if cid is None:
+    cid = _client_id_normalisieren(request.cookies.get("client_id"))
+    if not cid:
         cid = uuid.uuid4().hex
         g.client_id = cid
         g.set_client_id_cookie = True
@@ -343,6 +345,17 @@ PTT_RECORDING_LIMIT = max(1, int(os.getenv("PTT_RECORDING_LIMIT", "20")))
 PTT_RECORDING_RETENTION_HOURS = max(
     1, int(os.getenv("PTT_RECORDING_RETENTION_HOURS", "24"))
 )
+
+
+def _client_id_normalisieren(client_id):
+    """Gib nur gültige, kanonische UUIDs als Client-ID zurück."""
+
+    if not isinstance(client_id, str) or len(client_id) != 32:
+        return ""
+    try:
+        return uuid.UUID(hex=client_id).hex
+    except (ValueError, AttributeError):
+        return ""
 
 
 def _client_metadaten_ergänzen(info, ip=None, ua=None, now=None):
@@ -417,16 +430,110 @@ def _ptt_diagnosen_auflisten():
     return einträge
 
 
-def _client_ip():
-    """Return the originating client IP taking proxy headers into account."""
+def _proxy_netze_laden():
+    """Lade Netze, deren Forwarding-Header ausgewertet werden dürfen."""
 
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        for part in forwarded.split(","):
-            candidate = part.strip()
-            if candidate:
-                return candidate
-    return request.remote_addr or ""
+    rohwert = os.getenv(
+        "TRUSTED_PROXY_CIDRS",
+        "127.0.0.0/8,::1/128",
+    )
+    netze = []
+    for eintrag in rohwert.split(","):
+        eintrag = eintrag.strip()
+        if not eintrag:
+            continue
+        try:
+            netze.append(ipaddress.ip_network(eintrag, strict=False))
+        except ValueError:
+            logging.warning(
+                "Ungültiges Netz in TRUSTED_PROXY_CIDRS ignoriert: %s",
+                eintrag,
+            )
+    return tuple(netze)
+
+
+VERTRAUENSWÜRDIGE_PROXY_NETZE = _proxy_netze_laden()
+
+
+def _ip_normalisieren(wert):
+    """Normalisiere eine einzelne IPv4- oder IPv6-Adresse."""
+
+    if not isinstance(wert, str):
+        return ""
+    kandidat = wert.strip().strip('"')
+    if not kandidat:
+        return ""
+    try:
+        adresse = ipaddress.ip_address(kandidat)
+    except ValueError:
+        return ""
+    if isinstance(adresse, ipaddress.IPv6Address) and adresse.ipv4_mapped:
+        return str(adresse.ipv4_mapped)
+    return adresse.compressed
+
+
+def _ist_vertrauenswürdiger_proxy(ip):
+    """Prüfe, ob eine Adresse zu einem konfigurierten Proxy-Netz gehört."""
+
+    normalisiert = _ip_normalisieren(ip)
+    if not normalisiert:
+        return False
+    adresse = ipaddress.ip_address(normalisiert)
+    return any(adresse in netz for netz in VERTRAUENSWÜRDIGE_PROXY_NETZE)
+
+
+def _client_ip():
+    """Ermittle die echte Client-IP über ausschließlich vertraute Proxys."""
+
+    remote_ip = _ip_normalisieren(request.remote_addr or "")
+    if not remote_ip:
+        return request.remote_addr or ""
+    if not _ist_vertrauenswürdiger_proxy(remote_ip):
+        return remote_ip
+
+    weitergeleitet = []
+    for teil in request.headers.get("X-Forwarded-For", "").split(","):
+        kandidat = _ip_normalisieren(teil)
+        if kandidat:
+            weitergeleitet.append(kandidat)
+
+    # Der letzte nicht vertrauenswürdige Eintrag vor unserer Proxy-Kette ist
+    # der tatsächliche Absender. Vorangestellte Werte darf ein Client fälschen.
+    for kandidat in reversed(weitergeleitet):
+        if not _ist_vertrauenswürdiger_proxy(kandidat):
+            return kandidat
+
+    reale_ip = _ip_normalisieren(request.headers.get("X-Real-IP", ""))
+    if reale_ip:
+        return reale_ip
+    if weitergeleitet:
+        return weitergeleitet[-1]
+    return remote_ip
+
+
+def _anonymer_client_schlüssel(ip, ua):
+    """Bilde für Clients ohne Cookie einen stabilen, begrenzten Schlüssel."""
+
+    fingerabdruck = hashlib.sha256(
+        f"{ip}\0{ua}".encode("utf-8", errors="replace")
+    ).hexdigest()
+    return f"anonym:{fingerabdruck}"
+
+
+def _client_tracking_schlüssel(ip, ua, client_id=None):
+    """Trenne Browser per Cookie und anonyme Aufrufer per Fingerabdruck."""
+
+    if client_id is None:
+        client_id = _client_id_normalisieren(request.cookies.get("client_id"))
+    normalisierte_client_id = _client_id_normalisieren(client_id)
+    if normalisierte_client_id:
+        return f"client:{normalisierte_client_id}"
+    if client_id:
+        verbindungs_id = hashlib.sha256(
+            str(client_id).encode("utf-8", errors="replace")
+        ).hexdigest()
+        return f"verbindung:{verbindungs_id}"
+    return _anonymer_client_schlüssel(ip, ua)
 
 
 LOOKUP_CACHE_TTL = int(os.getenv("LOOKUP_CACHE_TTL", "300"))
@@ -575,9 +682,27 @@ def _track_client():
     """Collect information about the connecting client."""
     ip = _client_ip()
     ua = request.headers.get("User-Agent", "")
+    gespeicherte_client_id = _client_id_normalisieren(
+        request.cookies.get("client_id")
+    )
+    client_schlüssel = _client_tracking_schlüssel(
+        ip,
+        ua,
+        client_id=gespeicherte_client_id,
+    )
+    anonymer_schlüssel = _anonymer_client_schlüssel(ip, ua)
+    if (
+        gespeicherte_client_id
+        and client_schlüssel not in active_clients
+        and anonymer_schlüssel in active_clients
+    ):
+        active_clients[client_schlüssel] = active_clients.pop(
+            anonymer_schlüssel
+        )
+    g.client_tracking_schlüssel = client_schlüssel
     hostname = _cached_hostname(ip)
     now = time.time()
-    info = active_clients.get(ip)
+    info = active_clients.get(client_schlüssel)
     if info is None:
         browser, os_name = parse_user_agent(ua)
         info = {
@@ -592,16 +717,18 @@ def _track_client():
             "last_seen": now,
             "connections": 0,
         }
-        active_clients[ip] = info
+        active_clients[client_schlüssel] = info
     else:
+        vorherige_ip = info.get("ip")
         _client_metadaten_ergänzen(info, ip=ip, ua=ua, now=now)
+        info["ip"] = ip
         info["last_seen"] = now
         info["user_agent"] = ua
         info["hostname"] = hostname
         info["browser"], info["os"] = parse_user_agent(ua)
-        if ip and not info.get("location"):
+        if ip and (ip != vorherige_ip or not info.get("location")):
             info["location"] = lookup_location(ip)
-        if ip and not info.get("provider"):
+        if ip and (ip != vorherige_ip or not info.get("provider")):
             info["provider"] = lookup_provider(ip)
     if not request.path.startswith("/static/") and not request.path.startswith("/images/"):
         page_path = request.path
@@ -632,17 +759,17 @@ def _track_client():
         info["connections"] = info.get("connections", 0) + 1
 
 
-def _client_stream_getrennt(ip):
+def _client_stream_getrennt(client_schlüssel):
     """Merke eine getrennte Stream-Verbindung ohne den Client sofort zu löschen."""
 
-    info = active_clients.get(ip)
+    info = active_clients.get(client_schlüssel)
     if not info:
         return
-    _client_metadaten_ergänzen(info, ip=ip)
+    _client_metadaten_ergänzen(info)
     info["connections"] = max(0, info.get("connections", 1) - 1)
     info["last_seen"] = time.time()
     if info["connections"] <= 0 and not info.get("pages"):
-        active_clients.pop(ip, None)
+        active_clients.pop(client_schlüssel, None)
 
 
 # Block clients based on configured IP addresses
@@ -664,7 +791,15 @@ def block_ip_clients():
         and not request.path.startswith("/images/")
     ):
         # Replace recorded pages so the client shows as blocked
-        info = active_clients.setdefault(ip, {"ip": ip})
+        client_schlüssel = getattr(
+            g,
+            "client_tracking_schlüssel",
+            _client_tracking_schlüssel(
+                ip,
+                request.headers.get("User-Agent", ""),
+            ),
+        )
+        info = active_clients.setdefault(client_schlüssel, {"ip": ip})
         pages = info.setdefault("pages", [])
         if "index.html" in pages:
             pages.remove("index.html")
@@ -12479,6 +12614,14 @@ def stream_vehicle(vehicle_id="default"):
     """Stream vehicle data to the client using Server-Sent Events."""
     _start_thread(vehicle_id)
     ip = _client_ip()
+    client_schlüssel = getattr(
+        g,
+        "client_tracking_schlüssel",
+        _client_tracking_schlüssel(
+            ip,
+            request.headers.get("User-Agent", ""),
+        ),
+    )
 
     def gen():
         q = eventlet_queue.Queue(maxsize=FLEET_TELEMETRY_STREAM_QUEUE_MAX)
@@ -12580,7 +12723,7 @@ def stream_vehicle(vehicle_id="default"):
                 subscribers.get(vehicle_id, []).remove(q)
             except ValueError:
                 pass
-            _client_stream_getrennt(ip)
+            _client_stream_getrennt(client_schlüssel)
 
     resp = Response(gen(), mimetype="text/event-stream")
     resp.headers["Cache-Control"] = "no-cache, no-transform"
@@ -12628,12 +12771,12 @@ def _client_detail_liste(now=None):
         now = time.time()
     items = []
     expired = []
-    for ip, data in list(active_clients.items()):
-        _client_metadaten_ergänzen(data, ip=ip, now=now)
+    for client_schlüssel, data in list(active_clients.items()):
+        _client_metadaten_ergänzen(data, now=now)
         last_seen = data.get("last_seen", now)
         pages = data.get("pages", [])
         if now - last_seen > CLIENT_TIMEOUT or not pages:
-            expired.append(ip)
+            expired.append(client_schlüssel)
             continue
         first_seen = data.get("first_seen", now)
         delta = now - first_seen
@@ -12652,9 +12795,15 @@ def _client_detail_liste(now=None):
                 "first_seen_ms": int(first_seen * 1000),
             }
         )
-    for ip in expired:
-        active_clients.pop(ip, None)
-    items.sort(key=lambda d: d["ip"] or "")
+    for client_schlüssel in expired:
+        active_clients.pop(client_schlüssel, None)
+    items.sort(
+        key=lambda daten: (
+            daten["ip"] or "",
+            daten["first_seen_ms"],
+            daten["user_agent"] or "",
+        )
+    )
     return items
 
 
@@ -12664,16 +12813,16 @@ def api_clients():
     now = time.time()
     count = 0
     expired = []
-    for ip, data in list(active_clients.items()):
-        _client_metadaten_ergänzen(data, ip=ip, now=now)
+    for client_schlüssel, data in list(active_clients.items()):
+        _client_metadaten_ergänzen(data, now=now)
         last_seen = data.get("last_seen", now)
         pages = data.get("pages", [])
         if now - last_seen > CLIENT_TIMEOUT or not pages:
-            expired.append(ip)
+            expired.append(client_schlüssel)
             continue
         count += 1
-    for ip in expired:
-        active_clients.pop(ip, None)
+    for client_schlüssel in expired:
+        active_clients.pop(client_schlüssel, None)
     return jsonify({"clients": count})
 
 
@@ -14111,8 +14260,8 @@ def _timeline_events(limit=100):
 def _aktive_clients_zählen():
     now = time.time()
     count = 0
-    for ip, data in list(active_clients.items()):
-        _client_metadaten_ergänzen(data, ip=ip, now=now)
+    for _client_schlüssel, data in list(active_clients.items()):
+        _client_metadaten_ergänzen(data, now=now)
         pages = data.get("pages", [])
         last_seen = data.get("last_seen", now)
         if pages and now - last_seen <= CLIENT_TIMEOUT:
@@ -14505,7 +14654,7 @@ def export_file(dataset, fmt):
 def _client_id():
     """Return a stable client identifier for the current connection."""
 
-    cid = request.cookies.get("client_id")
+    cid = _client_id_normalisieren(request.cookies.get("client_id"))
     if cid:
         return cid
     # ``SocketIOTestClient`` and some real-time connections may not trigger the
@@ -14596,7 +14745,12 @@ def handle_ptt_diagnostics(data):
     }
     ptt_diagnostics[cid] = eintrag
     if ip:
-        info = active_clients.setdefault(ip, {"ip": ip})
+        client_schlüssel = _client_tracking_schlüssel(
+            ip,
+            request.headers.get("User-Agent", ""),
+            client_id=cid,
+        )
+        info = active_clients.setdefault(client_schlüssel, {"ip": ip})
         _client_metadaten_ergänzen(
             info,
             ip=ip,

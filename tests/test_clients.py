@@ -93,3 +93,107 @@ def test_fehlende_startzeit_wird_stabil_nachgetragen(monkeypatch):
     assert zuerst[0]["duration"] == "00 Tage, 00:00:05"
     assert später[0]["first_seen_ms"] == 1995000
     assert später[0]["duration"] == "00 Tage, 00:00:10"
+
+
+def test_direkter_client_kann_ip_nicht_per_header_fälschen(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "VERTRAUENSWÜRDIGE_PROXY_NETZE",
+        (app.ipaddress.ip_network("172.18.0.1/32"),),
+    )
+
+    with app.app.test_request_context(
+        "/",
+        environ_base={"REMOTE_ADDR": "203.0.113.10"},
+        headers={"X-Forwarded-For": "198.51.100.25"},
+    ):
+        assert app._client_ip() == "203.0.113.10"
+
+
+def test_proxy_kette_liefert_letzten_nicht_vertrauenswürdigen_client(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        app,
+        "VERTRAUENSWÜRDIGE_PROXY_NETZE",
+        (app.ipaddress.ip_network("172.18.0.1/32"),),
+    )
+
+    with app.app.test_request_context(
+        "/",
+        environ_base={"REMOTE_ADDR": "172.18.0.1"},
+        headers={
+            "X-Forwarded-For": "198.51.100.25, 203.0.113.10",
+            "X-Real-IP": "203.0.113.10",
+        },
+    ):
+        assert app._client_ip() == "203.0.113.10"
+
+
+def test_browser_mit_gleicher_ip_werden_getrennt_erfasst(monkeypatch):
+    monkeypatch.setattr(app, "_cached_hostname", lambda _ip: "")
+    monkeypatch.setattr(app, "lookup_location", lambda _ip: "")
+    monkeypatch.setattr(app, "lookup_provider", lambda _ip: "")
+    app.active_clients.clear()
+    headers_a = {
+        "Cookie": f"client_id={'a' * 32}",
+        "User-Agent": "Gleicher Testbrowser",
+    }
+    headers_b = {
+        "Cookie": f"client_id={'b' * 32}",
+        "User-Agent": "Gleicher Testbrowser",
+    }
+
+    try:
+        with app.app.test_request_context(
+            "/",
+            environ_base={"REMOTE_ADDR": "203.0.113.10"},
+            headers=headers_a,
+        ):
+            app._track_client()
+        with app.app.test_request_context(
+            "/",
+            environ_base={"REMOTE_ADDR": "203.0.113.10"},
+            headers=headers_b,
+        ):
+            app._track_client()
+
+        assert len(app.active_clients) == 2
+        assert {
+            daten["ip"] for daten in app.active_clients.values()
+        } == {"203.0.113.10"}
+    finally:
+        app.active_clients.clear()
+
+
+def test_bekannter_browser_aktualisiert_seine_ip(monkeypatch):
+    monkeypatch.setattr(app, "_cached_hostname", lambda ip: f"host-{ip}")
+    monkeypatch.setattr(app, "lookup_location", lambda ip: f"ort-{ip}")
+    monkeypatch.setattr(app, "lookup_provider", lambda ip: f"anbieter-{ip}")
+    app.active_clients.clear()
+    headers = {
+        "Cookie": f"client_id={'c' * 32}",
+        "User-Agent": "Mobiler Testbrowser",
+    }
+
+    try:
+        with app.app.test_request_context(
+            "/",
+            environ_base={"REMOTE_ADDR": "203.0.113.10"},
+            headers=headers,
+        ):
+            app._track_client()
+        with app.app.test_request_context(
+            "/",
+            environ_base={"REMOTE_ADDR": "198.51.100.25"},
+            headers=headers,
+        ):
+            app._track_client()
+
+        daten = next(iter(app.active_clients.values()))
+        assert daten["ip"] == "198.51.100.25"
+        assert daten["hostname"] == "host-198.51.100.25"
+        assert daten["location"] == "ort-198.51.100.25"
+        assert daten["provider"] == "anbieter-198.51.100.25"
+    finally:
+        app.active_clients.clear()
