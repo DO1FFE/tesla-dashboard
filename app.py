@@ -2330,6 +2330,8 @@ FLEET_TELEMETRIE_PROFILE_CHARGING_FELDER = (
     | FLEET_TELEMETRIE_PROFILE_CHARGING_30S_FELDER
     | FLEET_TELEMETRIE_PROFILE_CHARGING_60S_FELDER
 )
+
+
 def _fleet_telemetrie_profile_status_standard():
     """Erzeuge den Standardstatus für die Telemetry-Profilsteuerung."""
 
@@ -2339,6 +2341,8 @@ def _fleet_telemetrie_profile_status_standard():
         "target_since": 0.0,
         "last_sent": 0.0,
         "last_sent_profile": None,
+        "last_posted_at": 0.0,
+        "last_posted_profile": None,
         "last_error": None,
         "config_synced": None,
         "config_key_paired": None,
@@ -2350,6 +2354,9 @@ def _fleet_telemetrie_profile_status_standard():
         "config_sync_details": [],
         "live_stable_since": 0.0,
         "live_unstable_since": 0.0,
+        "charging_observed": None,
+        "post_charge_live_since": 0.0,
+        "post_charge_live_until": 0.0,
         "updated_at": 0.0,
     }
 
@@ -2395,7 +2402,16 @@ def _fleet_telemetrie_profile_status_laden():
         value = geladen.get(key)
         if value in FLEET_TELEMETRIE_PROFILE:
             status[key] = value
-    for key in ("target_since", "last_sent", "updated_at", "live_stable_since"):
+    for key in (
+        "target_since",
+        "last_sent",
+        "last_posted_at",
+        "updated_at",
+        "live_stable_since",
+        "live_unstable_since",
+        "post_charge_live_since",
+        "post_charge_live_until",
+    ):
         try:
             value = float(geladen.get(key))
         except Exception:
@@ -2403,6 +2419,10 @@ def _fleet_telemetrie_profile_status_laden():
         status[key] = value
     if geladen.get("last_sent_profile") in FLEET_TELEMETRIE_PROFILE:
         status["last_sent_profile"] = geladen.get("last_sent_profile")
+    if geladen.get("last_posted_profile") in FLEET_TELEMETRIE_PROFILE:
+        status["last_posted_profile"] = geladen.get("last_posted_profile")
+    if isinstance(geladen.get("charging_observed"), bool):
+        status["charging_observed"] = geladen.get("charging_observed")
     status["last_error"] = geladen.get("last_error")
     if isinstance(geladen.get("config_synced"), bool):
         status["config_synced"] = geladen.get("config_synced")
@@ -2424,6 +2444,16 @@ def _fleet_telemetrie_profile_status_laden():
     status["config_sync_details"] = _fleet_telemetrie_sync_details_normalisieren(
         geladen.get("config_sync_details")
     )
+    if (
+        status.get("last_posted_profile") not in FLEET_TELEMETRIE_PROFILE
+        and status.get("config_synced") is True
+        and status.get("config_sync_profile") in FLEET_TELEMETRIE_PROFILE
+    ):
+        status["last_posted_profile"] = status.get("config_sync_profile")
+        status["last_posted_at"] = max(
+            float(status.get("last_sent") or 0),
+            float(status.get("config_sync_updated_at") or 0),
+        )
     return status
 
 
@@ -5358,6 +5388,9 @@ def _fleet_telemetrie_profile_fahrzeug_bewegt_sich(data, jetzt=None):
 def _fleet_telemetrie_profile_stream_bestaetigt(data, status, profil):
     """Prüfe, ob der Stream das gesendete Profil belastbar bestätigt."""
 
+    letztes_profil = status.get("last_posted_profile")
+    if letztes_profil in FLEET_TELEMETRIE_PROFILE and letztes_profil != profil:
+        return False
     if not _fleet_telemetrie_profile_stream_nach_config_aktiv(data, status):
         return False
     if profil in {"live", "live_extended"}:
@@ -5431,12 +5464,12 @@ def _fleet_telemetrie_profile_status_an_daten(data):
     return data
 
 
-def _fleet_telemetrie_profile_ladend(data):
-    """Erkenne einen aktiven Ladevorgang."""
+def _fleet_telemetrie_profile_ladezustand(data):
+    """Erkenne Beginn und Ende eines gemeldeten Ladevorgangs."""
 
     charge = data.get("charge_state") if isinstance(data, dict) else None
     if not isinstance(charge, dict):
-        return False
+        return None
     status = str(charge.get("charging_state") or "").strip().lower()
     if status in {"charging", "starting"}:
         return True
@@ -5445,7 +5478,13 @@ def _fleet_telemetrie_profile_ladend(data):
     charger_power = _as_float(charge.get("charger_power"))
     if charger_power is not None and charger_power > 0:
         return True
-    return False
+    return None
+
+
+def _fleet_telemetrie_profile_ladend(data):
+    """Erkenne einen aktiven Ladevorgang."""
+
+    return _fleet_telemetrie_profile_ladezustand(data) is True
 
 
 def _fleet_telemetrie_profile_fahrzeug_fährt(data):
@@ -5886,6 +5925,9 @@ def _fleet_telemetrie_profile_api_sync_bestaetigt(status, profil):
 def _fleet_telemetrie_profile_sync_bestaetigt(status, profil):
     """Prüfe, ob genau dieses Profil von Tesla als synchron bestätigt wurde."""
 
+    letztes_profil = status.get("last_posted_profile")
+    if letztes_profil in FLEET_TELEMETRIE_PROFILE and letztes_profil != profil:
+        return False
     if not _fleet_telemetrie_profile_api_sync_bestaetigt(status, profil):
         return False
     if profil not in {"live", "live_extended"}:
@@ -5996,6 +6038,21 @@ def _fleet_telemetrie_profile_config_speichern(config_request):
         pass
 
 
+def _fleet_telemetrie_profile_versand_vermerken(profil, jetzt=None):
+    """Merke das Profil erst nach einem erfolgreichen HTTP-POST als gesendet."""
+
+    if profil not in FLEET_TELEMETRIE_PROFILE:
+        return False
+    jetzt = time.time() if jetzt is None else float(jetzt)
+    with _fleet_telemetry_profile_lock:
+        status = _fleet_telemetry_profile_status
+        status["last_posted_profile"] = profil
+        status["last_posted_at"] = jetzt
+        status["updated_at"] = jetzt
+        _fleet_telemetrie_profile_status_speichern()
+    return True
+
+
 def _fleet_telemetrie_profile_anwenden(profil):
     """Sende das gewünschte Profil an Teslas Fleet-Telemetry-Konfigurations-API."""
 
@@ -6019,6 +6076,7 @@ def _fleet_telemetrie_profile_anwenden(profil):
     )
     response.raise_for_status()
     _fleet_telemetrie_profile_config_speichern(config_request)
+    _fleet_telemetrie_profile_versand_vermerken(profil)
     try:
         return _fleet_telemetrie_profile_sync_pruefen(token, config_request)
     except Exception as exc:
@@ -6029,6 +6087,9 @@ def _fleet_telemetrie_profile_fehler_setzen(profil, fehler):
     """Merke fehlgeschlagene Profilwechsel ohne Live-Daten zu blockieren."""
 
     with _fleet_telemetry_profile_lock:
+        letzter_auftrag = _fleet_telemetry_profile_status.get("last_sent_profile")
+        if letzter_auftrag in FLEET_TELEMETRIE_PROFILE and letzter_auftrag != profil:
+            return False
         _fleet_telemetry_profile_status["target"] = profil
         _fleet_telemetry_profile_status["last_error"] = str(fehler)
         _fleet_telemetry_profile_status["config_synced"] = False
@@ -6039,12 +6100,16 @@ def _fleet_telemetrie_profile_fehler_setzen(profil, fehler):
         _fleet_telemetry_profile_status["config_sync_updated_at"] = time.time()
         _fleet_telemetry_profile_status["updated_at"] = time.time()
         _fleet_telemetrie_profile_status_speichern()
+    return True
 
 
 def _fleet_telemetrie_profile_erfolg_setzen(profil, sync_ergebnis=None):
     """Merke ein erfolgreich angewendetes Telemetry-Profil."""
 
     with _fleet_telemetry_profile_lock:
+        letzter_auftrag = _fleet_telemetry_profile_status.get("last_sent_profile")
+        if letzter_auftrag in FLEET_TELEMETRIE_PROFILE and letzter_auftrag != profil:
+            return False
         _fleet_telemetry_profile_status["last_error"] = None
         if sync_ergebnis is None:
             sync_ergebnis = {
@@ -6067,6 +6132,7 @@ def _fleet_telemetrie_profile_erfolg_setzen(profil, sync_ergebnis=None):
             _fleet_telemetry_profile_status["current"] = profil
         _fleet_telemetry_profile_status["updated_at"] = time.time()
         _fleet_telemetrie_profile_status_speichern()
+    return True
 
 
 def _fleet_telemetrie_profile_neuversand_fällig(status, jetzt, profil=None):
@@ -6247,6 +6313,69 @@ def _fleet_telemetrie_profile_nach_neuverbindung_anfordern(vin, jetzt=None):
     return True
 
 
+def _fleet_telemetrie_profile_ladeende_ueberbruecken(
+    status,
+    ziel,
+    ladezustand,
+    jetzt,
+):
+    """Halte nach dem Ladeende kurz Live, bis Fahrt oder Parken eindeutig ist."""
+
+    geändert = False
+    parkbeginn = None
+
+    def _bruecke_beenden():
+        nonlocal geändert
+        if _as_float(status.get("post_charge_live_since")) not in {None, 0.0}:
+            status["post_charge_live_since"] = 0.0
+            geändert = True
+        if _as_float(status.get("post_charge_live_until")) not in {None, 0.0}:
+            status["post_charge_live_until"] = 0.0
+            geändert = True
+
+    beobachtet = status.get("charging_observed")
+    if ladezustand is True:
+        if beobachtet is not True:
+            status["charging_observed"] = True
+            geändert = True
+        _bruecke_beenden()
+        return ziel, parkbeginn, geändert
+
+    if ladezustand is False:
+        ladeende_erkannt = beobachtet is True or (
+            beobachtet is None
+            and status.get("last_posted_profile") == "charging"
+        )
+        if beobachtet is not False:
+            status["charging_observed"] = False
+            geändert = True
+        if ladeende_erkannt:
+            status["post_charge_live_since"] = jetzt
+            status["post_charge_live_until"] = (
+                jetzt + FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS
+            )
+            geändert = True
+
+    live_seit = _as_float(status.get("post_charge_live_since"))
+    live_bis = _as_float(status.get("post_charge_live_until"))
+    bruecke_aktiv = (
+        live_seit is not None
+        and live_seit > 0
+        and live_bis is not None
+        and live_bis >= live_seit
+    )
+    if not bruecke_aktiv:
+        return ziel, parkbeginn, geändert
+    if ziel == "live":
+        _bruecke_beenden()
+    elif ziel == "parked" and jetzt < live_bis:
+        ziel = "live"
+    elif ziel == "parked":
+        parkbeginn = live_seit
+        _bruecke_beenden()
+    return ziel, parkbeginn, geändert
+
+
 def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
     """Aktualisiere das gewünschte Telemetry-Profil aus Live-Daten."""
 
@@ -6254,21 +6383,38 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
     if not _fleet_telemetrie_profile_aktiviert():
         return _fleet_telemetrie_profile_status_an_daten(data)
     ziel = _fleet_telemetrie_profile_ziel(data)
+    ladezustand = _fleet_telemetrie_profile_ladezustand(data)
     jetzt = time.time()
     live_takt_stabil = _fleet_telemetrie_profile_live_takt_stabil(data, jetzt)
     profil_anfordern = None
     with _fleet_telemetry_profile_lock:
         status = _fleet_telemetry_profile_status
         status_geändert = False
+        ziel, parkbeginn, ladezustand_geändert = (
+            _fleet_telemetrie_profile_ladeende_ueberbruecken(
+                status,
+                ziel,
+                ladezustand,
+                jetzt,
+            )
+        )
+        if ladezustand_geändert:
+            status["updated_at"] = jetzt
+            status_geändert = True
         ziel_geändert = status.get("target") != ziel
         if ziel_geändert:
             status["target"] = ziel
-            status["target_since"] = jetzt
+            status["target_since"] = (
+                parkbeginn if parkbeginn is not None else jetzt
+            )
             status["updated_at"] = jetzt
             status["last_error"] = None
             status_geändert = True
         target_since = float(status.get("target_since") or jetzt)
         current = status.get("current") or FLEET_TELEMETRIE_PROFILE_STANDARD
+        ladebruecke_aktiv = (
+            _as_float(status.get("post_charge_live_since")) or 0
+        ) > 0
         live_stable_since = _as_float(status.get("live_stable_since"))
         live_unstable_since = _as_float(status.get("live_unstable_since"))
         live_takt_toleriert = False
@@ -6338,7 +6484,9 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                     jetzt,
                 )
             )
-            if live_ausstehend:
+            if ladebruecke_aktiv:
+                aktivierbares_ziel = "live"
+            elif live_ausstehend:
                 aktivierbares_ziel = "live"
             elif live_erweitert_ausstehend:
                 aktivierbares_ziel = (
@@ -6397,8 +6545,20 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
             jetzt - float(status.get("last_sent") or 0)
             >= FLEET_TELEMETRIE_PROFILE_SEND_COOLDOWN_SECONDS
         )
+        auftrag_ausstehend = (
+            status.get("last_sent_profile") == aktivierbares_ziel
+            and status.get("config_sync_profile") == aktivierbares_ziel
+            and str(status.get("config_sync_state") or "").lower()
+            in {"pending", "active"}
+        )
+        letztes_gepostetes_profil = status.get("last_posted_profile")
+        physisches_profil_weicht_ab = (
+            letztes_gepostetes_profil in FLEET_TELEMETRIE_PROFILE
+            and letztes_gepostetes_profil != aktivierbares_ziel
+        )
         anderes_profil_angefordert = (
             status.get("last_sent_profile") != aktivierbares_ziel
+            or (physisches_profil_weicht_ab and not auftrag_ausstehend)
         )
         if (
             status.get("config_sync_profile") == aktivierbares_ziel

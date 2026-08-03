@@ -34,6 +34,38 @@ def _telemetrie_stream_details(vin="TESTVIN"):
     }]
 
 
+def _bestaetigter_profilstatus(profil, zeitpunkt, **anpassungen):
+    details = [{"vin": "TESTVIN", "synced": True}]
+    if profil in {"live", "live_extended"}:
+        details = _telemetrie_stream_details()
+    status = {
+        "current": profil,
+        "target": profil,
+        "target_since": zeitpunkt,
+        "last_sent": zeitpunkt,
+        "last_sent_profile": profil,
+        "last_posted_at": zeitpunkt,
+        "last_posted_profile": profil,
+        "last_error": None,
+        "config_synced": True,
+        "config_key_paired": None,
+        "config_sync_state": "synced",
+        "config_sync_profile": profil,
+        "config_sync_checked_at": zeitpunkt,
+        "config_sync_updated_at": zeitpunkt,
+        "config_sync_error": None,
+        "config_sync_details": details,
+        "live_stable_since": 0.0,
+        "live_unstable_since": 0.0,
+        "charging_observed": None,
+        "post_charge_live_since": 0.0,
+        "post_charge_live_until": 0.0,
+        "updated_at": zeitpunkt,
+    }
+    status.update(anpassungen)
+    return status
+
+
 @pytest.fixture(autouse=True)
 def keine_echten_parking_logs(monkeypatch):
     """Verhindere echte Log-Einträge in Fleet-Telemetry-Tests."""
@@ -67,6 +99,8 @@ def keine_echten_parking_logs(monkeypatch):
             "target_since": 0.0,
             "last_sent": 0.0,
             "last_sent_profile": None,
+            "last_posted_at": 0.0,
+            "last_posted_profile": None,
             "last_error": None,
             "config_synced": None,
             "config_key_paired": None,
@@ -76,6 +110,9 @@ def keine_echten_parking_logs(monkeypatch):
             "config_sync_updated_at": 0.0,
             "config_sync_error": None,
             "config_sync_details": [],
+            "charging_observed": None,
+            "post_charge_live_since": 0.0,
+            "post_charge_live_until": 0.0,
             "updated_at": 0.0,
         },
     )
@@ -2268,6 +2305,176 @@ def test_fleet_telemetrie_profile_verlaesst_charging_nach_ladeende():
     }) == "parked"
 
 
+def test_fleet_telemetrie_profile_nutzt_nach_ladeende_zuerst_live(monkeypatch):
+    angefordert = []
+    jetzt = [2000.0]
+
+    monkeypatch.setattr(app.time, "time", lambda: jetzt[0])
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS",
+        120.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        _bestaetigter_profilstatus(
+            "charging",
+            1900.0,
+            charging_observed=True,
+        ),
+    )
+    daten = {
+        "vin": "TESTVIN",
+        "charge_state": {"charging_state": "Complete"},
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "vehicle_state": {"locked": True, "is_user_present": False},
+        "climate_state": {"is_climate_on": False},
+    }
+
+    app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    status = app._fleet_telemetry_profile_status
+    assert angefordert == ["live"]
+    assert status["target"] == "live"
+    assert status["config_sync_profile"] == "live"
+    assert status["post_charge_live_since"] == 2000.0
+    assert status["post_charge_live_until"] == 2120.0
+
+    status.update({
+        "current": "live",
+        "last_sent_profile": "live",
+        "last_posted_at": 2000.0,
+        "last_posted_profile": "live",
+        "config_synced": True,
+        "config_sync_state": "synced",
+        "config_sync_profile": "live",
+        "config_sync_details": _telemetrie_stream_details(),
+    })
+    jetzt[0] = 2010.0
+    daten["drive_state"] = {"shift_state": "D", "speed": 5}
+
+    app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    assert status["target"] == "live"
+    assert status["post_charge_live_since"] == 0.0
+    assert status["post_charge_live_until"] == 0.0
+
+
+def test_fleet_telemetrie_profile_beendet_ladebruecke_ohne_fahrt(monkeypatch):
+    angefordert = []
+    jetzt = [2119.0]
+
+    monkeypatch.setattr(app.time, "time", lambda: jetzt[0])
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS",
+        120.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        _bestaetigter_profilstatus(
+            "live",
+            2000.0,
+            charging_observed=False,
+            post_charge_live_since=2000.0,
+            post_charge_live_until=2120.0,
+            live_stable_since=2000.0,
+        ),
+    )
+    daten = {
+        "vin": "TESTVIN",
+        "fleet_telemetry_received_at": 2_119_000,
+        "fleet_telemetry_field_received_at": {
+            "Location": 2_119_000,
+            "PackCurrent": 2_119_000,
+            "PackVoltage": 2_119_000,
+        },
+        "fleet_telemetry_field_interval_ms": {
+            "Location": 1000,
+            "PackCurrent": 1000,
+            "PackVoltage": 1000,
+        },
+        "charge_state": {"charging_state": "Complete"},
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "vehicle_state": {"locked": True, "is_user_present": False},
+        "climate_state": {"is_climate_on": False},
+    }
+
+    app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    assert angefordert == []
+    assert app._fleet_telemetry_profile_status["target"] == "live"
+
+    jetzt[0] = 2120.0
+    app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    status = app._fleet_telemetry_profile_status
+    assert angefordert == ["parked"]
+    assert status["target"] == "parked"
+    assert status["target_since"] == 2000.0
+    assert status["post_charge_live_since"] == 0.0
+    assert status["post_charge_live_until"] == 0.0
+
+
+def test_fleet_telemetrie_profile_korrigiert_physisches_charging(monkeypatch):
+    angefordert = []
+
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        _bestaetigter_profilstatus(
+            "live",
+            1900.0,
+            last_posted_profile="charging",
+            charging_observed=False,
+        ),
+    )
+    daten = {
+        "vin": "TESTVIN",
+        "fleet_telemetry_received_at": 1_999_000,
+        "fleet_telemetry_field_received_at": {
+            "VehicleSpeed": 1_999_000,
+            "Location": 1_970_000,
+        },
+        "fleet_telemetry_field_interval_ms": {
+            "VehicleSpeed": 10_000,
+            "Location": 30_000,
+        },
+        "charge_state": {"charging_state": "Disconnected"},
+        "drive_state": {"shift_state": "D", "speed": 20},
+    }
+
+    app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    status = app._fleet_telemetry_profile_status
+    assert angefordert == ["live"]
+    assert status["config_synced"] is False
+    assert status["config_sync_state"] == "pending"
+    assert status["config_sync_profile"] == "live"
+
+    app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    assert angefordert == ["live"]
+
+
 def test_fleet_telemetrie_profile_ignoriert_verbundenen_browser(monkeypatch):
     monkeypatch.setattr(app, "subscribers", {"veh-1": [object()]})
 
@@ -3668,7 +3875,7 @@ def test_fleet_telemetrie_profile_erfolg_setzt_current_erst_nach_sync(monkeypatc
 
     assert app._fleet_telemetry_profile_status["current"] == "charging"
 
-    app._fleet_telemetrie_profile_erfolg_setzen("live", {
+    assert app._fleet_telemetrie_profile_erfolg_setzen("live", {
         "synced": True,
         "key_paired": None,
         "state": "synced",
@@ -3689,6 +3896,57 @@ def test_fleet_telemetrie_profile_erfolg_setzt_current_erst_nach_sync(monkeypatc
     })
 
     assert app._fleet_telemetry_profile_status["current"] == "live"
+
+
+def test_fleet_telemetrie_profile_ignoriert_veralteten_erfolg(monkeypatch):
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        _bestaetigter_profilstatus(
+            "charging",
+            1999.0,
+            current="live",
+            last_posted_at=1998.0,
+            last_posted_profile="live",
+            config_synced=False,
+            config_sync_state="pending",
+            config_sync_details=[],
+        ),
+    )
+
+    app._fleet_telemetrie_profile_erfolg_setzen("live", {
+        "synced": True,
+        "key_paired": None,
+        "state": "synced",
+        "details": _telemetrie_stream_details(),
+        "checked_at": 2000.0,
+        "error": None,
+    }) is False
+
+    status = app._fleet_telemetry_profile_status
+    assert status["current"] == "live"
+    assert status["config_synced"] is False
+    assert status["config_sync_state"] == "pending"
+    assert status["config_sync_profile"] == "charging"
+
+    assert app._fleet_telemetrie_profile_fehler_setzen(
+        "live",
+        RuntimeError("Veralteter Fehler"),
+    ) is False
+    assert status["target"] == "charging"
+    assert status["last_error"] is None
+    assert status["config_sync_profile"] == "charging"
+
+
+def test_fleet_telemetrie_profile_merkt_tatsaechlichen_versand(monkeypatch):
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+
+    app._fleet_telemetrie_profile_versand_vermerken("live")
+
+    status = app._fleet_telemetry_profile_status
+    assert status["last_posted_profile"] == "live"
+    assert status["last_posted_at"] == 2000.0
 
 
 def test_fleet_telemetrie_profile_pending_prueft_vor_timeout_nur_sync(monkeypatch):
