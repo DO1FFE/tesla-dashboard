@@ -38,14 +38,20 @@ body {
   z-index: 1000;
 }
 
-h2 {
+h2,
+.dashboard-heading {
   background: var(--surface-color);
   margin: 0;
   padding: 1rem;
+  font-size: 1.5em;
   font-weight: 300;
   text-align: left;
   border-bottom: 1px solid #333;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.dashboard-version {
+  white-space: nowrap;
 }
 
 .header-logo {
@@ -1991,6 +1997,16 @@ select {
   grid-area: version;
   justify-self: center;
   min-width: 0;
+}
+
+.app-version a {
+  color: inherit;
+  text-underline-offset: 0.18em;
+}
+
+.app-version a:hover,
+.app-version a:focus {
+  color: var(--accent-color);
 }
 
 @media (max-width: 900px) {

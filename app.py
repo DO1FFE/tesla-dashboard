@@ -118,9 +118,9 @@ def disable_response_caching(resp):
 
 def _set_robots_header(resp):
     """Setze Standardregeln für Suchmaschinen."""
-    if request.path in {"/", "/robots.txt"}:
+    if request.path in {"/", "/robots.txt", "/sitemap.xml"}:
         return
-    resp.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
+    resp.headers.setdefault("X-Robots-Tag", "noindex, follow")
 
 
 def _kommt_von_interner_seite():
@@ -153,6 +153,14 @@ CURRENT_YEAR = datetime.now(ZoneInfo("Europe/Berlin")).year
 APP_STARTED_AT = time.time()
 RECEIPT_TIME_FORMAT = "%d.%m.%Y %H:%M"
 GA_TRACKING_ID = os.getenv("GA_TRACKING_ID")
+PUBLIC_SITE_URL = "https://tesla.do1ffe.de/"
+MAIN_SITE_URL = "https://do1ffe.de/"
+PROJECT_URL = "https://github.com/DO1FFE/tesla-dashboard"
+SEO_TITLE = "Tesla-Dashboard: Live-Fahrzeugdaten, Karte & Ladezustand"
+SEO_DESCRIPTION = (
+    "Live-Dashboard für Tesla-Fahrzeugdaten: Fahrzeugstatus, Ladezustand, "
+    "Reichweite, Klima, Kartenansicht, Ladeverlauf und Statistiken im Überblick."
+)
 TESLA_REQUEST_TIMEOUT = float(os.getenv("TESLA_REQUEST_TIMEOUT", "5"))
 CLIENT_TIMEOUT = int(os.getenv("CLIENT_TIMEOUT", "60"))
 STATE_PERCENT_NORMALIZE_TOLERANCE = max(
@@ -289,9 +297,17 @@ def socketio_client_script() -> str:
 
 
 @app.context_processor
-def inject_ga_id():
-    """Add Google Analytics tracking ID to all templates."""
-    return {"ga_id": GA_TRACKING_ID}
+def inject_template_globals():
+    """Stelle öffentliche, fahrzeugneutrale Angaben für Templates bereit."""
+    return {
+        "ga_id": GA_TRACKING_ID,
+        "public_site_url": PUBLIC_SITE_URL,
+        "main_site_url": MAIN_SITE_URL,
+        "project_url": PROJECT_URL,
+        "seo_title": SEO_TITLE,
+        "seo_description": SEO_DESCRIPTION,
+        "year": CURRENT_YEAR,
+    }
 
 
 @app.before_request
@@ -12565,6 +12581,20 @@ def robots_txt():
     return send_from_directory("static", "robots.txt")
 
 
+@app.route("/sitemap.xml")
+def sitemap_xml():
+    """Liefere eine Sitemap ausschließlich für die öffentliche Startseite."""
+    inhalt = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        "  <url>\n"
+        f"    <loc>{PUBLIC_SITE_URL}</loc>\n"
+        "  </url>\n"
+        "</urlset>\n"
+    )
+    return Response(inhalt, mimetype="application/xml")
+
+
 @app.route("/.well-known/appspecific/com.tesla.3p.public-key.pem")
 def tesla_fleet_public_key():
     """Liefere den öffentlichen Tesla-Fleet-Schlüssel aus."""
@@ -13339,13 +13369,29 @@ def images(filename):
 
 @app.route("/blocked")
 def blocked():
-    return render_template("blocked.html"), 403
+    return (
+        render_template(
+            "blocked.html",
+            fehlercode=403,
+            überschrift="Zugriff nicht möglich",
+            hinweis="Diese Ansicht ist nicht öffentlich freigegeben.",
+        ),
+        403,
+    )
 
 
 @app.errorhandler(404)
 def handle_404(_):
-    """Display blocked page for unknown routes."""
-    return render_template("blocked.html"), 404
+    """Zeige eine echte, nicht indexierbare 404-Seite."""
+    return (
+        render_template(
+            "blocked.html",
+            fehlercode=404,
+            überschrift="Seite nicht gefunden",
+            hinweis="Diese Adresse gibt es im Tesla-Dashboard nicht oder nicht mehr.",
+        ),
+        404,
+    )
 
 
 @app.route("/error")

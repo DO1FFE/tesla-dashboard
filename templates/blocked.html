@@ -3,29 +3,62 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Fehlerseite des Tesla-Dashboards mit Hinweis auf eine nicht gefundene Seite (404)">
-    <meta name="keywords" content="Tesla, Dashboard, Fehler, 404, Seite nicht gefunden">
+    <meta name="description" content="{{ hinweis }}">
     {% include 'seo.html' %}
-    <title>Tesla-Dashboard - Error 404</title>
+    <title>{{ überschrift }} | Tesla-Dashboard</title>
     <style>
         body {
             margin: 0;
-            height: 100vh;
+            min-height: 100vh;
             background-color: #0d4da2; /* Tesla Deep Blue Metallic */
+            color: #fff;
+            font-family: Arial, sans-serif;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
+            text-align: center;
+        }
+
+        main {
+            display: grid;
+            justify-items: center;
+            gap: 1rem;
+            padding: 2rem 1rem;
         }
 
         img {
-            height: 100vh;
-            width: auto;
+            width: min(320px, 75vw);
+            height: auto;
+            max-height: 55vh;
+            object-fit: cover;
+            border-radius: 12px;
+        }
+
+        h1,
+        p {
+            margin: 0;
+        }
+
+        a {
+            color: #fff;
+            font-weight: 700;
+        }
+
+        footer {
+            padding: 1rem;
+            font-size: 0.9rem;
         }
     </style>
-<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9376188585752918"
-     crossorigin="anonymous"></script>
 </head>
 <body>
-    <img src="/images/404.jpg" alt="Fehler 404">
+    <main>
+        <img src="/images/404.jpg" alt="Illustration zur Fehlerseite" width="1024" height="1536">
+        <p>Fehler {{ fehlercode }}</p>
+        <h1>{{ überschrift }}</h1>
+        <p>{{ hinweis }}</p>
+        <a href="/">Zur öffentlichen Startseite des Tesla-Dashboards</a>
+    </main>
+    <footer>© 2025{% if year > 2025 %}-{{ year }}{% endif %} Erik Schauer, do1ffe@darc.de</footer>
 </body>
 </html>

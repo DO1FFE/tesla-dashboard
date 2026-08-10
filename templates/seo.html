@@ -1,15 +1,41 @@
 {% if request.path == '/' %}
     <meta name="robots" content="index, follow">
-{% else %}
-    <meta name="robots" content="noindex, nofollow">
-{% endif %}
-    <link rel="canonical" href="{{ url_for('index', _external=True) }}">
-{% if request.path == '/' %}
+    <link rel="canonical" href="{{ public_site_url }}">
+    <meta property="og:locale" content="de_DE">
     <meta property="og:type" content="website">
-    <meta property="og:title" content="Tesla-Dashboard - Live-Fahrzeugdaten">
-    <meta property="og:description" content="Live-Dashboard für Tesla-Fahrzeugdaten mit Karte, Ladezustand, Reichweite, Geschwindigkeit, Klima, Ladeverlauf und Statistik.">
-    <meta property="og:url" content="{{ url_for('index', _external=True) }}">
+    <meta property="og:site_name" content="Tesla-Dashboard">
+    <meta property="og:title" content="{{ seo_title }}">
+    <meta property="og:description" content="{{ seo_description }}">
+    <meta property="og:url" content="{{ public_site_url }}">
+    <meta property="og:image" content="{{ public_site_url }}static/images/tesla-dashboard-logo.webp">
+    <meta property="og:image:type" content="image/webp">
+    <meta property="og:image:width" content="512">
+    <meta property="og:image:height" content="512">
+    <meta property="og:image:alt" content="Logo des Tesla-Dashboards von DO1FFE">
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="Tesla-Dashboard - Live-Fahrzeugdaten">
-    <meta name="twitter:description" content="Live-Dashboard für Tesla-Fahrzeugdaten mit Karte, Ladezustand, Reichweite, Geschwindigkeit, Klima, Ladeverlauf und Statistik.">
+    <meta name="twitter:title" content="{{ seo_title }}">
+    <meta name="twitter:description" content="{{ seo_description }}">
+    <meta name="twitter:image" content="{{ public_site_url }}static/images/tesla-dashboard-logo.webp">
+    <meta name="twitter:image:alt" content="Logo des Tesla-Dashboards von DO1FFE">
+    <script type="application/ld+json">
+    {{ {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Tesla-Dashboard",
+        "url": public_site_url,
+        "description": seo_description,
+        "applicationCategory": "UtilitiesApplication",
+        "operatingSystem": "Web",
+        "inLanguage": "de-DE",
+        "isAccessibleForFree": true,
+        "author": {
+            "@type": "Person",
+            "name": "Erik Schauer",
+            "url": main_site_url
+        },
+        "sameAs": project_url
+    } | tojson }}
+    </script>
+{% else %}
+    <meta name="robots" content="noindex, follow">
 {% endif %}

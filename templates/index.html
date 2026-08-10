@@ -3,10 +3,9 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Live-Dashboard für Tesla-Fahrzeugdaten mit Karte, Ladezustand, Reichweite, Geschwindigkeit, Klima, Ladeverlauf und Statistik.">
-    <meta name="keywords" content="Tesla Dashboard, Tesla Fahrzeugdaten, Live-Dashboard, Elektroauto, Ladezustand, Reichweite, Karte, Statistik, Tesla Model S, Model 3, Model X, Model Y">
+    <meta name="description" content="{{ seo_description }}">
     {% include 'seo.html' %}
-    <title>Tesla-Dashboard - Live-Fahrzeugdaten</title>
+    <title>{{ seo_title }}</title>
     <link rel="stylesheet" href="/static/css/leaflet.css" />
     <link rel="stylesheet" href="/static/css/style.css" />
     {% if splashscreen_anzeigen %}
@@ -43,11 +42,11 @@
     </div>
     {% endif %}
     <a href="#dashboard-content" class="skip-link">Zum Inhalt springen</a>
-    <h2><img class="header-logo" src="/static/images/tesla-dashboard-logo.webp" alt="" aria-hidden="true">Tesla-Dashboard V{{ version }}
+    <h1 class="dashboard-heading"><img class="header-logo" src="/static/images/tesla-dashboard-logo.webp" alt="" aria-hidden="true">Tesla-Dashboard: Live-Fahrzeugdaten <span class="dashboard-version">V{{ version }}</span>
         <span id="header-right">
             <span id="vehicle-info"></span>&nbsp;&nbsp;&nbsp;<span id="vehicle-status"></span>
         </span>
-    </h2>
+    </h1>
     {% set show_dash = config.get('menu-dashboard', True) %}
     {% set show_stat = config.get('menu-statistik', True) %}
     {% set show_hist = config.get('menu-history', True) %}
@@ -345,7 +344,12 @@
         <span id="client-count"></span>
         <span id="telemetry-profile"></span>
         <span id="data-age"></span>
-        <span>Tesla-Dashboard V{{ version }} - © 2025-{{ year }} Erik Schauer, do1ffe@darc.de</span>
+        <span>
+            Tesla-Dashboard V{{ version }} - © 2025-{{ year }} Erik Schauer, do1ffe@darc.de
+            · <a href="{{ main_site_url }}tesla-dashboard">Projektseite</a>
+            · <a href="{{ main_site_url }}">DO1FFE</a>
+            · <a href="{{ project_url }}">GitHub</a>
+        </span>
     </footer>
 
     <script>
