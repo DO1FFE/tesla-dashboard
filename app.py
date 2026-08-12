@@ -3855,6 +3855,7 @@ def _log_energy(vehicle_id, amount, timestamp=None):
     try:
         with _energy_log_lock:
             eps = 0.001
+            timestamp_explizit = timestamp is not None
             logger = _get_energy_logger(vehicle_id)
             last_ts, last = _last_logged_energy_entry(vehicle_id)
             marker_before = _current_last_energy_marker(vehicle_id)
@@ -3900,13 +3901,19 @@ def _log_energy(vehicle_id, amount, timestamp=None):
                 and amount_val is not None
                 and abs(amount_val - last) <= eps
             ):
-                if (
+                neue_session_mit_zeitstempel = bool(
+                    timestamp_explizit
+                    and last_ts is not None
+                    and ts_dt is not None
+                    and ts_dt > last_ts
+                )
+                if not neue_session_mit_zeitstempel and (
                     marker_before is not None
                     and stored_marker is not None
                     and marker_before == stored_marker
                 ):
                     return False
-                if not (
+                if not neue_session_mit_zeitstempel and not (
                     last_ts is not None
                     and ts_dt is not None
                     and ts_dt > last_ts
@@ -9046,6 +9053,24 @@ def _extract_current_charge_soc(charge_state):
     return _normalize_charge_soc(pct)
 
 
+def _ladeenergie_nachtrag_durch_soc_bestaetigt(cached, data):
+    """Erkenne eine verpasste Ladesitzung anhand eines echten SOC-Anstiegs."""
+
+    if not isinstance(cached, dict) or not isinstance(data, dict):
+        return False
+    vorheriger_ladezustand = cached.get("charge_state")
+    aktueller_ladezustand = data.get("charge_state")
+    if not isinstance(vorheriger_ladezustand, dict):
+        return False
+    if not isinstance(aktueller_ladezustand, dict):
+        return False
+    vorheriger_soc = _extract_current_charge_soc(vorheriger_ladezustand)
+    aktueller_soc = _extract_current_charge_soc(aktueller_ladezustand)
+    if vorheriger_soc is None or aktueller_soc is None:
+        return False
+    return aktueller_soc > vorheriger_soc
+
+
 def _load_session_start_soc(vehicle_id):
     """Lese den Start-SOC der aktuellen Ladesession."""
     start_soc = _charging_session_start_soc.get(vehicle_id)
@@ -9322,10 +9347,16 @@ def _fleet_telemetrie_ladeinformationen_aktualisieren(cache_id, data, cached=Non
     end_states = ("Complete", "Disconnected", "Stopped", "NoPower")
     if charging_state in end_states and current_energy is not None and current_energy > 0.001:
         vorherige_energie = _as_float(last_val)
-        neue_session = (
-            vorherige_energie is None
-            or current_energy - vorherige_energie > 0.001
-            or session_start is not None
+        nachtrag_durch_soc = _ladeenergie_nachtrag_durch_soc_bestaetigt(
+            cached,
+            data,
+        )
+        neue_session = session_start is not None or (
+            nachtrag_durch_soc
+            and (
+                vorherige_energie is None
+                or abs(current_energy - vorherige_energie) > 0.001
+            )
         )
         if neue_session:
             start_time = session_start
@@ -12193,9 +12224,10 @@ def _fetch_data_once(vehicle_id="default"):
             if (
                 current_amount is not None
                 and current_amount > 0.001
+                and _ladeenergie_nachtrag_durch_soc_bestaetigt(cached, data)
                 and (
                     previous_amount is None
-                    or current_amount - previous_amount > 0.001
+                    or abs(current_amount - previous_amount) > 0.001
                 )
             ):
                 session_ended = True

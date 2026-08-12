@@ -189,6 +189,7 @@ def test_log_energy_allows_new_session_with_same_amount(tmp_path, monkeypatch):
     handler.setFormatter(logging.Formatter("%(message)s"))
     app.energy_logger.addHandler(handler)
     app._recently_logged_sessions.clear()
+    app._last_energy_markers.clear()
 
     vehicle_id = "veh"
 
@@ -198,6 +199,7 @@ def test_log_energy_allows_new_session_with_same_amount(tmp_path, monkeypatch):
 
         app._log_energy(vehicle_id, 5.0, timestamp=first_ts)
         handler.flush()
+        app._save_last_energy(vehicle_id, 5.0)
 
         app._clear_session_start(vehicle_id)
 
@@ -406,7 +408,10 @@ def test_fleet_telemetrie_traegt_beendete_ladung_nach(tmp_path, monkeypatch):
     }
     cached = {
         "last_charge_energy_added": 30.1,
-        "charge_state": {"charging_state": "Disconnected"},
+        "charge_state": {
+            "charging_state": "Disconnected",
+            "battery_level": 70,
+        },
     }
 
     try:
@@ -437,6 +442,51 @@ def test_fleet_telemetrie_traegt_beendete_ladung_nach(tmp_path, monkeypatch):
     assert daten["last_charge_energy_added"] == 30.1
     assert daten["charge_state"]["last_charge_energy_added"] == 30.1
     assert list(app._compute_energy_stats(vehicle_id=vehicle_id).values()) == [30.1]
+
+
+def test_fleet_telemetrie_ignoriert_stale_ladeenergie_ohne_soc_anstieg(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    os.makedirs(app.DATA_DIR, exist_ok=True)
+
+    vehicle_id = "fleet_stale_energie"
+    fahrzeug_dir = pathlib.Path(app.vehicle_dir(vehicle_id))
+    (fahrzeug_dir / "last_energy.txt").write_text("7.53", encoding="utf-8")
+
+    app._charging_session_start.clear()
+    app._charging_session_start_soc.clear()
+    app._charging_session_last_soc.clear()
+    app._recently_logged_sessions.clear()
+    app._last_energy_markers.clear()
+
+    daten = {
+        "state": "online",
+        "charge_state": {
+            "charging_state": "Disconnected",
+            "charge_energy_added": 27.4,
+            "battery_level": 85,
+        },
+        "drive_state": {},
+    }
+    cached = {
+        "last_charge_energy_added": 7.53,
+        "charge_state": {
+            "charging_state": "Disconnected",
+            "battery_level": 85,
+        },
+    }
+
+    app._fleet_telemetrie_ladeinformationen_aktualisieren(
+        vehicle_id, daten, cached
+    )
+
+    energy_file = fahrzeug_dir / "energy.log"
+    if energy_file.exists():
+        assert energy_file.read_text(encoding="utf-8").strip() == ""
+    assert (fahrzeug_dir / "last_energy.txt").read_text(
+        encoding="utf-8"
+    ) == "7.53"
 
 
 def test_fleet_telemetrie_schreibt_ladung_nicht_fuer_alias_cache(tmp_path, monkeypatch):
