@@ -29,6 +29,16 @@ def test_unterseiten_bekommen_noindex_header():
     assert _robots_header_fuer_pfad("/api/data") == "noindex, follow"
 
 
+def test_v2l_bekommt_strikte_noindex_regeln():
+    assert _robots_header_fuer_pfad("/v2l") == "noindex, nofollow"
+    assert _robots_header_fuer_pfad("/api/v2l") == "noindex, nofollow"
+    assert _robots_header_fuer_pfad("/v2l/export.csv") == "noindex, nofollow"
+
+    with app.app.test_request_context("/v2l"):
+        html = render_template("seo.html")
+    assert '<meta name="robots" content="noindex, nofollow">' in html
+
+
 def test_robots_txt_erlaubt_keine_unterseiten():
     robots_txt = pathlib.Path("static/robots.txt").read_text(encoding="utf-8")
 

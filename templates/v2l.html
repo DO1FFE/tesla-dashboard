@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="V2L-Verbrauchsstatistik des Tesla-Dashboards">
+    <meta name="keywords" content="Tesla, V2L, Vehicle to Load, Verbrauch, Akkuleistung, Statistik">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    {% include 'seo.html' %}
+    <title>V2L-Statistik</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/v2l.css">
+    {% include 'analytics.html' %}
+</head>
+<body data-vehicle-id="{{ vehicle_id }}" data-capacity-kwh="{{ capacity_kwh }}">
+    <h1 class="v2l-title">V2L-Statistik</h1>
+    {% set show_dash = config.get('menu-dashboard', True) %}
+    {% set show_stat = config.get('menu-statistik', True) %}
+    {% set show_hist = config.get('menu-history', True) %}
+    {% set show_heat = config.get('menu-heatmap', True) %}
+    {% if config.get('page-menu', True) %}
+    <nav id="page-menu" aria-label="Seitennavigation">
+        {% if show_dash %}<a class="menu-button" href="/">Dashboard</a>{% endif %}
+        {% if show_stat %}<a class="menu-button" href="/statistik">Statistik</a>{% endif %}
+        <a class="menu-button is-active" href="/v2l" aria-current="page">V2L</a>
+        {% if show_hist %}<a class="menu-button" href="/history">History</a>{% endif %}
+        {% if show_heat %}<a class="menu-button" href="/heatmap">Heatmap</a>{% endif %}
+    </nav>
+    {% endif %}
+
+    <main class="v2l-page">
+        <section class="v2l-status-band" aria-labelledby="v2l-status-heading">
+            <div>
+                <span id="v2l-status-mark" class="v2l-status-mark" aria-hidden="true"></span>
+                <div>
+                    <h2 id="v2l-status-heading">Bereit</h2>
+                    <p id="v2l-status-text" aria-live="polite">Keine Aufzeichnung aktiv</p>
+                </div>
+            </div>
+            <form id="v2l-control-form">
+                <label for="v2l-title-input">Bezeichnung</label>
+                <input id="v2l-title-input" name="titel" type="text" maxlength="120" value="V2L-Verbrauch">
+                <label for="v2l-capacity-input">Nutzbare Akkukapazität</label>
+                <span class="v2l-input-unit">
+                    <input id="v2l-capacity-input" name="kapazität_kwh" type="number" min="1" max="200" step="0.1" value="{{ '%.1f'|format(capacity_kwh) }}">
+                    <span>kWh</span>
+                </span>
+                <button id="v2l-start-button" type="submit">Aufzeichnung starten</button>
+                <button id="v2l-stop-button" class="is-danger" type="button" hidden>Aufzeichnung beenden</button>
+            </form>
+        </section>
+
+        <section class="v2l-live-band" aria-labelledby="v2l-live-heading">
+            <header>
+                <h2 id="v2l-live-heading">Aktuelle Sitzung</h2>
+                <span id="v2l-measurement-method">SOC</span>
+            </header>
+            <div class="v2l-metrics" id="v2l-live-metrics">
+                <div><span>Dauer</span><strong id="v2l-live-duration">–</strong></div>
+                <div><span>SOC</span><strong id="v2l-live-soc">–</strong></div>
+                <div><span>Akkuverbrauch</span><strong id="v2l-live-energy">–</strong></div>
+                <div><span>Packleistung</span><strong id="v2l-live-power">–</strong></div>
+                <div><span>Ø Leistung</span><strong id="v2l-live-average">–</strong></div>
+                <div><span>Messabdeckung</span><strong id="v2l-live-coverage">–</strong></div>
+            </div>
+            <div class="v2l-chart-wrap">
+                <canvas id="v2l-chart" role="img" aria-label="Verlauf von SOC und Packleistung"></canvas>
+                <div class="v2l-chart-legend" aria-hidden="true">
+                    <span class="is-soc">SOC</span>
+                    <span class="is-power">Packleistung</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="v2l-summary-band" aria-labelledby="v2l-summary-heading">
+            <header>
+                <h2 id="v2l-summary-heading">Gesamt</h2>
+                <a class="v2l-export-link" href="/v2l/export.csv">CSV exportieren</a>
+            </header>
+            <div class="v2l-metrics">
+                <div><span>Sitzungen</span><strong id="v2l-total-sessions">0</strong></div>
+                <div><span>Akkuverbrauch</span><strong id="v2l-total-energy">0,00 kWh</strong></div>
+                <div><span>Laufzeit</span><strong id="v2l-total-duration">0 min</strong></div>
+                <div><span>Ø Leistung</span><strong id="v2l-total-average">0,00 kW</strong></div>
+            </div>
+        </section>
+
+        <section class="v2l-history-band" aria-labelledby="v2l-history-heading">
+            <h2 id="v2l-history-heading">Sitzungsverlauf</h2>
+            <div class="v2l-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Datum</th>
+                            <th>Zeitraum</th>
+                            <th>Dauer</th>
+                            <th>SOC</th>
+                            <th>Verbrauch</th>
+                            <th>Ø / Spitze</th>
+                            <th>Abdeckung</th>
+                            <th>Messung</th>
+                            <th>Ort</th>
+                        </tr>
+                    </thead>
+                    <tbody id="v2l-history-rows">
+                        <tr><td colspan="9" class="v2l-empty">Keine Sitzungen vorhanden</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <p id="v2l-action-status" class="v2l-action-status" aria-live="polite"></p>
+    </main>
+
+    <footer class="app-version v2l-footer">
+        <span>
+            Tesla-Dashboard V{{ version }} - © 2025-{{ year }} Erik Schauer, do1ffe@darc.de
+            · <a href="{{ main_site_url }}tesla-dashboard">Projektseite</a>
+            · <a href="{{ main_site_url }}">DO1FFE</a>
+            · <a href="{{ project_url }}">GitHub</a>
+        </span>
+    </footer>
+
+    <script src="/static/js/v2l.js"></script>
+</body>
+</html>

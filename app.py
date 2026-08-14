@@ -120,6 +120,12 @@ def _set_robots_header(resp):
     """Setze Standardregeln für Suchmaschinen."""
     if request.path in {"/", "/robots.txt", "/sitemap.xml"}:
         return
+    if request.path == "/v2l" or request.path.startswith((
+        "/v2l/",
+        "/api/v2l",
+    )):
+        resp.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
+        return
     resp.headers.setdefault("X-Robots-Tag", "noindex, follow")
 
 
@@ -1039,8 +1045,23 @@ PARK_UI_LOG = "park-ui.log"
 PARKING_CHARGING_STATES = {"Charging", "Starting", "Stopped", "NoPower"}
 PARKING_DROP_CONFIRM_SECONDS = 300
 OFFLINE_STATE_INTERVALL_SEKUNDEN = 10
+V2L_STANDARD_KAPAZITAET_KWH = max(
+    1.0,
+    float(os.getenv("V2L_BATTERIE_KAPAZITAET_KWH", "71.6")),
+)
+V2L_MAX_LEISTUNGSLUECKE_SECONDS = max(
+    10.0,
+    float(os.getenv("V2L_MAX_LEISTUNGSLUECKE_SECONDS", "45")),
+)
+V2L_AUTOMATISCH_MIN_DAUER_SECONDS = max(
+    0.0,
+    float(os.getenv("V2L_AUTOMATISCH_MIN_DAUER_SECONDS", "60")),
+)
 _active_parking_sessions = {}
 _last_parking_samples = {}
+_v2l_lock = threading.RLock()
+_v2l_aktive_fahrzeuge = set()
+_v2l_status_datenbankpfad = None
 
 
 def _merge_state_logs(filename=None, vehicle_id=None):
@@ -4574,6 +4595,796 @@ def _record_dashboard_parking_state(vehicle_id, data):
         _active_parking_sessions.pop(session_key, None)
 
 
+def _v2l_datenbankpfad():
+    """Liefere den Pfad der getrennten V2L-Messdatenbank."""
+
+    return os.path.join(DATA_DIR, "v2l.db")
+
+
+def _v2l_datenbank_öffnen():
+    """Öffne die V2L-Datenbank und stelle das aktuelle Schema bereit."""
+
+    os.makedirs(DATA_DIR, exist_ok=True)
+    verbindung = sqlite3.connect(_v2l_datenbankpfad(), timeout=10)
+    verbindung.row_factory = sqlite3.Row
+    verbindung.execute("PRAGMA foreign_keys = ON")
+    verbindung.execute("PRAGMA journal_mode = WAL")
+    verbindung.execute(
+        """
+        CREATE TABLE IF NOT EXISTS v2l_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vehicle_id TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL,
+            status TEXT NOT NULL,
+            started_at_ms INTEGER NOT NULL,
+            ended_at_ms INTEGER,
+            start_soc REAL,
+            end_soc REAL,
+            start_range_km REAL,
+            end_range_km REAL,
+            battery_capacity_kwh REAL NOT NULL,
+            energy_pack_kwh REAL NOT NULL DEFAULT 0.0,
+            covered_seconds REAL NOT NULL DEFAULT 0.0,
+            gap_seconds REAL NOT NULL DEFAULT 0.0,
+            peak_power_kw REAL NOT NULL DEFAULT 0.0,
+            sample_count INTEGER NOT NULL DEFAULT 0,
+            last_seen_at_ms INTEGER NOT NULL,
+            last_signature_at_ms INTEGER,
+            last_power_at_ms INTEGER,
+            last_discharge_power_kw REAL,
+            location_address TEXT,
+            latitude REAL,
+            longitude REAL,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        )
+        """
+    )
+    verbindung.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS v2l_sessions_active_vehicle
+        ON v2l_sessions(vehicle_id)
+        WHERE status = 'active'
+        """
+    )
+    verbindung.execute(
+        """
+        CREATE TABLE IF NOT EXISTS v2l_samples (
+            session_id INTEGER NOT NULL,
+            measured_at_ms INTEGER NOT NULL,
+            power_measured_at_ms INTEGER,
+            soc REAL,
+            range_km REAL,
+            pack_power_kw REAL,
+            discharge_power_kw REAL,
+            pack_voltage_v REAL,
+            pack_current_a REAL,
+            PRIMARY KEY (session_id, measured_at_ms),
+            FOREIGN KEY (session_id) REFERENCES v2l_sessions(id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    verbindung.execute(
+        """
+        CREATE INDEX IF NOT EXISTS v2l_samples_session_time
+        ON v2l_samples(session_id, measured_at_ms)
+        """
+    )
+    verbindung.commit()
+    return verbindung
+
+
+def _v2l_aktive_fahrzeuge_laden_ungesperrt():
+    """Lade aktive Sitzungen einmal je verwendetem Datenbankpfad."""
+
+    global _v2l_aktive_fahrzeuge, _v2l_status_datenbankpfad
+
+    datenbankpfad = _v2l_datenbankpfad()
+    if _v2l_status_datenbankpfad == datenbankpfad:
+        return
+    aktive_fahrzeuge = set()
+    if os.path.exists(datenbankpfad):
+        try:
+            verbindung = _v2l_datenbank_öffnen()
+            try:
+                zeilen = verbindung.execute(
+                    "SELECT vehicle_id FROM v2l_sessions WHERE status = 'active'"
+                ).fetchall()
+                aktive_fahrzeuge = {
+                    str(zeile["vehicle_id"])
+                    for zeile in zeilen
+                    if zeile["vehicle_id"] is not None
+                }
+            finally:
+                verbindung.close()
+        except sqlite3.Error as exc:
+            logging.warning("V2L-Status konnte nicht geladen werden: %s", exc)
+    _v2l_aktive_fahrzeuge = aktive_fahrzeuge
+    _v2l_status_datenbankpfad = datenbankpfad
+
+
+def _v2l_zeitstempel_ms(wert=None):
+    """Normalisiere einen V2L-Zeitwert auf Millisekunden seit Epoch."""
+
+    if isinstance(wert, datetime):
+        if wert.tzinfo is None:
+            wert = wert.replace(tzinfo=LOCAL_TZ)
+        return int(wert.timestamp() * 1000)
+    if wert is None:
+        return int(time.time() * 1000)
+    normalisiert = _fleet_telemetrie_zeitstempel_ms(wert)
+    if isinstance(normalisiert, (int, float)):
+        return int(normalisiert)
+    return int(time.time() * 1000)
+
+
+def _v2l_kapazität_kwh(vehicle_id, wert=None):
+    """Liefere die nutzbare Akkukapazität für eine V2L-Sitzung."""
+
+    kandidat = _as_float(wert)
+    if kandidat is None:
+        try:
+            kandidat = _as_float(
+                load_config(vehicle_id).get("v2l_battery_capacity_kwh")
+            )
+        except Exception:
+            kandidat = None
+    if kandidat is None:
+        kandidat = V2L_STANDARD_KAPAZITAET_KWH
+    return min(200.0, max(1.0, float(kandidat)))
+
+
+def _v2l_messwerte(data, timestamp_ms=None):
+    """Extrahiere alle für eine V2L-Messung benötigten Fahrzeugwerte."""
+
+    if not isinstance(data, dict):
+        data = {}
+    charge = data.get("charge_state")
+    if not isinstance(charge, dict):
+        charge = {}
+    drive = data.get("drive_state")
+    if not isinstance(drive, dict):
+        drive = {}
+    vehicle = data.get("vehicle_state")
+    if not isinstance(vehicle, dict):
+        vehicle = {}
+
+    zeit_ms = _v2l_zeitstempel_ms(
+        timestamp_ms
+        if timestamp_ms is not None
+        else data.get("fleet_telemetry_received_at")
+        or charge.get("timestamp")
+        or data.get("timestamp")
+    )
+    soc = charge.get("usable_battery_level")
+    if soc is None:
+        soc = charge.get("battery_level")
+    soc = _as_float(soc)
+    reichweite = _extract_dashboard_range_km(charge)
+    packspannung = _as_float(charge.get("pack_voltage"))
+    packstrom = _as_float(charge.get("pack_current"))
+    packleistung = _as_float(charge.get("pack_power"))
+    if packleistung is None and packspannung is not None and packstrom is not None:
+        packleistung = packspannung * packstrom / 1000.0
+
+    leistungszeit_ms = None
+    empfangszeiten = data.get("fleet_telemetry_field_received_at")
+    if isinstance(empfangszeiten, dict):
+        stromzeit = _fleet_telemetrie_zeitstempel_ms(
+            empfangszeiten.get("PackCurrent")
+        )
+        spannungszeit = _fleet_telemetrie_zeitstempel_ms(
+            empfangszeiten.get("PackVoltage")
+        )
+        if isinstance(stromzeit, (int, float)) and isinstance(
+            spannungszeit, (int, float)
+        ):
+            if abs(float(stromzeit) - float(spannungszeit)) <= 20000:
+                leistungszeit_ms = int(max(stromzeit, spannungszeit))
+    elif packleistung is not None:
+        leistungszeit_ms = zeit_ms
+    if timestamp_ms is not None and packleistung is not None:
+        leistungszeit_ms = zeit_ms
+    if (
+        leistungszeit_ms is not None
+        and zeit_ms - leistungszeit_ms
+        > V2L_MAX_LEISTUNGSLUECKE_SECONDS * 1000
+    ):
+        packleistung = None
+        leistungszeit_ms = None
+
+    return {
+        "zeit_ms": zeit_ms,
+        "leistungszeit_ms": leistungszeit_ms,
+        "soc": soc,
+        "reichweite_km": reichweite,
+        "packleistung_kw": packleistung,
+        "packspannung_v": packspannung,
+        "packstrom_a": packstrom,
+        "gang": _normalize_shift_state(drive.get("shift_state")),
+        "geschwindigkeit": _as_float(drive.get("speed")),
+        "ladestatus": str(charge.get("charging_state") or "").strip(),
+        "ladeleistung_kw": _as_float(charge.get("charger_power")),
+        "ladekabel": str(charge.get("conn_charge_cable") or "").strip(),
+        "ladeport_farbe": str(charge.get("charge_port_color") or "").strip(),
+        "adresse": str(data.get("location_address") or "").strip() or None,
+        "latitude": _as_float(drive.get("latitude")),
+        "longitude": _as_float(drive.get("longitude")),
+        "kilometerstand": _as_float(vehicle.get("odometer")),
+    }
+
+
+def _v2l_signatur_aktiv(data):
+    """Erkenne den bekannten V2L-Adapter eindeutig in Fahrzeugdaten."""
+
+    werte = _v2l_messwerte(data)
+    if werte["ladestatus"].lower() != "starting":
+        return False
+    ladeleistung = werte["ladeleistung_kw"]
+    if ladeleistung is None or not 3.5 <= abs(ladeleistung) <= 4.5:
+        return False
+    packleistung = werte["packleistung_kw"]
+    if packleistung is not None and packleistung < -0.2:
+        return True
+    farbe = werte["ladeport_farbe"].lower()
+    return werte["ladekabel"].upper() == "IEC" and farbe == "flashinggreen"
+
+
+def _v2l_fahrzeug_bewegt(werte):
+    """Erkenne eine Bewegung, die eine V2L-Aufzeichnung beendet."""
+
+    if werte.get("gang") in {"D", "R", "N"}:
+        return True
+    geschwindigkeit = _as_float(werte.get("geschwindigkeit"))
+    return geschwindigkeit is not None and abs(geschwindigkeit) >= 0.5
+
+
+def _v2l_aktive_sitzung_ungesperrt(verbindung, vehicle_id):
+    return verbindung.execute(
+        """
+        SELECT * FROM v2l_sessions
+        WHERE vehicle_id = ? AND status = 'active'
+        ORDER BY id DESC LIMIT 1
+        """,
+        (str(vehicle_id),),
+    ).fetchone()
+
+
+def _v2l_messpunkt_speichern_ungesperrt(verbindung, sitzung, werte):
+    """Speichere einen Messpunkt und integriere ausschließlich frische Leistung."""
+
+    if sitzung is None:
+        return None
+    sitzung = dict(sitzung)
+    zeit_ms = int(werte["zeit_ms"])
+    if zeit_ms < int(sitzung.get("last_seen_at_ms") or 0):
+        return sitzung
+
+    packleistung = _as_float(werte.get("packleistung_kw"))
+    entladeleistung = None
+    if packleistung is not None:
+        entladeleistung = max(0.0, -packleistung)
+    leistungszeit_ms = werte.get("leistungszeit_ms")
+    if leistungszeit_ms is not None:
+        leistungszeit_ms = int(leistungszeit_ms)
+
+    energie = float(sitzung.get("energy_pack_kwh") or 0.0)
+    abgedeckt = float(sitzung.get("covered_seconds") or 0.0)
+    lücke = float(sitzung.get("gap_seconds") or 0.0)
+    spitze = float(sitzung.get("peak_power_kw") or 0.0)
+    letzte_leistungszeit = sitzung.get("last_power_at_ms")
+    letzte_leistung = _as_float(sitzung.get("last_discharge_power_kw"))
+
+    neue_leistungsmessung = bool(
+        entladeleistung is not None
+        and leistungszeit_ms is not None
+        and (
+            letzte_leistungszeit is None
+            or leistungszeit_ms > int(letzte_leistungszeit)
+        )
+    )
+    if neue_leistungsmessung:
+        spitze = max(spitze, entladeleistung)
+        if letzte_leistungszeit is not None and letzte_leistung is not None:
+            differenz = (leistungszeit_ms - int(letzte_leistungszeit)) / 1000.0
+            if 0 < differenz <= V2L_MAX_LEISTUNGSLUECKE_SECONDS:
+                energie += (letzte_leistung + entladeleistung) / 2.0 * (
+                    differenz / 3600.0
+                )
+                abgedeckt += differenz
+            elif differenz > V2L_MAX_LEISTUNGSLUECKE_SECONDS:
+                lücke += differenz
+
+    cursor = verbindung.execute(
+        """
+        INSERT OR IGNORE INTO v2l_samples (
+            session_id, measured_at_ms, power_measured_at_ms, soc, range_km,
+            pack_power_kw, discharge_power_kw, pack_voltage_v, pack_current_a
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            int(sitzung["id"]),
+            zeit_ms,
+            leistungszeit_ms,
+            werte.get("soc"),
+            werte.get("reichweite_km"),
+            packleistung,
+            entladeleistung,
+            werte.get("packspannung_v"),
+            werte.get("packstrom_a"),
+        ),
+    )
+    anzahl = int(sitzung.get("sample_count") or 0)
+    if cursor.rowcount > 0:
+        anzahl += 1
+
+    verbindung.execute(
+        """
+        UPDATE v2l_sessions
+        SET end_soc = COALESCE(?, end_soc),
+            end_range_km = COALESCE(?, end_range_km),
+            energy_pack_kwh = ?,
+            covered_seconds = ?,
+            gap_seconds = ?,
+            peak_power_kw = ?,
+            sample_count = ?,
+            last_seen_at_ms = ?,
+            last_power_at_ms = CASE WHEN ? THEN ? ELSE last_power_at_ms END,
+            last_discharge_power_kw = CASE
+                WHEN ? THEN ? ELSE last_discharge_power_kw END,
+            updated_at_ms = ?
+        WHERE id = ?
+        """,
+        (
+            werte.get("soc"),
+            werte.get("reichweite_km"),
+            energie,
+            abgedeckt,
+            lücke,
+            spitze,
+            anzahl,
+            zeit_ms,
+            int(neue_leistungsmessung),
+            leistungszeit_ms,
+            int(neue_leistungsmessung),
+            entladeleistung,
+            zeit_ms,
+            int(sitzung["id"]),
+        ),
+    )
+    return verbindung.execute(
+        "SELECT * FROM v2l_sessions WHERE id = ?",
+        (int(sitzung["id"]),),
+    ).fetchone()
+
+
+def _v2l_sitzung_starten_ungesperrt(
+    verbindung,
+    vehicle_id,
+    data,
+    quelle,
+    titel=None,
+    kapazität_kwh=None,
+    timestamp_ms=None,
+):
+    """Lege eine aktive V2L-Sitzung an und speichere den Startwert."""
+
+    aktiv = _v2l_aktive_sitzung_ungesperrt(verbindung, vehicle_id)
+    if aktiv is not None:
+        return aktiv
+    werte = _v2l_messwerte(data, timestamp_ms=timestamp_ms)
+    if werte["soc"] is None:
+        raise ValueError("Für den Start fehlt ein aktueller SOC-Wert")
+    zeit_ms = int(werte["zeit_ms"])
+    kapazität = _v2l_kapazität_kwh(vehicle_id, kapazität_kwh)
+    titel = str(titel or "").strip()[:120]
+    cursor = verbindung.execute(
+        """
+        INSERT INTO v2l_sessions (
+            vehicle_id, title, source, status, started_at_ms, start_soc,
+            end_soc, start_range_km, end_range_km, battery_capacity_kwh,
+            last_seen_at_ms, last_signature_at_ms, location_address,
+            latitude, longitude, created_at_ms, updated_at_ms
+        ) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            str(vehicle_id),
+            titel,
+            str(quelle),
+            zeit_ms,
+            werte["soc"],
+            werte["soc"],
+            werte["reichweite_km"],
+            werte["reichweite_km"],
+            kapazität,
+            zeit_ms,
+            zeit_ms if quelle == "automatic" else None,
+            werte["adresse"],
+            werte["latitude"],
+            werte["longitude"],
+            zeit_ms,
+            zeit_ms,
+        ),
+    )
+    sitzung = verbindung.execute(
+        "SELECT * FROM v2l_sessions WHERE id = ?",
+        (int(cursor.lastrowid),),
+    ).fetchone()
+    return _v2l_messpunkt_speichern_ungesperrt(verbindung, sitzung, werte)
+
+
+def _v2l_sitzung_beenden_ungesperrt(
+    verbindung,
+    sitzung,
+    data=None,
+    timestamp_ms=None,
+):
+    """Schließe eine Sitzung ab und entferne kurze automatische Fehlstarts."""
+
+    if sitzung is None:
+        return None
+    sitzung = dict(sitzung)
+    if isinstance(data, dict):
+        werte = _v2l_messwerte(data, timestamp_ms=timestamp_ms)
+        sitzung = dict(
+            _v2l_messpunkt_speichern_ungesperrt(verbindung, sitzung, werte)
+        )
+        ende_ms = int(werte["zeit_ms"])
+    else:
+        ende_ms = _v2l_zeitstempel_ms(timestamp_ms)
+    ende_ms = max(ende_ms, int(sitzung.get("last_seen_at_ms") or ende_ms))
+    verbindung.execute(
+        """
+        UPDATE v2l_sessions
+        SET status = 'completed', ended_at_ms = ?, updated_at_ms = ?
+        WHERE id = ?
+        """,
+        (ende_ms, ende_ms, int(sitzung["id"])),
+    )
+    abgeschlossen = verbindung.execute(
+        "SELECT * FROM v2l_sessions WHERE id = ?",
+        (int(sitzung["id"]),),
+    ).fetchone()
+    if abgeschlossen is None:
+        return None
+    abgeschlossen_dict = dict(abgeschlossen)
+    dauer = max(
+        0.0,
+        (ende_ms - int(abgeschlossen_dict["started_at_ms"])) / 1000.0,
+    )
+    start_soc = _as_float(abgeschlossen_dict.get("start_soc"))
+    ende_soc = _as_float(abgeschlossen_dict.get("end_soc"))
+    soc_verlust = 0.0
+    if start_soc is not None and ende_soc is not None:
+        soc_verlust = max(0.0, start_soc - ende_soc)
+    if (
+        abgeschlossen_dict.get("source") == "automatic"
+        and dauer < V2L_AUTOMATISCH_MIN_DAUER_SECONDS
+        and soc_verlust < 0.2
+        and float(abgeschlossen_dict.get("energy_pack_kwh") or 0.0) < 0.05
+    ):
+        verbindung.execute(
+            "DELETE FROM v2l_sessions WHERE id = ?",
+            (int(abgeschlossen_dict["id"]),),
+        )
+        return None
+    return abgeschlossen
+
+
+def _v2l_telemetrie_aktualisieren(vehicle_id, data, timestamp_ms=None):
+    """Starte, aktualisiere oder beende V2L anhand aktueller Telemetrie."""
+
+    if not isinstance(data, dict):
+        return data
+    vehicle_id = str(vehicle_id or "default")
+    werte = _v2l_messwerte(data, timestamp_ms=timestamp_ms)
+    signatur_aktiv = _v2l_signatur_aktiv(data)
+    with _v2l_lock:
+        _v2l_aktive_fahrzeuge_laden_ungesperrt()
+        if not signatur_aktiv and vehicle_id not in _v2l_aktive_fahrzeuge:
+            data["v2l_active"] = False
+            data.pop("v2l_session_id", None)
+            return data
+        verbindung = _v2l_datenbank_öffnen()
+        try:
+            sitzung = _v2l_aktive_sitzung_ungesperrt(verbindung, vehicle_id)
+            if sitzung is None and signatur_aktiv:
+                sitzung = _v2l_sitzung_starten_ungesperrt(
+                    verbindung,
+                    vehicle_id,
+                    data,
+                    "automatic",
+                    titel="Automatisch erkannt",
+                    timestamp_ms=timestamp_ms,
+                )
+            if sitzung is not None:
+                sitzung = _v2l_messpunkt_speichern_ungesperrt(
+                    verbindung,
+                    sitzung,
+                    werte,
+                )
+                if signatur_aktiv and sitzung is not None:
+                    verbindung.execute(
+                        """
+                        UPDATE v2l_sessions
+                        SET last_signature_at_ms = ?, updated_at_ms = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            int(werte["zeit_ms"]),
+                            int(werte["zeit_ms"]),
+                            int(sitzung["id"]),
+                        ),
+                    )
+                automatisches_ende = bool(
+                    sitzung is not None
+                    and sitzung["source"] == "automatic"
+                    and werte["ladestatus"].lower()
+                    not in {"", "starting"}
+                )
+                if _v2l_fahrzeug_bewegt(werte) or automatisches_ende:
+                    _v2l_sitzung_beenden_ungesperrt(
+                        verbindung,
+                        sitzung,
+                        data=data,
+                        timestamp_ms=timestamp_ms,
+                    )
+                    sitzung = None
+            verbindung.commit()
+            aktiv = _v2l_aktive_sitzung_ungesperrt(verbindung, vehicle_id)
+        finally:
+            verbindung.close()
+        if aktiv is not None:
+            _v2l_aktive_fahrzeuge.add(vehicle_id)
+        else:
+            _v2l_aktive_fahrzeuge.discard(vehicle_id)
+
+    data["v2l_active"] = aktiv is not None
+    if aktiv is not None:
+        data["v2l_session_id"] = int(aktiv["id"])
+    else:
+        data.pop("v2l_session_id", None)
+    return data
+
+
+def _v2l_telemetrie_sicher_aktualisieren(
+    vehicle_id,
+    data,
+    timestamp_ms=None,
+):
+    """Aktualisiere V2L, ohne den Fahrzeugdatenstrom zu unterbrechen."""
+
+    try:
+        return _v2l_telemetrie_aktualisieren(
+            vehicle_id,
+            data,
+            timestamp_ms=timestamp_ms,
+        )
+    except Exception:
+        logging.exception("V2L-Telemetrie konnte nicht gespeichert werden")
+        return data
+
+
+def _v2l_cache_status_setzen(vehicle_id, aktiv, sitzungs_id=None):
+    """Spiegele den V2L-Status in alle passenden Live-Caches."""
+
+    vehicle_id = str(vehicle_id or "default")
+    erstes_ergebnis = None
+    with _fleet_telemetry_lock:
+        for cache_id, daten in latest_data.items():
+            if not isinstance(daten, dict):
+                continue
+            kennungen = {
+                str(cache_id),
+                str(daten.get("id_s") or ""),
+                str(daten.get("vehicle_id") or ""),
+            }
+            if vehicle_id not in kennungen and not (
+                cache_id == "default" and vehicle_id == str(_default_vehicle_id)
+            ):
+                continue
+            daten["v2l_active"] = bool(aktiv)
+            if aktiv and sitzungs_id is not None:
+                daten["v2l_session_id"] = int(sitzungs_id)
+            else:
+                daten.pop("v2l_session_id", None)
+            if erstes_ergebnis is None:
+                erstes_ergebnis = daten
+    return erstes_ergebnis
+
+
+def _v2l_aktuelle_fahrzeugdaten(vehicle_id):
+    """Liefere den frischesten Cache für manuelle V2L-Aktionen."""
+
+    kandidaten = [str(vehicle_id or "default"), "default"]
+    for cache_id in kandidaten:
+        daten = latest_data.get(cache_id)
+        if isinstance(daten, dict):
+            return _subscriber_daten_kopie(daten)
+    for cache_id in kandidaten:
+        daten = _load_cached(cache_id)
+        if isinstance(daten, dict):
+            return daten
+    return {}
+
+
+def _v2l_sitzung_payload(sitzung, jetzt_ms=None):
+    """Bereite eine Datenbankzeile für API und Statistikseite auf."""
+
+    daten = dict(sitzung)
+    jetzt_ms = _v2l_zeitstempel_ms(jetzt_ms)
+    start_ms = int(daten["started_at_ms"])
+    ende_ms = daten.get("ended_at_ms")
+    if ende_ms is None:
+        ende_ms = jetzt_ms
+    ende_ms = max(start_ms, int(ende_ms))
+    dauer = max(0.0, (ende_ms - start_ms) / 1000.0)
+    start_soc = _as_float(daten.get("start_soc"))
+    ende_soc = _as_float(daten.get("end_soc"))
+    soc_verlust = None
+    if start_soc is not None and ende_soc is not None:
+        soc_verlust = max(0.0, start_soc - ende_soc)
+    kapazität = float(daten.get("battery_capacity_kwh") or 0.0)
+    soc_energie = None
+    if soc_verlust is not None:
+        soc_energie = soc_verlust / 100.0 * kapazität
+    pack_energie = float(daten.get("energy_pack_kwh") or 0.0)
+    abgedeckt = float(daten.get("covered_seconds") or 0.0)
+    abdeckung = min(100.0, abgedeckt / dauer * 100.0) if dauer > 0 else 0.0
+    if pack_energie > 0 and abdeckung >= 75.0:
+        verbrauch = pack_energie
+        methode = "Packleistung"
+    else:
+        verbrauch = soc_energie if soc_energie is not None else pack_energie
+        methode = "SOC"
+    durchschnitt = verbrauch / (dauer / 3600.0) if dauer > 0 else 0.0
+    aktuelle_leistung = _as_float(daten.get("last_discharge_power_kw"))
+    letzte_leistungszeit = daten.get("last_power_at_ms")
+    if (
+        letzte_leistungszeit is None
+        or jetzt_ms - int(letzte_leistungszeit)
+        > V2L_MAX_LEISTUNGSLUECKE_SECONDS * 1000
+    ):
+        aktuelle_leistung = None
+
+    start_dt = datetime.fromtimestamp(start_ms / 1000.0, LOCAL_TZ)
+    ende_dt = datetime.fromtimestamp(ende_ms / 1000.0, LOCAL_TZ)
+    start_reichweite = _as_float(daten.get("start_range_km"))
+    ende_reichweite = _as_float(daten.get("end_range_km"))
+    reichweitenverlust = None
+    if start_reichweite is not None and ende_reichweite is not None:
+        reichweitenverlust = max(0.0, start_reichweite - ende_reichweite)
+
+    spitze = None
+    if daten.get("last_power_at_ms") is not None:
+        spitze = round(float(daten.get("peak_power_kw") or 0.0), 6)
+
+    return {
+        "id": int(daten["id"]),
+        "vehicle_id": str(daten["vehicle_id"]),
+        "titel": daten.get("title") or "V2L",
+        "quelle": daten.get("source"),
+        "status": daten.get("status"),
+        "start_ms": start_ms,
+        "ende_ms": None if daten.get("ended_at_ms") is None else int(ende_ms),
+        "start": start_dt.isoformat(),
+        "ende": None if daten.get("ended_at_ms") is None else ende_dt.isoformat(),
+        "datum": start_dt.strftime("%d.%m.%Y"),
+        "zeitraum": (
+            f"{start_dt.strftime('%H:%M:%S')}–"
+            + (
+                ende_dt.strftime("%H:%M:%S")
+                if daten.get("ended_at_ms") is not None
+                else "läuft"
+            )
+        ),
+        "dauer_s": round(dauer, 3),
+        "start_soc": start_soc,
+        "ende_soc": ende_soc,
+        "soc_verlust": None if soc_verlust is None else round(soc_verlust, 6),
+        "kapazität_kwh": round(kapazität, 3),
+        "verbrauch_kwh": round(float(verbrauch or 0.0), 6),
+        "pack_energie_kwh": round(pack_energie, 6),
+        "soc_energie_kwh": None if soc_energie is None else round(soc_energie, 6),
+        "methode": methode,
+        "durchschnitt_kw": round(durchschnitt, 6),
+        "spitze_kw": spitze,
+        "aktuelle_leistung_kw": aktuelle_leistung,
+        "messabdeckung_prozent": round(abdeckung, 2),
+        "messlücke_s": round(float(daten.get("gap_seconds") or 0.0), 3),
+        "messpunkte": int(daten.get("sample_count") or 0),
+        "start_reichweite_km": start_reichweite,
+        "ende_reichweite_km": ende_reichweite,
+        "reichweitenverlust_km": (
+            None if reichweitenverlust is None else round(reichweitenverlust, 6)
+        ),
+        "adresse": daten.get("location_address"),
+        "latitude": _as_float(daten.get("latitude")),
+        "longitude": _as_float(daten.get("longitude")),
+    }
+
+
+def _v2l_auswertung(vehicle_id=None, limit=100):
+    """Liefere V2L-Sitzungen, Summen und den Verlauf der aktiven Sitzung."""
+
+    jetzt_ms = int(time.time() * 1000)
+    parameter = []
+    anzeigelimit = max(1, min(1000, int(limit)))
+    where = ""
+    if vehicle_id not in (None, "", "default"):
+        where = "WHERE vehicle_id = ?"
+        parameter.append(str(vehicle_id))
+    with _v2l_lock:
+        verbindung = _v2l_datenbank_öffnen()
+        try:
+            zeilen = verbindung.execute(
+                f"""
+                SELECT * FROM v2l_sessions
+                {where}
+                ORDER BY started_at_ms DESC
+                """,
+                tuple(parameter),
+            ).fetchall()
+            alle_sitzungen = [
+                _v2l_sitzung_payload(zeile, jetzt_ms=jetzt_ms)
+                for zeile in zeilen
+            ]
+            sitzungen = alle_sitzungen[:anzeigelimit]
+            aktive = next(
+                (
+                    sitzung
+                    for sitzung in alle_sitzungen
+                    if sitzung["status"] == "active"
+                ),
+                None,
+            )
+            messpunkte = []
+            if aktive is not None:
+                punkte = verbindung.execute(
+                    """
+                    SELECT measured_at_ms, soc, discharge_power_kw
+                    FROM v2l_samples
+                    WHERE session_id = ?
+                    ORDER BY measured_at_ms DESC
+                    LIMIT 600
+                    """,
+                    (aktive["id"],),
+                ).fetchall()
+                messpunkte = [
+                    {
+                        "zeit_ms": int(punkt["measured_at_ms"]),
+                        "soc": _as_float(punkt["soc"]),
+                        "leistung_kw": _as_float(punkt["discharge_power_kw"]),
+                    }
+                    for punkt in reversed(punkte)
+                ]
+        finally:
+            verbindung.close()
+
+    gesamtverbrauch = sum(
+        sitzung["verbrauch_kwh"] for sitzung in alle_sitzungen
+    )
+    gesamtdauer = sum(sitzung["dauer_s"] for sitzung in alle_sitzungen)
+    return {
+        "vehicle_id": str(vehicle_id or "default"),
+        "kapazität_kwh": _v2l_kapazität_kwh(vehicle_id),
+        "aktiv": aktive,
+        "messpunkte": messpunkte,
+        "sitzungen": sitzungen,
+        "zusammenfassung": {
+            "anzahl": len(alle_sitzungen),
+            "verbrauch_kwh": round(gesamtverbrauch, 6),
+            "dauer_s": round(gesamtdauer, 3),
+            "durchschnitt_kw": round(
+                gesamtverbrauch / (gesamtdauer / 3600.0), 6
+            ) if gesamtdauer > 0 else 0.0,
+        },
+        "aktualisiert_ms": jetzt_ms,
+    }
+
+
 def _log_sms(message, success, vehicle_id=None):
     """Append SMS information to ``sms.log``."""
     try:
@@ -5567,6 +6378,8 @@ def _fleet_telemetrie_profile_ziel(data):
     """Ermittle das passende Kostenprofil aus den letzten Fahrzeugdaten."""
 
     if _fleet_telemetrie_profile_fahrzeug_fährt(data):
+        return "live"
+    if _fleet_telemetrie_wahr(data.get("v2l_active")):
         return "live"
     if _fleet_telemetrie_profile_ladend(data):
         return "charging"
@@ -8130,6 +8943,21 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
 
     if not feldwerte:
         return False
+    v2l_relevante_felder = {
+        "ACChargingPower",
+        "BatteryLevel",
+        "ChargeState",
+        "ChargingCableType",
+        "DCChargingPower",
+        "DetailedChargeState",
+        "Gear",
+        "PackCurrent",
+        "PackVoltage",
+        "Soc",
+    }
+    v2l_relevantes_update = any(
+        feld in v2l_relevante_felder for feld, _wert, _zeit in feldwerte
+    )
     aktualisierte_daten = []
     with _fleet_telemetry_lock:
         for cache_id in _fleet_telemetrie_cache_ids(vin):
@@ -8191,15 +9019,24 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
                 else:
                     data.pop("fleet_telemetry_updated_at", None)
                 data["_live"] = True
+                v2l_aktualisiert = False
+                if (
+                    v2l_relevantes_update
+                    and _fleet_telemetrie_primärer_cache(cache_id, data)
+                ):
+                    _v2l_telemetrie_sicher_aktualisieren(cache_id, data)
+                    v2l_aktualisiert = True
                 data = _fleet_telemetrie_profile_aktualisieren(cache_id, data)
                 stale_bereinigt = _fleet_telemetrie_veraltete_oeffnungen_bereinigen(
                     data
                 )
                 data.pop("api_error", None)
                 latest_data[cache_id] = data
-                if stale_bereinigt:
+                if stale_bereinigt or v2l_aktualisiert:
                     _fleet_telemetrie_cache_spaeter_speichern(cache_id, data)
-                aktualisierte_daten.append((cache_id, data, stale_bereinigt))
+                aktualisierte_daten.append(
+                    (cache_id, data, stale_bereinigt or v2l_aktualisiert)
+                )
                 continue
             data["state_checked_at"] = letzter_zeitstempel
             data["fleet_telemetry_last_field"] = letztes_feld
@@ -8208,6 +9045,11 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
             )
             data = _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data)
             _fleet_telemetrie_veraltete_oeffnungen_bereinigen(data)
+            if (
+                v2l_relevantes_update
+                and _fleet_telemetrie_primärer_cache(cache_id, data)
+            ):
+                _v2l_telemetrie_sicher_aktualisieren(cache_id, data)
             data = _fleet_telemetrie_profile_aktualisieren(cache_id, data)
             _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, data)
             data["_live"] = True
@@ -11993,6 +12835,17 @@ def _fetch_data_once(vehicle_id="default"):
         telemetry_data = _fleet_telemetrie_ladeinformationen_aktualisieren(
             cache_id, telemetry_data, cached
         )
+        vehicle_identifier = (
+            telemetry_data.get("id_s")
+            or telemetry_data.get("vehicle_id")
+            or vid
+            or cache_id
+            or "default"
+        )
+        _v2l_telemetrie_sicher_aktualisieren(
+            str(vehicle_identifier),
+            telemetry_data,
+        )
         _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, telemetry_data, vid)
         latest_data[cache_id] = telemetry_data
         return telemetry_data
@@ -12450,6 +13303,10 @@ def _fetch_data_once(vehicle_id="default"):
         )
         try:
             _record_dashboard_parking_state(str(vehicle_identifier), data)
+            _v2l_telemetrie_sicher_aktualisieren(
+                str(vehicle_identifier),
+                data,
+            )
         except Exception:
             pass
 
@@ -13554,6 +14411,239 @@ def _prepare_statistics_payload():
         "today": today,
         "current_state": state,
     }
+
+
+def _v2l_fahrzeug_id(payload=None):
+    """Bestimme die gewünschte Fahrzeug-ID für V2L-Routen."""
+
+    payload = payload if isinstance(payload, dict) else {}
+    angefordert = payload.get("vehicle_id") or request.args.get("vehicle_id")
+    standard_id = str(
+        _default_vehicle_id or default_vehicle_id() or "default"
+    )
+    if angefordert in (None, "", "default"):
+        return standard_id
+    vehicle_id = str(angefordert)
+    if len(vehicle_id) > 80 or not all(
+        zeichen.isascii()
+        and (zeichen.isalnum() or zeichen in {"-", "_"})
+        for zeichen in vehicle_id
+    ):
+        abort(400)
+
+    bekannte_ids = {standard_id}
+    for vehicle in _fleet_telemetrie_fahrzeuge():
+        for key in ("id_s", "id", "vehicle_id"):
+            wert = vehicle.get(key)
+            if wert not in (None, ""):
+                bekannte_ids.add(str(wert))
+    for vehicle in _vehicle_list_cache or []:
+        if not isinstance(vehicle, dict):
+            continue
+        for key in ("id_s", "id", "vehicle_id"):
+            wert = vehicle.get(key)
+            if wert not in (None, ""):
+                bekannte_ids.add(str(wert))
+    for cache_id, daten in latest_data.items():
+        bekannte_ids.add(str(cache_id))
+        if not isinstance(daten, dict):
+            continue
+        for key in ("id_s", "id", "vehicle_id"):
+            wert = daten.get(key)
+            if wert not in (None, ""):
+                bekannte_ids.add(str(wert))
+    if vehicle_id not in bekannte_ids:
+        abort(404)
+    return vehicle_id
+
+
+def _v2l_manuell_starten(vehicle_id, payload):
+    """Starte eine manuelle Sitzung mit dem aktuellen Fahrzeugzustand."""
+
+    daten = _v2l_aktuelle_fahrzeugdaten(vehicle_id)
+    werte = _v2l_messwerte(daten)
+    if _v2l_fahrzeug_bewegt(werte):
+        raise ValueError("V2L kann nur bei stehendem Fahrzeug gestartet werden")
+    kapazität = _v2l_kapazität_kwh(
+        vehicle_id,
+        payload.get("kapazität_kwh", payload.get("kapazitaet_kwh")),
+    )
+    cfg = load_config(vehicle_id)
+    cfg["v2l_battery_capacity_kwh"] = kapazität
+    save_config(cfg, vehicle_id)
+    with _v2l_lock:
+        _v2l_aktive_fahrzeuge_laden_ungesperrt()
+        verbindung = _v2l_datenbank_öffnen()
+        try:
+            if _v2l_aktive_sitzung_ungesperrt(verbindung, vehicle_id) is not None:
+                raise RuntimeError("Für dieses Fahrzeug läuft bereits eine V2L-Sitzung")
+            sitzung = _v2l_sitzung_starten_ungesperrt(
+                verbindung,
+                vehicle_id,
+                daten,
+                "manual",
+                titel=payload.get("titel") or "Manuelle Aufzeichnung",
+                kapazität_kwh=kapazität,
+            )
+            verbindung.commit()
+            _v2l_aktive_fahrzeuge.add(str(vehicle_id))
+            ergebnis = _v2l_sitzung_payload(sitzung)
+        finally:
+            verbindung.close()
+    cache_daten = _v2l_cache_status_setzen(
+        vehicle_id,
+        True,
+        sitzungs_id=sitzung["id"],
+    )
+    try:
+        if cache_daten is not None:
+            _fleet_telemetrie_profile_aktualisieren(vehicle_id, cache_daten)
+        else:
+            _fleet_telemetrie_profile_spaeter_anwenden("live")
+    except Exception as exc:
+        logging.warning("V2L-Liveprofil konnte nicht aktiviert werden: %s", exc)
+    return ergebnis
+
+
+def _v2l_manuell_beenden(vehicle_id):
+    """Beende die aktive V2L-Sitzung mit dem frischesten Fahrzeugstand."""
+
+    daten = _v2l_aktuelle_fahrzeugdaten(vehicle_id)
+    with _v2l_lock:
+        _v2l_aktive_fahrzeuge_laden_ungesperrt()
+        verbindung = _v2l_datenbank_öffnen()
+        try:
+            sitzung = _v2l_aktive_sitzung_ungesperrt(verbindung, vehicle_id)
+            if sitzung is None:
+                raise RuntimeError("Es läuft keine V2L-Sitzung")
+            beendet = _v2l_sitzung_beenden_ungesperrt(
+                verbindung,
+                sitzung,
+                data=daten,
+            )
+            verbindung.commit()
+            _v2l_aktive_fahrzeuge.discard(str(vehicle_id))
+            ergebnis = (
+                _v2l_sitzung_payload(beendet) if beendet is not None else None
+            )
+        finally:
+            verbindung.close()
+    cache_daten = _v2l_cache_status_setzen(vehicle_id, False)
+    try:
+        if cache_daten is not None:
+            _fleet_telemetrie_profile_aktualisieren(vehicle_id, cache_daten)
+    except Exception as exc:
+        logging.warning("V2L-Liveprofil konnte nicht beendet werden: %s", exc)
+    return ergebnis
+
+
+@app.route("/v2l")
+def v2l_page():
+    """Zeige die V2L-Liveaufzeichnung und den Sitzungsverlauf."""
+
+    vehicle_id = _v2l_fahrzeug_id()
+    return render_template(
+        "v2l.html",
+        config=load_config(),
+        vehicle_id=vehicle_id,
+        capacity_kwh=_v2l_kapazität_kwh(vehicle_id),
+        version=__version__,
+        year=CURRENT_YEAR,
+        main_site_url=MAIN_SITE_URL,
+        project_url=PROJECT_URL,
+    )
+
+
+@app.route("/api/v2l")
+def api_v2l():
+    """Liefere die aktuelle V2L-Auswertung als JSON."""
+
+    vehicle_id = _v2l_fahrzeug_id()
+    limit = request.args.get("limit", default=100, type=int) or 100
+    return jsonify(_v2l_auswertung(vehicle_id, limit=limit))
+
+
+@app.route("/api/v2l/start", methods=["POST"])
+def api_v2l_start():
+    """Starte eine manuelle V2L-Sitzung."""
+
+    payload = request.get_json(silent=True) or {}
+    vehicle_id = _v2l_fahrzeug_id(payload)
+    try:
+        sitzung = _v2l_manuell_starten(vehicle_id, payload)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"sitzung": sitzung}), 201
+
+
+@app.route("/api/v2l/stop", methods=["POST"])
+def api_v2l_stop():
+    """Beende die aktive V2L-Sitzung."""
+
+    payload = request.get_json(silent=True) or {}
+    vehicle_id = _v2l_fahrzeug_id(payload)
+    try:
+        sitzung = _v2l_manuell_beenden(vehicle_id)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 409
+    return jsonify({"sitzung": sitzung})
+
+
+@app.route("/v2l/export.csv")
+def v2l_export_csv():
+    """Exportiere die V2L-Sitzungen als deutsch formatiertes CSV."""
+
+    vehicle_id = _v2l_fahrzeug_id()
+    sitzungen = _v2l_auswertung(vehicle_id, limit=1000)["sitzungen"]
+    ausgabe = StringIO()
+    writer = csv.writer(ausgabe, delimiter=";")
+    writer.writerow([
+        "Datum",
+        "Bezeichnung",
+        "Zeitraum",
+        "Dauer Sekunden",
+        "Start SOC Prozent",
+        "Ende SOC Prozent",
+        "Verbrauch Prozentpunkte",
+        "Verbrauch kWh",
+        "Packmessung kWh",
+        "SOC-Schätzung kWh",
+        "Durchschnitt kW",
+        "Spitze kW",
+        "Messabdeckung Prozent",
+        "Methode",
+        "Quelle",
+        "Ort",
+    ])
+    for sitzung in sitzungen:
+        writer.writerow([
+            sitzung["datum"],
+            sitzung["titel"],
+            sitzung["zeitraum"],
+            sitzung["dauer_s"],
+            sitzung["start_soc"],
+            sitzung["ende_soc"],
+            sitzung["soc_verlust"],
+            sitzung["verbrauch_kwh"],
+            sitzung["pack_energie_kwh"],
+            sitzung["soc_energie_kwh"],
+            sitzung["durchschnitt_kw"],
+            sitzung["spitze_kw"],
+            sitzung["messabdeckung_prozent"],
+            sitzung["methode"],
+            sitzung["quelle"],
+            sitzung["adresse"],
+        ])
+    antwort = Response(
+        "\ufeff" + ausgabe.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+    )
+    antwort.headers["Content-Disposition"] = (
+        "attachment; filename=v2l-statistik.csv"
+    )
+    return antwort
 
 
 @app.route("/statistik")

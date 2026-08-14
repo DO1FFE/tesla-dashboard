@@ -36,6 +36,8 @@
         "sameAs": project_url
     } | tojson }}
     </script>
+{% elif request.path == '/v2l' %}
+    <meta name="robots" content="noindex, nofollow">
 {% else %}
     <meta name="robots" content="noindex, follow">
 {% endif %}
