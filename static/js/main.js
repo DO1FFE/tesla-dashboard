@@ -1253,7 +1253,7 @@ function handleData(data) {
     );
     updateTPMS(vehicle);
     updateReifendruckDetails(vehicle);
-    updateOpenings(vehicle, charge, drive.shift_state);
+    updateOpenings(vehicle, charge);
     updateMediaPlayer(vehicle.media_info);
     var alarm = data.alarm_state;
     if (alarm == null && vehicle.alarm_state != null) {
@@ -2162,17 +2162,15 @@ function updateReifendruckDetails(vehicle) {
     $details.html(html).show();
 }
 
-function updateBrakeLights(vehicle, shiftState) {
+function updateBrakeLights(vehicle) {
     var $lights = $('#brake-lights');
     if (!$lights.length) {
         return;
     }
     vehicle = vehicle || {};
-    var pedalAktiv = istAktiv(vehicle.brake_pedal);
     var bremsdruck = parseNumber(vehicle.brake_pedal_pos);
-    var gang = normalizeShiftState(shiftState);
-    var druckbremseAktiv = gang !== 'P' && bremsdruck != null && bremsdruck > 0.1;
-    var aktiv = pedalAktiv || druckbremseAktiv;
+    // Der analoge ESP-Druck schwankt auch ohne Betätigung des Bremspedals.
+    var aktiv = istAktiv(vehicle.brake_pedal);
     var titel = aktiv ? 'Bremslicht an' : 'Bremslicht aus';
     if (bremsdruck != null) {
         titel += ' · Bremsdruck ' + bremsdruck.toFixed(1);
@@ -2184,7 +2182,7 @@ function updateBrakeLights(vehicle, shiftState) {
     $lights.find('title').text(titel);
 }
 
-function updateOpenings(vehicle, charge, shiftState) {
+function updateOpenings(vehicle, charge) {
     var parts = [
         {key: 'df', id: 'door-fl'},
         {key: 'dr', id: 'door-rl'},
@@ -2248,7 +2246,7 @@ function updateOpenings(vehicle, charge, shiftState) {
 
     var charging = charge && charge.charging_state === 'Charging';
     $('#charge-cable').toggleClass('charging', charging);
-    updateBrakeLights(vehicle, shiftState);
+    updateBrakeLights(vehicle);
 }
 
 var MAX_SPEED = 250;

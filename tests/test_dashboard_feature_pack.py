@@ -167,14 +167,16 @@ def test_fensterdarstellung_markiert_offene_fenster_nur_gruen():
     assert "transform-origin: right center;" not in css
 
 
-def test_bremslicht_ignoriert_druckrauschen_in_parkstellung():
+def test_bremslicht_wertet_nur_digitalen_pedalstatus_aus():
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
+    funktion = js.split("function updateBrakeLights", 1)[1].split(
+        "function updateOpenings", 1
+    )[0]
 
-    assert "updateOpenings(vehicle, charge, drive.shift_state)" in js
-    assert "function updateBrakeLights(vehicle, shiftState)" in js
-    assert "var gang = normalizeShiftState(shiftState);" in js
-    assert "var druckbremseAktiv = gang !== 'P'" in js
-    assert "var aktiv = pedalAktiv || druckbremseAktiv;" in js
+    assert "updateOpenings(vehicle, charge)" in js
+    assert "var aktiv = istAktiv(vehicle.brake_pedal);" in funktion
+    assert "var bremsdruck = parseNumber(vehicle.brake_pedal_pos);" in funktion
+    assert "bremsdruck >" not in funktion
 
 
 def test_technische_packdetails_sind_in_ui_eingebunden():
