@@ -1690,14 +1690,35 @@ def test_fleet_telemetrie_reichert_tpms_und_spiegel_aus_rohdaten_an():
             "RearDefrostEnabled": True,
         },
         "vehicle_state": {},
-        "climate_state": {},
+        "climate_state": {
+            "is_rear_defroster_on": False,
+            "side_mirror_heaters": False,
+        },
     }
 
     app._fleet_telemetrie_rohdaten_anreichern(daten)
 
     assert daten["vehicle_state"]["tpms_pressure_fl"] == 2.95
     assert daten["vehicle_state"]["tpms_last_seen_pressure_time_fl"] == 1781412111000
+    assert daten["climate_state"]["is_rear_defroster_on"] is True
     assert daten["climate_state"]["side_mirror_heaters"] is True
+
+
+def test_fleet_telemetrie_reichert_ungültige_scheibenheizung_als_unbekannt_an():
+    daten = {
+        "fleet_telemetry_raw": {
+            "RearDefrostEnabled": {"invalid": True},
+        },
+        "climate_state": {
+            "is_rear_defroster_on": True,
+            "side_mirror_heaters": True,
+        },
+    }
+
+    app._fleet_telemetrie_rohdaten_anreichern(daten)
+
+    assert daten["climate_state"]["is_rear_defroster_on"] is None
+    assert daten["climate_state"]["side_mirror_heaters"] is None
 
 
 def test_fleet_telemetrie_reichert_lüfterstufe_null_aus_rohdaten_an():
@@ -2530,6 +2551,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
                 "RouteLine": {"interval_seconds": 1},
                 "RouteTrafficMinutesDelay": {"interval_seconds": 60},
                 "RdWindow": {"interval_seconds": 60},
+                "RearDefrostEnabled": {"interval_seconds": 60},
                 "RpWindow": {"interval_seconds": 60},
                 "SeatHeaterLeft": {"interval_seconds": 60},
                 "SeatHeaterRearCenter": {"interval_seconds": 60},
@@ -2580,6 +2602,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert live_fields["RouteLine"]["interval_seconds"] == 10
     assert live_fields["RouteTrafficMinutesDelay"]["interval_seconds"] == 5
     assert live_fields["RdWindow"]["interval_seconds"] == 10
+    assert live_fields["RearDefrostEnabled"]["interval_seconds"] == 10
     assert live_fields["RpWindow"]["interval_seconds"] == 10
     assert live_fields["SeatHeaterLeft"]["interval_seconds"] == 10
     assert live_fields["SeatHeaterRearCenter"]["interval_seconds"] == 10
@@ -2613,6 +2636,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert erweitert_fields["ModuleTempMax"]["interval_seconds"] == 60
     assert erweitert_fields["ModuleTempMin"]["interval_seconds"] == 60
     assert erweitert_fields["FdWindow"]["interval_seconds"] == 10
+    assert erweitert_fields["RearDefrostEnabled"]["interval_seconds"] == 10
     assert erweitert_fields["SeatHeaterRearRight"]["interval_seconds"] == 10
     assert erweitert_fields["VehicleName"]["interval_seconds"] == 60
     assert all(
@@ -2636,6 +2660,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert fields["DCDCEnable"]["interval_seconds"] == 60
     assert fields["ChargeState"]["interval_seconds"] == 10
     assert fields["FdWindow"]["interval_seconds"] == 10
+    assert fields["RearDefrostEnabled"]["interval_seconds"] == 10
     assert fields["SeatHeaterRearRight"]["interval_seconds"] == 10
     assert fields["VehicleSpeed"]["interval_seconds"] == 10
     assert "minimum_delta" not in fields["VehicleSpeed"]
@@ -2652,6 +2677,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "minimum_delta" not in charging_fields["BatteryLevel"]
     assert charging_fields["BatteryHeaterOn"]["interval_seconds"] == 10
     assert charging_fields["FdWindow"]["interval_seconds"] == 10
+    assert charging_fields["RearDefrostEnabled"]["interval_seconds"] == 10
     assert charging_fields["HvacLeftTemperatureRequest"]["interval_seconds"] == 10
     assert charging_fields["HvacRightTemperatureRequest"]["interval_seconds"] == 10
     assert charging_fields["SeatHeaterRearRight"]["interval_seconds"] == 10
@@ -3949,6 +3975,66 @@ def test_fleet_telemetrie_profile_merkt_tatsaechlichen_versand(monkeypatch):
     status = app._fleet_telemetry_profile_status
     assert status["last_posted_profile"] == "live"
     assert status["last_posted_at"] == 2000.0
+    assert (
+        status["config_revision"]
+        == app.FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION
+    )
+
+
+def test_fleet_telemetrie_alte_profildefinition_wird_neu_gesendet(
+    monkeypatch,
+    tmp_path,
+):
+    statusdatei = tmp_path / "telemetry-profile-status.json"
+    statusdatei.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        app,
+        "TESLA_FLEET_TELEMETRY_PROFILE_STATUS_FILE",
+        str(statusdatei),
+    )
+
+    status = app._fleet_telemetrie_profile_status_laden()
+    status.update({
+        "config_synced": True,
+        "config_sync_state": "synced",
+        "config_sync_profile": "live",
+    })
+
+    assert status["config_revision"] is None
+    assert not app._fleet_telemetrie_profile_api_sync_bestaetigt(status, "live")
+
+
+def test_fleet_telemetrie_alte_profildefinition_fordert_profil_neu_an(
+    monkeypatch,
+):
+    angefordert = []
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: True)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        angefordert.append,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        _bestaetigter_profilstatus(
+            "parked",
+            1000.0,
+            config_revision=0,
+        ),
+    )
+    daten = {
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "vehicle_state": {"is_user_present": False},
+        "climate_state": {"is_climate_on": False},
+        "charge_state": {"charging_state": "Disconnected"},
+    }
+
+    app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    assert angefordert == ["parked"]
+    assert app._fleet_telemetry_profile_status["config_sync_state"] == "pending"
 
 
 def test_fleet_telemetrie_profile_pending_prueft_vor_timeout_nur_sync(monkeypatch):

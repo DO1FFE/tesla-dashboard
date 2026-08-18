@@ -1940,6 +1940,7 @@ _fleet_telemetry_queue_verworfen = 0
 _fleet_telemetry_queue_warnung = 0.0
 FLEET_TELEMETRIE_PROFILE = {"live", "live_extended", "parked", "charging"}
 FLEET_TELEMETRIE_PROFILE_STANDARD = "live"
+FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 1
 FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS = max(
     0.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_PARK_PROFILE_DELAY_SECONDS", "120")),
@@ -2086,6 +2087,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_10S_FELDER = frozenset({
     "Locked",
     "OutsideTemp",
     "RdWindow",
+    "RearDefrostEnabled",
     "RouteLine",
     "RpWindow",
     "SeatHeaterLeft",
@@ -2153,6 +2155,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_FELDER = frozenset({
     "PedalPosition",
     "RatedRange",
     "RdWindow",
+    "RearDefrostEnabled",
     "RouteLine",
     "RouteTrafficMinutesDelay",
     "RpWindow",
@@ -2243,6 +2246,7 @@ FLEET_TELEMETRIE_PROFILE_PARKED_10S_FELDER = frozenset({
     "Locked",
     "PedalPosition",
     "RdWindow",
+    "RearDefrostEnabled",
     "RpWindow",
     "SeatHeaterLeft",
     "SeatHeaterRearCenter",
@@ -2269,7 +2273,6 @@ FLEET_TELEMETRIE_PROFILE_PARKED_60S_FELDER = frozenset({
     "HvacSteeringWheelHeatLevel",
     "IdealBatteryRange",
     "RatedRange",
-    "RearDefrostEnabled",
     "Soc",
     "TpmsHardWarnings",
     "TpmsPressureFl",
@@ -2311,6 +2314,7 @@ FLEET_TELEMETRIE_PROFILE_CHARGING_10S_FELDER = frozenset({
     "PackCurrent",
     "PackVoltage",
     "RdWindow",
+    "RearDefrostEnabled",
     "RpWindow",
     "SeatHeaterLeft",
     "SeatHeaterRearCenter",
@@ -2344,7 +2348,6 @@ FLEET_TELEMETRIE_PROFILE_CHARGING_30S_FELDER = frozenset({
     "OutsideTemp",
     "PedalPosition",
     "RatedRange",
-    "RearDefrostEnabled",
     "WiperHeatEnabled",
 })
 FLEET_TELEMETRIE_PROFILE_CHARGING_60S_FELDER = frozenset({
@@ -2389,6 +2392,7 @@ def _fleet_telemetrie_profile_status_standard():
         "config_sync_updated_at": 0.0,
         "config_sync_error": None,
         "config_sync_details": [],
+        "config_revision": FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION,
         "live_stable_since": 0.0,
         "live_unstable_since": 0.0,
         "charging_observed": None,
@@ -2435,6 +2439,7 @@ def _fleet_telemetrie_profile_status_laden():
         return status
     if not isinstance(geladen, dict):
         return status
+    status["config_revision"] = geladen.get("config_revision")
     for key in ("current", "target"):
         value = geladen.get(key)
         if value in FLEET_TELEMETRIE_PROFILE:
@@ -5878,10 +5883,12 @@ def _fleet_telemetrie_rohdaten_anreichern(data):
     for source, target in FLEET_TELEMETRIE_TPMS_ZEITFELDER.items():
         if source in raw and vehicle_state.get(target) is None:
             vehicle_state[target] = _fleet_telemetrie_zeitstempel_ms(raw.get(source))
-    if "RearDefrostEnabled" in raw and climate.get("side_mirror_heaters") is None:
-        climate["side_mirror_heaters"] = _fleet_telemetrie_wahr(
+    if "RearDefrostEnabled" in raw:
+        heckscheibenheizung = _fleet_telemetrie_optional_wahr(
             raw.get("RearDefrostEnabled")
         )
+        climate["is_rear_defroster_on"] = heckscheibenheizung
+        climate["side_mirror_heaters"] = heckscheibenheizung
     if climate.get("fan_status") is None:
         for feld in ("HvacFanSpeed", "HvacFanStatus"):
             if feld not in raw:
@@ -6747,7 +6754,11 @@ def _fleet_telemetrie_profile_api_sync_bestaetigt(status, profil):
     if not isinstance(status, dict) or profil not in FLEET_TELEMETRIE_PROFILE:
         return False
     return (
-        status.get("config_synced") is True
+        status.get(
+            "config_revision",
+            FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION,
+        ) == FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION
+        and status.get("config_synced") is True
         and str(status.get("config_sync_state") or "").lower() == "synced"
         and status.get("config_sync_profile") == profil
     )
@@ -6879,6 +6890,7 @@ def _fleet_telemetrie_profile_versand_vermerken(profil, jetzt=None):
         status = _fleet_telemetry_profile_status
         status["last_posted_profile"] = profil
         status["last_posted_at"] = jetzt
+        status["config_revision"] = FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION
         status["updated_at"] = jetzt
         _fleet_telemetrie_profile_status_speichern()
     return True
@@ -8293,8 +8305,9 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         climate["timestamp"] = timestamp_ms
         return True
     if field == "RearDefrostEnabled":
-        climate["is_rear_defroster_on"] = _fleet_telemetrie_wahr(value)
-        climate["side_mirror_heaters"] = climate["is_rear_defroster_on"]
+        heckscheibenheizung = _fleet_telemetrie_optional_wahr(value)
+        climate["is_rear_defroster_on"] = heckscheibenheizung
+        climate["side_mirror_heaters"] = heckscheibenheizung
         climate["timestamp"] = timestamp_ms
         return True
     if field == "WiperHeatEnabled":
