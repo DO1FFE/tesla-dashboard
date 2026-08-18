@@ -78,7 +78,7 @@ function hasNewTeslaDisplayFingerprint() {
     var screenWidth = Number(window.screen && window.screen.width);
     var screenHeight = Number(window.screen && window.screen.height);
     if (
-        !isFinite(dpr) || dpr < 1.45 || dpr > 1.65 ||
+        !isFinite(dpr) || dpr < 1.30 || dpr > 1.65 ||
         touchPoints < 1 ||
         !isFinite(screenWidth) || !isFinite(screenHeight) ||
         screenWidth <= 0 || screenHeight <= 0
