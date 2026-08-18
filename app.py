@@ -13863,6 +13863,7 @@ def _client_detail_liste(now=None):
                 "browser": data.get("browser"),
                 "os": data.get("os"),
                 "user_agent": data.get("user_agent"),
+                "browser_diagnostics": data.get("browser_diagnostics"),
                 # Return list of visited pages so clients can format them
                 "pages": pages,
                 "duration": _client_dauer_text(delta),
@@ -13904,6 +13905,93 @@ def api_clients():
 def api_client_details():
     """Return detailed information about connected clients."""
     return jsonify({"clients": _client_detail_liste()})
+
+
+def _browser_diagnose_zahl(value, maximum):
+    """Normalisiere eine begrenzte Zahl aus der Browserdiagnose."""
+
+    from math import isfinite
+
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not isfinite(number) or number < 0 or number > maximum:
+        return None
+    if number.is_integer():
+        return int(number)
+    return round(number, 4)
+
+
+def _browser_diagnose_abschnitt(payload, name, fields):
+    """Übernimm nur bekannte und plausible Messwerte eines Abschnitts."""
+
+    source = payload.get(name)
+    if not isinstance(source, dict):
+        return None
+    result = {}
+    for field, maximum in fields.items():
+        value = _browser_diagnose_zahl(source.get(field), maximum)
+        if value is not None:
+            result[field] = value
+    return result or None
+
+
+@csrf.exempt
+@app.route("/api/browser-diagnostics", methods=["POST"])
+def api_browser_diagnostics():
+    """Speichere technische Browsermaße beim aktiven Client."""
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Ungültige Browserdiagnose"}), 400
+
+    diagnose = {
+        "erfasst_am": datetime.now(timezone.utc).isoformat(),
+        "erkannt": payload.get("erkannt") is True,
+        "desktop_ansicht_aktiv": payload.get("desktop_ansicht_aktiv") is True,
+        "device_pixel_ratio": _browser_diagnose_zahl(
+            payload.get("device_pixel_ratio"), 10
+        ),
+        "touchpunkte": _browser_diagnose_zahl(payload.get("touchpunkte"), 100),
+        "bildschirm": _browser_diagnose_abschnitt(
+            payload,
+            "bildschirm",
+            {"breite": 10000, "hoehe": 10000},
+        ),
+        "fenster": _browser_diagnose_abschnitt(
+            payload,
+            "fenster",
+            {
+                "breite": 10000,
+                "hoehe": 10000,
+                "aussen_breite": 10000,
+                "aussen_hoehe": 10000,
+            },
+        ),
+        "sichtbereich": _browser_diagnose_abschnitt(
+            payload,
+            "sichtbereich",
+            {"breite": 10000, "hoehe": 10000, "skalierung": 10},
+        ),
+        "dokument": _browser_diagnose_abschnitt(
+            payload,
+            "dokument",
+            {"breite": 20000, "hoehe": 100000},
+        ),
+    }
+    dokument = payload.get("dokument")
+    if isinstance(dokument, dict) and isinstance(dokument.get("css_zoom"), str):
+        diagnose["dokument"] = diagnose.get("dokument") or {}
+        diagnose["dokument"]["css_zoom"] = dokument["css_zoom"][:16]
+
+    client_schlüssel = getattr(g, "client_tracking_schlüssel", None)
+    info = active_clients.get(client_schlüssel)
+    if info is not None:
+        info["browser_diagnostics"] = diagnose
+    return "", 204
 
 
 @app.route("/api/ptt/diagnostics")

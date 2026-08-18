@@ -41,14 +41,35 @@ function hasTeslaUaData() {
     });
 }
 
-function hasNewTeslaDisplayFingerprint() {
-    var ua = '';
+function getTeslaBrowserUserAgent() {
     try {
-        ua = navigator.userAgent || '';
+        return navigator.userAgent || '';
     } catch (err) {
-        ua = '';
+        return '';
     }
-    if (!/Linux; Android 10; K/i.test(ua) || !/Mobile Safari\/537\.36/i.test(ua)) {
+}
+
+function hasUpdatedTeslaLinuxUserAgent(ua) {
+    return (
+        /\(X11; Linux x86_64\)/i.test(ua) &&
+        /Chrome\/(?:14[8-9]|1[5-9][0-9])\.0\.0\.0/i.test(ua) &&
+        /Safari\/537\.36/i.test(ua)
+    );
+}
+
+function hasReducedTeslaAndroidUserAgent(ua) {
+    return (
+        /Linux; Android 10; K/i.test(ua) &&
+        /Mobile Safari\/537\.36/i.test(ua)
+    );
+}
+
+function hasNewTeslaDisplayFingerprint() {
+    var ua = getTeslaBrowserUserAgent();
+    if (
+        !hasUpdatedTeslaLinuxUserAgent(ua) &&
+        !hasReducedTeslaAndroidUserAgent(ua)
+    ) {
         return false;
     }
 
@@ -58,7 +79,7 @@ function hasNewTeslaDisplayFingerprint() {
     var screenHeight = Number(window.screen && window.screen.height);
     if (
         !isFinite(dpr) || dpr < 1.45 || dpr > 1.65 ||
-        touchPoints < 12 ||
+        touchPoints < 1 ||
         !isFinite(screenWidth) || !isFinite(screenHeight) ||
         screenWidth <= 0 || screenHeight <= 0
     ) {
@@ -80,18 +101,28 @@ function isTeslaBrowser() {
     if (hasTeslaUaData()) {
         return true;
     }
-    var ua = '';
-    try {
-        ua = navigator.userAgent || '';
-    } catch (err) {
-        ua = '';
-    }
+    var ua = getTeslaBrowserUserAgent();
     return (
         /Tesla\//i.test(ua) ||
         /TeslaBrowser/i.test(ua) ||
         /QtCarBrowser/i.test(ua) ||
         hasNewTeslaDisplayFingerprint()
     );
+}
+
+function setTeslaDesktopScale(scale) {
+    var applyScale = function() {
+        if (!document.body) {
+            return;
+        }
+        document.body.style.zoom = scale.toFixed(6);
+    };
+
+    if (document.body) {
+        applyScale();
+        return;
+    }
+    document.addEventListener('DOMContentLoaded', applyScale, {once: true});
 }
 
 function applyTeslaDesktopViewport() {
@@ -103,12 +134,12 @@ function applyTeslaDesktopViewport() {
     }
 
     var dpr = Number(window.devicePixelRatio || 1);
-    var screenWidth = Number(window.screen && window.screen.width);
-    if (!isFinite(dpr) || dpr <= 1.1 || !isFinite(screenWidth) || screenWidth <= 0) {
+    var innerWidth = Number(window.innerWidth || 0);
+    if (!isFinite(dpr) || dpr <= 1.1 || !isFinite(innerWidth) || innerWidth <= 0) {
         return false;
     }
 
-    var desktopWidth = Math.round(screenWidth * dpr);
+    var desktopWidth = Math.round(innerWidth * dpr);
     if (desktopWidth < 1000) {
         return false;
     }
@@ -117,19 +148,87 @@ function applyTeslaDesktopViewport() {
     if (!viewport) {
         return false;
     }
-    var initialScale = Math.min(1, 1 / dpr);
+    var desktopScale = Math.min(1, 1 / dpr);
     viewport.setAttribute(
         'content',
-        'width=' + desktopWidth +
-        ', initial-scale=' + initialScale.toFixed(4) +
-        ', viewport-fit=cover'
+        'width=device-width, initial-scale=1, viewport-fit=cover'
     );
 
     var root = document.documentElement;
     root.classList.add('tesla-browser', 'tesla-desktop-viewport');
     root.setAttribute('data-tesla-device-pixel-ratio', dpr.toFixed(2));
     root.setAttribute('data-tesla-desktop-width', String(desktopWidth));
+    root.setAttribute('data-tesla-desktop-scale', desktopScale.toFixed(4));
+    setTeslaDesktopScale(desktopScale);
     return true;
+}
+
+function isPotentialUpdatedTeslaBrowser() {
+    var ua = getTeslaBrowserUserAgent();
+    return (
+        /Tesla\/|TeslaBrowser|QtCarBrowser/i.test(ua) ||
+        hasTeslaUaData() ||
+        (
+            Number(navigator.maxTouchPoints || 0) > 0 &&
+            (
+                hasUpdatedTeslaLinuxUserAgent(ua) ||
+                hasReducedTeslaAndroidUserAgent(ua)
+            )
+        )
+    );
+}
+
+function sendTeslaBrowserDiagnostics(viewportApplied) {
+    if (!isPotentialUpdatedTeslaBrowser() || typeof window.fetch !== 'function') {
+        return;
+    }
+
+    var send = function() {
+        var visualViewport = window.visualViewport;
+        var body = document.body;
+        var payload = {
+            erkannt: isTeslaBrowser(),
+            desktop_ansicht_aktiv: Boolean(viewportApplied),
+            device_pixel_ratio: Number(window.devicePixelRatio || 1),
+            touchpunkte: Number(navigator.maxTouchPoints || 0),
+            bildschirm: {
+                breite: Number(window.screen && window.screen.width) || 0,
+                hoehe: Number(window.screen && window.screen.height) || 0
+            },
+            fenster: {
+                breite: Number(window.innerWidth || 0),
+                hoehe: Number(window.innerHeight || 0),
+                aussen_breite: Number(window.outerWidth || 0),
+                aussen_hoehe: Number(window.outerHeight || 0)
+            },
+            sichtbereich: visualViewport ? {
+                breite: Number(visualViewport.width || 0),
+                hoehe: Number(visualViewport.height || 0),
+                skalierung: Number(visualViewport.scale || 1)
+            } : null,
+            dokument: body ? {
+                breite: Number(body.offsetWidth || 0),
+                hoehe: Number(body.offsetHeight || 0),
+                css_zoom: String(body.style.zoom || '')
+            } : null
+        };
+
+        window.fetch('/api/browser-diagnostics', {
+            method: 'POST',
+            credentials: 'same-origin',
+            keepalive: true,
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        }).catch(function() {});
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            window.setTimeout(send, 0);
+        }, {once: true});
+        return;
+    }
+    window.setTimeout(send, 0);
 }
 
 window.isTeslaSelectForced = isTeslaSelectForced;
@@ -137,7 +236,8 @@ window.isTeslaBrowser = isTeslaBrowser;
 window.hasNewTeslaDisplayFingerprint = hasNewTeslaDisplayFingerprint;
 window.applyTeslaDesktopViewport = applyTeslaDesktopViewport;
 
-applyTeslaDesktopViewport();
+var teslaDesktopViewportApplied = applyTeslaDesktopViewport();
+sendTeslaBrowserDiagnostics(teslaDesktopViewportApplied);
 window.addEventListener('orientationchange', function() {
     window.setTimeout(applyTeslaDesktopViewport, 0);
 });

@@ -197,3 +197,93 @@ def test_bekannter_browser_aktualisiert_seine_ip(monkeypatch):
         assert daten["provider"] == "anbieter-198.51.100.25"
     finally:
         app.active_clients.clear()
+
+
+def test_browserdiagnose_wird_beim_client_gespeichert(monkeypatch):
+    monkeypatch.setattr(app, "_cached_hostname", lambda _ip: "")
+    monkeypatch.setattr(app, "lookup_location", lambda _ip: "")
+    monkeypatch.setattr(app, "lookup_provider", lambda _ip: "")
+    app.active_clients.clear()
+    client = app.app.test_client()
+    payload = {
+        "erkannt": True,
+        "desktop_ansicht_aktiv": True,
+        "device_pixel_ratio": 1.53,
+        "touchpunkte": 16,
+        "bildschirm": {"breite": 784, "hoehe": 1254},
+        "fenster": {
+            "breite": 773,
+            "hoehe": 601,
+            "aussen_breite": 784,
+            "aussen_hoehe": 1254,
+        },
+        "sichtbereich": {
+            "breite": 773,
+            "hoehe": 601,
+            "skalierung": 1,
+        },
+        "dokument": {
+            "breite": 1183,
+            "hoehe": 2500,
+            "css_zoom": "0.653595",
+        },
+    }
+
+    try:
+        response = client.post(
+            "/api/browser-diagnostics",
+            json=payload,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/148.0.0.0 Safari/537.36"
+                )
+            },
+            environ_base={"REMOTE_ADDR": "203.0.113.10"},
+        )
+        details = client.get("/api/clients/details").get_json()["clients"]
+    finally:
+        app.active_clients.clear()
+
+    assert response.status_code == 204
+    diagnose = next(
+        item["browser_diagnostics"]
+        for item in details
+        if item["browser_diagnostics"] is not None
+    )
+    assert diagnose["desktop_ansicht_aktiv"] is True
+    assert diagnose["device_pixel_ratio"] == 1.53
+    assert diagnose["bildschirm"] == {"breite": 784, "hoehe": 1254}
+    assert diagnose["dokument"]["css_zoom"] == "0.653595"
+
+
+def test_browserdiagnose_verwirft_unplausible_zahlen(monkeypatch):
+    monkeypatch.setattr(app, "_cached_hostname", lambda _ip: "")
+    monkeypatch.setattr(app, "lookup_location", lambda _ip: "")
+    monkeypatch.setattr(app, "lookup_provider", lambda _ip: "")
+    app.active_clients.clear()
+    client = app.app.test_client()
+
+    try:
+        response = client.post(
+            "/api/browser-diagnostics",
+            json={
+                "device_pixel_ratio": "unendlich",
+                "touchpunkte": -1,
+                "bildschirm": {"breite": 999999, "hoehe": 1254},
+            },
+        )
+        details = client.get("/api/clients/details").get_json()["clients"]
+    finally:
+        app.active_clients.clear()
+
+    assert response.status_code == 204
+    diagnose = next(
+        item["browser_diagnostics"]
+        for item in details
+        if item["browser_diagnostics"] is not None
+    )
+    assert diagnose["device_pixel_ratio"] is None
+    assert diagnose["touchpunkte"] is None
+    assert diagnose["bildschirm"] == {"hoehe": 1254}
