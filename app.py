@@ -6228,11 +6228,6 @@ def _fleet_telemetrie_profile_stream_bestaetigt(data, status, profil):
     if not _fleet_telemetrie_profile_stream_nach_config_aktiv(data, status):
         return False
     if profil in {"live", "live_extended"}:
-        if (
-            status.get("current") != profil
-            and _fleet_telemetrie_profile_api_sync_bestaetigt(status, profil)
-        ):
-            return True
         return _fleet_telemetrie_profile_live_takt_bestaetigt(data, status)
     return True
 

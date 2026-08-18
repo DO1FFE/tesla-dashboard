@@ -3151,7 +3151,9 @@ def test_fleet_telemetrie_profile_wartet_vor_takt_neuversand(monkeypatch):
     assert daten["telemetry_config_synced"] is True
 
 
-def test_fleet_telemetrie_profile_wechselt_mit_api_sync_auf_live(monkeypatch):
+def test_fleet_telemetrie_profile_bestaetigt_api_sync_nicht_bei_10s_takt(
+    monkeypatch,
+):
     angefordert = []
 
     monkeypatch.setattr(app.time, "time", lambda: 2300.0)
@@ -3205,15 +3207,15 @@ def test_fleet_telemetrie_profile_wechselt_mit_api_sync_auf_live(monkeypatch):
     daten = app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
 
     assert angefordert == []
-    assert daten["telemetry_profile"] == "live"
+    assert daten["telemetry_profile"] == "parked"
     assert daten["telemetry_profile_target"] == "live"
     assert daten["telemetry_config_synced"] is True
     assert daten["telemetry_config_sync_state"] == "synced"
-    assert app._fleet_telemetry_profile_status["current"] == "live"
+    assert app._fleet_telemetry_profile_status["current"] == "parked"
     assert app._fleet_telemetry_profile_status["config_sync_details"] == [{
         "vin": "TESTVIN",
         "synced": True,
-        "source": "telemetry_stream",
+        "limit_reached": False,
     }]
 
 
@@ -4063,7 +4065,23 @@ def test_fleet_telemetrie_profile_prueft_nach_wechsel_schnell(monkeypatch):
     assert app._fleet_telemetry_profile_status["last_sent"] == 1000.0
 
 
-def test_fleet_telemetrie_profile_sendet_in_schnellphase_erneut(monkeypatch):
+@pytest.mark.parametrize(
+    ("config_synced", "config_sync_state", "config_sync_details"),
+    [
+        (False, "pending", []),
+        (
+            True,
+            "synced",
+            [{"vin": "TESTVIN", "synced": True, "limit_reached": False}],
+        ),
+    ],
+)
+def test_fleet_telemetrie_profile_sendet_in_schnellphase_erneut(
+    monkeypatch,
+    config_synced,
+    config_sync_state,
+    config_sync_details,
+):
     gesendet = []
 
     monkeypatch.setattr(app.time, "time", lambda: 1061.0)
@@ -4107,14 +4125,14 @@ def test_fleet_telemetrie_profile_sendet_in_schnellphase_erneut(monkeypatch):
             "last_sent": 1000.0,
             "last_sent_profile": "live",
             "last_error": None,
-            "config_synced": False,
+            "config_synced": config_synced,
             "config_key_paired": None,
-            "config_sync_state": "pending",
+            "config_sync_state": config_sync_state,
             "config_sync_profile": "live",
             "config_sync_checked_at": 1050.0,
             "config_sync_updated_at": 1000.0,
             "config_sync_error": None,
-            "config_sync_details": [],
+            "config_sync_details": config_sync_details,
             "updated_at": 1000.0,
         },
     )
