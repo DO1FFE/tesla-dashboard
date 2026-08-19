@@ -2028,6 +2028,22 @@ FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS = max(
     5.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MAX_AGE_SECONDS", "15")),
 )
+FLEET_TELEMETRIE_PROFILE_LIVE_NEUVERSAND_INTERVAL_SECONDS = max(
+    3.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_RESEND_INTERVAL_SECONDS", "5")),
+)
+FLEET_TELEMETRIE_PROFILE_LIVE_NEUVERSAND_STARTVERZOEGERUNG_SECONDS = max(
+    3.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_RESEND_GRACE_SECONDS", "5")),
+)
+FLEET_TELEMETRIE_PROFILE_LIVE_NEUVERSAND_BEWEGUNGSNACHLAUF_SECONDS = max(
+    FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_RESEND_MOVING_HOLD_SECONDS", "15")),
+)
+FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MAX_ALTER_SECONDS = max(
+    2.0,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_CONFIRM_MAX_AGE_SECONDS", "3")),
+)
 FLEET_TELEMETRIE_PROFILE_LIVE_TAKT_PRUEFVERZOEGERUNG_SECONDS = max(
     FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS,
     float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_CADENCE_GRACE_SECONDS", "20")),
@@ -2395,6 +2411,11 @@ def _fleet_telemetrie_profile_status_standard():
         "config_revision": FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION,
         "live_stable_since": 0.0,
         "live_unstable_since": 0.0,
+        "live_retry_active": False,
+        "live_retry_started_at": 0.0,
+        "live_retry_last_moving_at": 0.0,
+        "live_retry_confirmed_at": 0.0,
+        "live_retry_attempts": 0,
         "charging_observed": None,
         "post_charge_live_since": 0.0,
         "post_charge_live_until": 0.0,
@@ -2451,6 +2472,9 @@ def _fleet_telemetrie_profile_status_laden():
         "updated_at",
         "live_stable_since",
         "live_unstable_since",
+        "live_retry_started_at",
+        "live_retry_last_moving_at",
+        "live_retry_confirmed_at",
         "post_charge_live_since",
         "post_charge_live_until",
     ):
@@ -2459,6 +2483,15 @@ def _fleet_telemetrie_profile_status_laden():
         except Exception:
             continue
         status[key] = value
+    if isinstance(geladen.get("live_retry_active"), bool):
+        status["live_retry_active"] = geladen.get("live_retry_active")
+    try:
+        status["live_retry_attempts"] = max(
+            0,
+            int(geladen.get("live_retry_attempts") or 0),
+        )
+    except (TypeError, ValueError):
+        pass
     if geladen.get("last_sent_profile") in FLEET_TELEMETRIE_PROFILE:
         status["last_sent_profile"] = geladen.get("last_sent_profile")
     if geladen.get("last_posted_profile") in FLEET_TELEMETRIE_PROFILE:
@@ -6109,7 +6142,7 @@ def _fleet_telemetrie_profile_stream_nach_config_aktiv(data, status):
     return max(zeitpunkte) > letzter_versand
 
 
-def _fleet_telemetrie_profile_live_takt_bestaetigt(data, status):
+def _fleet_telemetrie_profile_live_takt_bestaetigt(data, status, jetzt=None):
     """Prüfe, ob schnelle Live-Felder nach dem Config-Senden eintreffen."""
 
     letzter_versand = _as_float(status.get("last_sent"))
@@ -6117,8 +6150,13 @@ def _fleet_telemetrie_profile_live_takt_bestaetigt(data, status):
         return False
     empfangen = data.get("fleet_telemetry_field_received_at")
     vorher = data.get("fleet_telemetry_field_previous_received_at")
-    if not isinstance(empfangen, dict) or not isinstance(vorher, dict):
+    abstände = data.get("fleet_telemetry_field_interval_ms")
+    if not isinstance(empfangen, dict):
         return False
+    if not isinstance(vorher, dict):
+        vorher = {}
+    if not isinstance(abstände, dict):
+        abstände = {}
     schnelle_felder = 0
     schnelle_fahrfelder = 0
     for feld in FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNGSFELDER:
@@ -6130,10 +6168,24 @@ def _fleet_telemetrie_profile_live_takt_bestaetigt(data, status):
             vorher.get(feld),
             letzter_versand,
         )
-        if letzter is None or vorletzter is None:
+        if letzter is None:
+            continue
+        if vorletzter is None:
+            intervall_ms = _as_float(abstände.get(feld))
+            if intervall_ms is not None:
+                vorletzter = letzter - (intervall_ms / 1000.0)
+        if vorletzter is None:
             continue
         if vorletzter < letzter_versand or letzter < letzter_versand:
             continue
+        if jetzt is not None:
+            alter = float(jetzt) - letzter
+            if (
+                alter < 0
+                or alter
+                > FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MAX_ALTER_SECONDS
+            ):
+                continue
         abstand = letzter - vorletzter
         if (
             abstand >= FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MIN_ABSTAND_SECONDS
@@ -6145,6 +6197,23 @@ def _fleet_telemetrie_profile_live_takt_bestaetigt(data, status):
     if _fleet_telemetrie_profile_fahrzeug_fährt(data) and schnelle_fahrfelder < 1:
         return False
     return schnelle_felder >= FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MIN_FELDER
+
+
+def _fleet_telemetrie_profile_live_neuversand_fahrt_aktuell(status, jetzt):
+    """Prüfe, ob eine laufende Live-Reparatur noch Fahrbewegung sieht."""
+
+    if not isinstance(status, dict) or status.get("live_retry_active") is not True:
+        return False
+    if status.get("target") != "live":
+        return False
+    letzte_bewegung = _as_float(status.get("live_retry_last_moving_at"))
+    if letzte_bewegung is None or letzte_bewegung <= 0:
+        return False
+    alter = float(jetzt) - letzte_bewegung
+    return (
+        0 <= alter
+        <= FLEET_TELEMETRIE_PROFILE_LIVE_NEUVERSAND_BEWEGUNGSNACHLAUF_SECONDS
+    )
 
 
 def _fleet_telemetrie_profile_live_takt_stabil(data, jetzt=None):
@@ -6226,7 +6295,12 @@ def _fleet_telemetrie_profile_fahrzeug_bewegt_sich(data, jetzt=None):
     )
 
 
-def _fleet_telemetrie_profile_stream_bestaetigt(data, status, profil):
+def _fleet_telemetrie_profile_stream_bestaetigt(
+    data,
+    status,
+    profil,
+    jetzt=None,
+):
     """Prüfe, ob der Stream das gesendete Profil belastbar bestätigt."""
 
     letztes_profil = status.get("last_posted_profile")
@@ -6235,7 +6309,11 @@ def _fleet_telemetrie_profile_stream_bestaetigt(data, status, profil):
     if not _fleet_telemetrie_profile_stream_nach_config_aktiv(data, status):
         return False
     if profil in {"live", "live_extended"}:
-        return _fleet_telemetrie_profile_live_takt_bestaetigt(data, status)
+        return _fleet_telemetrie_profile_live_takt_bestaetigt(
+            data,
+            status,
+            jetzt,
+        )
     return True
 
 
@@ -6293,6 +6371,20 @@ def _fleet_telemetrie_profile_status_an_daten(data):
     data["telemetry_config_sync_checked_at"] = status.get("config_sync_checked_at")
     data["telemetry_config_sync_updated_at"] = status.get("config_sync_updated_at")
     data["telemetry_config_sync_error"] = status.get("config_sync_error")
+    data["telemetry_live_retry_active"] = status.get("live_retry_active") is True
+    data["telemetry_live_retry_moving"] = (
+        _fleet_telemetrie_profile_live_neuversand_fahrt_aktuell(
+            status,
+            time.time(),
+        )
+    )
+    data["telemetry_live_retry_started_at"] = status.get("live_retry_started_at")
+    data["telemetry_live_retry_confirmed_at"] = status.get(
+        "live_retry_confirmed_at"
+    )
+    data["telemetry_live_retry_attempts"] = int(
+        status.get("live_retry_attempts") or 0
+    )
     if status.get("last_error"):
         data["telemetry_profile_error"] = status.get("last_error")
     else:
@@ -6838,6 +6930,11 @@ def _fleet_telemetrie_profile_schnellprüfung_aktiv(status, jetzt, profil=None):
 def _fleet_telemetrie_profile_sync_check_intervall(status, jetzt, profil=None):
     """Gib das passende Prüfintervall für die aktuelle Profilbestätigung zurück."""
 
+    if (
+        profil == "live"
+        and _fleet_telemetrie_profile_live_neuversand_fahrt_aktuell(status, jetzt)
+    ):
+        return FLEET_TELEMETRIE_PROFILE_LIVE_NEUVERSAND_INTERVAL_SECONDS
     if _fleet_telemetrie_profile_schnellprüfung_aktiv(status, jetzt, profil):
         return FLEET_TELEMETRIE_PROFILE_SYNC_FAST_CHECK_INTERVAL_SECONDS
     return FLEET_TELEMETRIE_PROFILE_SYNC_CHECK_INTERVAL_SECONDS
@@ -6846,6 +6943,11 @@ def _fleet_telemetrie_profile_sync_check_intervall(status, jetzt, profil=None):
 def _fleet_telemetrie_profile_resend_intervall(status, jetzt, profil=None):
     """Gib das passende Neuversand-Intervall für unbestätigte Profile zurück."""
 
+    if (
+        profil == "live"
+        and _fleet_telemetrie_profile_live_neuversand_fahrt_aktuell(status, jetzt)
+    ):
+        return FLEET_TELEMETRIE_PROFILE_LIVE_NEUVERSAND_INTERVAL_SECONDS
     if _fleet_telemetrie_profile_schnellprüfung_aktiv(status, jetzt, profil):
         return min(
             FLEET_TELEMETRIE_PROFILE_FAST_RESEND_AFTER_SECONDS,
@@ -6891,6 +6993,10 @@ def _fleet_telemetrie_profile_versand_vermerken(profil, jetzt=None):
         status["last_posted_profile"] = profil
         status["last_posted_at"] = jetzt
         status["config_revision"] = FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION
+        if profil == "live" and status.get("live_retry_active") is True:
+            status["live_retry_attempts"] = int(
+                status.get("live_retry_attempts") or 0
+            ) + 1
         status["updated_at"] = jetzt
         _fleet_telemetrie_profile_status_speichern()
     return True
@@ -7010,12 +7116,27 @@ def _fleet_telemetrie_profile_sync_erneut_pruefen():
     jetzt = time.time()
     with _fleet_telemetry_profile_lock:
         status = _fleet_telemetry_profile_status
-        sync_state = str(status.get("config_sync_state") or "").lower()
-        profil = (
-            status.get("last_sent_profile")
-            or status.get("config_sync_profile")
-            or status.get("current")
+        live_neuversand_aktiv = (
+            _fleet_telemetrie_profile_live_neuversand_fahrt_aktuell(
+                status,
+                jetzt,
+            )
         )
+        if (
+            status.get("live_retry_active") is True
+            and status.get("target") == "live"
+            and not live_neuversand_aktiv
+        ):
+            return
+        sync_state = str(status.get("config_sync_state") or "").lower()
+        if live_neuversand_aktiv:
+            profil = "live"
+        else:
+            profil = (
+                status.get("last_sent_profile")
+                or status.get("config_sync_profile")
+                or status.get("current")
+            )
         if profil not in FLEET_TELEMETRIE_PROFILE:
             return
         if sync_state not in {"pending", "active", "error", "unknown", "synced"}:
@@ -7229,6 +7350,10 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
     ladezustand = _fleet_telemetrie_profile_ladezustand(data)
     jetzt = time.time()
     live_takt_stabil = _fleet_telemetrie_profile_live_takt_stabil(data, jetzt)
+    fahrzeug_bewegt_sich = _fleet_telemetrie_profile_fahrzeug_bewegt_sich(
+        data,
+        jetzt,
+    )
     profil_anfordern = None
     with _fleet_telemetry_profile_lock:
         status = _fleet_telemetry_profile_status
@@ -7299,6 +7424,70 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                 status_geändert = True
             live_stable_since = None
         live_takt_akzeptiert = live_takt_stabil or live_takt_toleriert
+        live_takt_bestaetigt = (
+            ziel == "live"
+            and _fleet_telemetrie_profile_live_takt_bestaetigt(
+                data,
+                status,
+                jetzt,
+            )
+        )
+        if (
+            ziel == "live"
+            and fahrzeug_bewegt_sich
+            and status.get("live_retry_active") is True
+        ):
+            if status.get("live_retry_last_moving_at") != jetzt:
+                status["live_retry_last_moving_at"] = jetzt
+                status_geändert = True
+        if status.get("live_retry_active") is True:
+            if ziel != "live":
+                status["live_retry_active"] = False
+                status_geändert = True
+            elif live_takt_bestaetigt:
+                status["live_retry_active"] = False
+                status["live_retry_confirmed_at"] = jetzt
+                status["config_sync_error"] = None
+                status_geändert = True
+                logging.info(
+                    "Fleet-Telemetry-Live-Takt nach %s Neuversandversuchen bestätigt",
+                    int(status.get("live_retry_attempts") or 0),
+                )
+        letzter_versand = float(status.get("last_sent") or 0)
+        live_neuversand_pruefbar = (
+            ziel == "live"
+            and fahrzeug_bewegt_sich
+            and not live_takt_bestaetigt
+            and jetzt - max(target_since, letzter_versand)
+            >= FLEET_TELEMETRIE_PROFILE_LIVE_NEUVERSAND_STARTVERZOEGERUNG_SECONDS
+            and (
+                current not in {"live", "live_extended"}
+                or live_takt_stabil
+                or not live_takt_toleriert
+            )
+        )
+        if (
+            live_neuversand_pruefbar
+            and status.get("live_retry_active") is not True
+        ):
+            status["live_retry_active"] = True
+            status["live_retry_started_at"] = jetzt
+            status["live_retry_last_moving_at"] = jetzt
+            status["live_retry_confirmed_at"] = 0.0
+            status["live_retry_attempts"] = 0
+            status["config_synced"] = False
+            status["config_sync_state"] = "active"
+            status["config_sync_error"] = (
+                "Live-Datenstrom liefert keinen bestätigten 1s-Takt"
+            )
+            status["config_sync_updated_at"] = jetzt
+            status["updated_at"] = jetzt
+            status_geändert = True
+            logging.warning(
+                "Fleet-Telemetry-Live-Takt fehlt während der Fahrt; "
+                "Profil wird alle %.0f Sekunden neu gesendet",
+                FLEET_TELEMETRIE_PROFILE_LIVE_NEUVERSAND_INTERVAL_SECONDS,
+            )
         live_stable_seconds = None
         if live_stable_since is not None:
             live_stable_seconds = jetzt - live_stable_since
@@ -7327,7 +7516,9 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                     jetzt,
                 )
             )
-            if ladebruecke_aktiv:
+            if status.get("live_retry_active") is True:
+                aktivierbares_ziel = "live"
+            elif ladebruecke_aktiv:
                 aktivierbares_ziel = "live"
             elif live_ausstehend:
                 aktivierbares_ziel = "live"
@@ -7366,7 +7557,7 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
             ziel == "live"
             and current == aktivierbares_ziel
             and current in {"live", "live_extended"}
-            and _fleet_telemetrie_profile_fahrzeug_bewegt_sich(data, jetzt)
+            and fahrzeug_bewegt_sich
             and jetzt - max(target_since, letzter_versand)
             >= FLEET_TELEMETRIE_PROFILE_LIVE_TAKT_PRUEFVERZOEGERUNG_SECONDS
         )
@@ -7413,6 +7604,7 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                 data,
                 status,
                 aktivierbares_ziel,
+                jetzt,
             )
         ):
             _fleet_telemetrie_profile_stream_bestaetigt_setzen(
@@ -7437,6 +7629,16 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
             or neuversand_fällig
             or (dringlich and cooldown_abgelaufen)
         )
+        live_neuversand_pausiert = (
+            status.get("live_retry_active") is True
+            and status.get("target") == "live"
+            and not _fleet_telemetrie_profile_live_neuversand_fahrt_aktuell(
+                status,
+                jetzt,
+            )
+        )
+        if live_neuversand_pausiert:
+            darf_senden = False
         if ziel_ausstehend and darf_senden:
             profil_anfordern = aktivierbares_ziel
             _fleet_telemetrie_profile_sync_ausstehend_setzen(
@@ -7478,6 +7680,24 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
         "config_sync_updated_at"
     )
     data["telemetry_config_sync_error"] = status_kopie.get("config_sync_error")
+    data["telemetry_live_retry_active"] = (
+        status_kopie.get("live_retry_active") is True
+    )
+    data["telemetry_live_retry_moving"] = (
+        _fleet_telemetrie_profile_live_neuversand_fahrt_aktuell(
+            status_kopie,
+            jetzt,
+        )
+    )
+    data["telemetry_live_retry_started_at"] = status_kopie.get(
+        "live_retry_started_at"
+    )
+    data["telemetry_live_retry_confirmed_at"] = status_kopie.get(
+        "live_retry_confirmed_at"
+    )
+    data["telemetry_live_retry_attempts"] = int(
+        status_kopie.get("live_retry_attempts") or 0
+    )
     if status_kopie.get("last_error"):
         data["telemetry_profile_error"] = status_kopie.get("last_error")
     else:
