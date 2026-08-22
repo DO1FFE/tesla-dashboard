@@ -511,6 +511,7 @@ var installedVersion = null;
 var CONFIG = {};
 var HIGHLIGHT_BLUE = false;
 var currentPath = [];
+var currentPathGeneration = null;
 var lastPathDelta = [];
 var OFFLINE_TEXT = 'Das Fahrzeug ist offline und schläft - Bitte nicht wecken! - Die Daten sind die zuletzt bekannten und somit nicht aktuell!';
 var SERVICE_MODE_TEXT = 'Fahrzeug befindet sich im Service Mode.';
@@ -986,6 +987,16 @@ var eventSource = null;
 
 function updatePathPoints(data) {
     lastPathDelta = [];
+    var pathGeneration = data && data.path_generation;
+    var generationChanged = (
+        pathGeneration != null && pathGeneration !== currentPathGeneration
+    );
+    if (generationChanged) {
+        data.path_reset = true;
+    }
+    if (pathGeneration != null) {
+        currentPathGeneration = pathGeneration;
+    }
     if (data && data.path_reset) {
         if (Array.isArray(data.path)) {
             currentPath = data.path.slice();

@@ -310,6 +310,8 @@ def test_livepfad_wird_per_delta_an_leaflet_angehaengt():
     assert "lastPathDelta.push(pt)" in js
     assert "function neuerPfadNurAngehängt(data)" in js
     assert "polyline.addLatLng(pt)" in js
+    assert "var currentPathGeneration = null" in js
+    assert "data.path_reset = true" in js
 
 
 def test_live_update_alter_nutzt_telemetrie_empfangszeit():
