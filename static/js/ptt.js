@@ -41,6 +41,7 @@
   let speakingActive = false;
   let stoppingRecorder = false;
   let pendingChunkSends = [];
+  let chunkSendChain = Promise.resolve();
   let totTimer;
   let micSource;
   let micAnalyser;
@@ -310,12 +311,42 @@
     });
   }
 
+  function mediaStreamIstAktiv(stream) {
+    if (!stream || stream.active === false || typeof stream.getAudioTracks !== 'function') {
+      return false;
+    }
+    const tracks = stream.getAudioTracks();
+    return tracks.some((track) => track.readyState === 'live');
+  }
+
+  function mikrofonFreigeben(statusText) {
+    const stream = mediaStream;
+    mediaStream = null;
+    mediaPromise = null;
+    if (stream && typeof stream.getTracks === 'function') {
+      stream.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch (err) {
+          console.warn('Mikrofon-Track konnte nicht beendet werden', err);
+        }
+      });
+    }
+    if (stream) {
+      microphoneStatus = statusText || 'bereit, derzeit inaktiv';
+      pttDiagnoseMelden('Mikrofon freigegeben');
+    }
+  }
+
   function ensureMedia() {
     if (!recordingSupported) {
       return Promise.reject(new Error('MediaRecorder or getUserMedia unavailable'));
     }
-    if (mediaStream) {
+    if (mediaStreamIstAktiv(mediaStream)) {
       return Promise.resolve(mediaStream);
+    }
+    if (mediaStream) {
+      mikrofonFreigeben('Stream beendet, erneute Freigabe erforderlich');
     }
     if (mediaPromise) {
       return mediaPromise;
@@ -326,16 +357,30 @@
       audio: { echoCancellation: true, noiseSuppression: true }
     })
       .then((stream) => {
+        mediaPromise = null;
         mediaStream = stream;
         microphoneStatus = 'freigegeben';
+        if (typeof stream.getAudioTracks === 'function') {
+          stream.getAudioTracks().forEach((track) => {
+            track.onended = () => {
+              if (mediaStream === stream) {
+                mediaStream = null;
+                mediaPromise = null;
+                microphoneStatus = 'Stream wurde vom Browser beendet';
+                pttDiagnoseMelden('Mikrofonstream beendet');
+              }
+            };
+          });
+        }
         pttDiagnoseMelden('Mikrofon freigegeben');
         return stream;
       })
       .catch((err) => {
-        recordingSupported = false;
+        mediaPromise = null;
         microphoneStatus = 'Fehler: ' + (err && (err.name || err.message) ?
           (err.name || err.message) : 'unbekannt');
         setButtonAvailable();
+        setDescription('Mikrofonzugriff fehlgeschlagen. Erneut drücken, um die Freigabe anzufragen.');
         pttDiagnoseMelden('Mikrofonfehler');
         console.error('Microphone access denied', err);
         throw err;
@@ -359,7 +404,9 @@
     if (!blob || !blob.size) {
       return Promise.resolve();
     }
-    const sendPromise = blobToArrayBuffer(blob)
+    const sendPromise = chunkSendChain
+      .catch(() => {})
+      .then(() => blobToArrayBuffer(blob))
       .then((buf) => {
         const chunk = new Uint8Array(buf);
         if (chunk.length) {
@@ -369,6 +416,7 @@
       .catch((err) => {
         console.error('Audio chunk conversion failed', err);
       });
+    chunkSendChain = sendPromise;
     pendingChunkSends.push(sendPromise);
     sendPromise.then(() => {
       pendingChunkSends = pendingChunkSends.filter((item) => item !== sendPromise);
@@ -382,25 +430,54 @@
     }
     resumeAudioContext().catch((err) => console.error('Audio context resume failed', err));
     pendingChunkSends = [];
+    chunkSendChain = Promise.resolve();
     const mimeType = waehleMimeType();
     lastChosenMimeType = mimeType;
     const options = mimeType ? { mimeType } : {};
-    try {
-      recorder = new MediaRecorder(mediaStream, options);
-    } catch (err) {
-      recordingSupported = false;
-      setButtonAvailable();
-      pttDiagnoseMelden('MediaRecorder-Fehler');
-      console.error('MediaRecorder start failed', err);
-      return false;
+
+    function recorderStarten(startOptionen) {
+      const neuerRecorder = Object.keys(startOptionen).length ?
+        new MediaRecorder(mediaStream, startOptionen) :
+        new MediaRecorder(mediaStream);
+      recorder = neuerRecorder;
+      neuerRecorder.ondataavailable = (e) => {
+        sendBlob(e.data);
+      };
+      neuerRecorder.onerror = (e) => {
+        console.error('MediaRecorder-Fehler', e);
+        setDescription('Die Mikrofonaufnahme wurde unerwartet beendet.');
+        pttDiagnoseMelden('MediaRecorder-Laufzeitfehler');
+        if (!stoppingRecorder) {
+          speakingActive = false;
+          clearTot();
+          stopLocalRecording(true);
+        }
+      };
+      neuerRecorder.start(250);
+      return neuerRecorder;
     }
-    recorder.ondataavailable = (e) => {
-      sendBlob(e.data);
-    };
-    recorder.onerror = (e) => {
-      console.error('MediaRecorder error', e);
-    };
-    recorder.start(250);
+
+    try {
+      recorderStarten(options);
+    } catch (ersterFehler) {
+      recorder = null;
+      try {
+        recorderStarten({});
+        lastChosenMimeType = recorder.mimeType || '';
+      } catch (zweiterFehler) {
+        recorder = null;
+        mikrofonFreigeben('MediaRecorder nicht verfügbar');
+        setButtonAvailable();
+        setDescription('Die Mikrofonaufnahme konnte nicht gestartet werden. Erneut versuchen.');
+        pttDiagnoseMelden('MediaRecorder-Fehler');
+        console.error(
+          'MediaRecorder konnte nicht gestartet werden',
+          ersterFehler,
+          zweiterFehler
+        );
+        return false;
+      }
+    }
     pttDiagnoseMelden('Aufnahme gestartet');
     return true;
   }
@@ -416,6 +493,7 @@
           .then(() => {
             recorder = null;
             stoppingRecorder = false;
+            mikrofonFreigeben();
             if (sendStopAfterChunks) {
               socket.emit('stop_speaking');
             }
@@ -430,6 +508,7 @@
         console.error('MediaRecorder stop failed', err);
         recorder = null;
         stoppingRecorder = false;
+        mikrofonFreigeben();
         if (sendStopAfterChunks) {
           socket.emit('stop_speaking');
         }
@@ -438,11 +517,14 @@
     }
     recorder = null;
     stoppingRecorder = false;
-    if (sendStopAfterChunks) {
-      Promise.all(pendingChunkSends.slice())
-        .catch(() => {})
-        .then(() => socket.emit('stop_speaking'));
-    }
+    Promise.all(pendingChunkSends.slice())
+      .catch(() => {})
+      .then(() => {
+        mikrofonFreigeben();
+        if (sendStopAfterChunks) {
+          socket.emit('stop_speaking');
+        }
+      });
   }
 
   function startLevelMonitoring() {
@@ -514,6 +596,7 @@
       .then(() => {
         if (pendingStopAfterStart) {
           startRequested = false;
+          mikrofonFreigeben();
           if (pttBtn) {
             pttBtn.classList.remove('active-btn');
           }
@@ -646,6 +729,10 @@
   }
   document.addEventListener('click', () => unlockPlayback(), false);
   document.addEventListener('touchend', () => unlockPlayback(), false);
+  window.addEventListener('pagehide', () => {
+    stopLevelMonitoring();
+    mikrofonFreigeben('Seite verlassen');
+  });
   pttDiagnoseMelden('Seite geladen');
 
   socket.on('your_id', (data) => {
@@ -686,6 +773,23 @@
     setButtonAvailable();
     if (pttBtn) {
       pttBtn.classList.remove('active-btn');
+    }
+  });
+
+  socket.on('ptt_error', (data) => {
+    const message = data && data.message ? data.message :
+      'Die Audioübertragung wurde beendet.';
+    startRequested = false;
+    pendingStopAfterStart = false;
+    speakingActive = false;
+    clearTot();
+    if (pttBtn) {
+      pttBtn.classList.remove('active-btn');
+    }
+    setDescription(message);
+    pttDiagnoseMelden('Audioübertragung abgebrochen');
+    if (!stoppingRecorder) {
+      stopLocalRecording(true);
     }
   });
 

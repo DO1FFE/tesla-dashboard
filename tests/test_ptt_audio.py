@@ -1,5 +1,7 @@
 import base64
 import pathlib
+import shutil
+import subprocess
 import sys
 
 import pytest
@@ -26,6 +28,7 @@ def reset_ptt(monkeypatch):
     app_module.current_speaker_id = None
     app_module.ptt_speaker_info = {}
     app_module.ptt_started_at = None
+    app_module.ptt_audio_limit_erreicht = False
     if app_module.ptt_timer:
         app_module.ptt_timer.cancel()
         app_module.ptt_timer = None
@@ -35,6 +38,7 @@ def reset_ptt(monkeypatch):
     app_module.current_speaker_id = None
     app_module.ptt_speaker_info = {}
     app_module.ptt_started_at = None
+    app_module.ptt_audio_limit_erreicht = False
     if app_module.ptt_timer:
         app_module.ptt_timer.cancel()
         app_module.ptt_timer = None
@@ -98,6 +102,69 @@ def test_audio_chunk_multiple_listeners():
 
     assert msgs1 and msgs1[0]['args'][0]['audio'] == payload
     assert msgs2 and msgs2[0]['args'][0]['audio'] == payload
+
+
+def test_audio_limit_stoppt_weitere_chunks(monkeypatch):
+    monkeypatch.setattr(app_module, "PTT_MAX_AUDIO_BYTES", 5)
+    speaker = make_client()
+    listener = make_client()
+
+    speaker.emit('start_speaking')
+    speaker.get_received()
+    listener.get_received()
+    speaker.emit('audio_chunk', b'1234')
+    speaker.emit('audio_chunk', b'56')
+
+    fehler = [
+        nachricht for nachricht in speaker.get_received()
+        if nachricht['name'] == 'ptt_error'
+    ]
+    assert len(fehler) == 1
+    assert app_module.ptt_audio_limit_erreicht is True
+    assert bytes(app_module.audio_buffer) == b'1234'
+
+    speaker.emit('audio_chunk', b'5')
+    assert not any(
+        nachricht['name'] == 'ptt_error'
+        for nachricht in speaker.get_received()
+    )
+    assert bytes(app_module.audio_buffer) == b'1234'
+
+    speaker.emit('stop_speaking')
+    wiedergaben = [
+        nachricht for nachricht in listener.get_received()
+        if nachricht['name'] == 'play_audio'
+    ]
+    assert wiedergaben[0]['args'][0]['audio'] == b'1234'
+    assert app_module.ptt_audio_limit_erreicht is False
+
+
+def test_permissions_policy_erlaubt_mikrofonzugriff():
+    response = app.test_client().get('/')
+
+    assert response.headers['Permissions-Policy'] == (
+        'microphone=(self), camera=(self)'
+    )
+
+
+def test_ptt_javascript_ist_syntaktisch_gültig():
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('Node.js ist nicht installiert')
+
+    ptt_datei = pathlib.Path(__file__).resolve().parents[1] / 'static/js/ptt.js'
+    subprocess.run([node, '--check', str(ptt_datei)], check=True)
+
+
+def test_ptt_javascript_gibt_mikrofon_wieder_frei():
+    ptt_datei = pathlib.Path(__file__).resolve().parents[1] / 'static/js/ptt.js'
+    javascript = ptt_datei.read_text(encoding='utf-8')
+
+    assert 'function mikrofonFreigeben(' in javascript
+    assert 'track.stop();' in javascript
+    assert "socket.on('ptt_error'" in javascript
+    assert 'chunkSendChain = sendPromise;' in javascript
+    assert "pttDiagnoseMelden('MediaRecorder-Laufzeitfehler')" in javascript
 
 
 def test_ptt_diagnostics_are_reported():

@@ -112,6 +112,10 @@ def disable_response_caching(resp):
     )
     resp.headers.setdefault("Pragma", "no-cache")
     resp.headers.setdefault("Expires", "0")
+    resp.headers.setdefault(
+        "Permissions-Policy",
+        "microphone=(self), camera=(self)",
+    )
     _set_robots_header(resp)
     return resp
 
@@ -358,11 +362,16 @@ active_clients = {}
 current_speaker_id = None
 ptt_timer = None
 audio_buffer = bytearray()
+ptt_audio_limit_erreicht = False
 ptt_speaker_info = {}
 ptt_started_at = None
 ptt_diagnostics = {}
 PTT_DIAGNOSTICS_TTL = 24 * 60 * 60
 PTT_RECORDINGS_DIR = None
+PTT_MAX_AUDIO_BYTES = max(
+    64 * 1024,
+    int(os.getenv("PTT_MAX_AUDIO_BYTES", str(4 * 1024 * 1024))),
+)
 PTT_RECORDING_LIMIT = max(1, int(os.getenv("PTT_RECORDING_LIMIT", "20")))
 PTT_RECORDING_RETENTION_HOURS = max(
     1, int(os.getenv("PTT_RECORDING_RETENTION_HOURS", "24"))
@@ -16434,7 +16443,8 @@ def _client_id():
 def _ptt_session_zurücksetzen():
     """Setze die Metadaten der aktuellen PTT-Übertragung zurück."""
 
-    global ptt_speaker_info, ptt_started_at
+    global ptt_audio_limit_erreicht, ptt_speaker_info, ptt_started_at
+    ptt_audio_limit_erreicht = False
     ptt_speaker_info = {}
     ptt_started_at = None
 
@@ -16532,7 +16542,8 @@ def handle_ptt_diagnostics(data):
 @socketio.on("start_speaking")
 def start_speaking(data=None):
     """Allow a client to speak if no other client is active."""
-    global current_speaker_id, ptt_timer, audio_buffer, ptt_speaker_info
+    global current_speaker_id, ptt_timer, audio_buffer
+    global ptt_audio_limit_erreicht, ptt_speaker_info
     global ptt_started_at
     cid = _client_id()
     sid = request.sid
@@ -16544,6 +16555,7 @@ def start_speaking(data=None):
         ptt_started_at = time.time()
         ptt_speaker_info = _ptt_start_info(cid, data)
         audio_buffer.clear()
+        ptt_audio_limit_erreicht = False
         emit("start_accepted", room=sid)
         emit("lock_ptt", {"speaker": cid}, broadcast=True, include_self=False)
         if ptt_timer:
@@ -16582,16 +16594,28 @@ def stop_speaking():
 @socketio.on("audio_chunk")
 def handle_audio_chunk(data):
     """Forward audio data from the active speaker to all listeners."""
+    global audio_buffer, ptt_audio_limit_erreicht
     if not is_ptt_enabled():
         return
     if _client_id() == current_speaker_id:
-        global audio_buffer
+        if ptt_audio_limit_erreicht:
+            return
         try:
             raw = bytes(data)
         except Exception:
             app.logger.warning("Invalid audio chunk received: %r", type(data))
             return
         if raw:
+            if len(audio_buffer) + len(raw) > PTT_MAX_AUDIO_BYTES:
+                ptt_audio_limit_erreicht = True
+                app.logger.warning(
+                    "PTT-Audio-Limit überschritten: %s Bytes",
+                    len(audio_buffer) + len(raw),
+                )
+                emit("ptt_error", {
+                    "message": "Die maximale Übertragungsgröße wurde erreicht."
+                })
+                return
             audio_buffer.extend(raw)
         else:
             app.logger.warning("Empty audio chunk received")
