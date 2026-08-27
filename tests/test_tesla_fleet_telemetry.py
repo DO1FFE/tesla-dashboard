@@ -463,6 +463,256 @@ def test_fleet_telemetrie_positionsabfrage_hat_sperrfrist(monkeypatch):
     assert app._fleet_telemetrie_position_abfrage_reservieren("TESTVIN", 130.0)
 
 
+def test_fleet_telemetrie_streamwiederherstellung_nur_bei_aktiven_daten(
+    monkeypatch,
+):
+    jetzt_ms = 2_000_000_000_000
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_STREAM_WIEDERHERSTELLUNG_NACH_SECONDS",
+        20.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_STREAM_WIEDERHERSTELLUNG_WIEDERHOLUNG_SECONDS",
+        30.0,
+    )
+    daten = {
+        "fleet_telemetry_received_at": jetzt_ms - 21_000,
+        "drive_state": {"shift_state": "D", "speed": 30, "power": 5},
+        "charge_state": {"charging_state": "Disconnected"},
+        "climate_state": {"is_climate_on": True},
+    }
+
+    assert app._fleet_telemetrie_stream_wiederherstellung_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms,
+    )
+
+    daten["drive_state"] = {"shift_state": "D", "speed": 0, "power": 0}
+    assert not app._fleet_telemetrie_stream_wiederherstellung_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms,
+    )
+
+    daten["drive_state"] = {"shift_state": "P", "speed": 0, "power": 0}
+    assert app._fleet_telemetrie_stream_wiederherstellung_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms,
+    )
+
+    daten["fleet_vehicle_data_received_at"] = jetzt_ms - 10_000
+    assert not app._fleet_telemetrie_stream_wiederherstellung_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms,
+    )
+
+
+def test_fleet_telemetrie_streamwiederherstellung_hat_sperrfrist(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_stream_wiederherstellung_letzte_abfrage",
+        {},
+    )
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_STREAM_WIEDERHERSTELLUNG_WIEDERHOLUNG_SECONDS",
+        30.0,
+    )
+
+    assert app._fleet_telemetrie_stream_wiederherstellung_reservieren(
+        "TESTVIN",
+        100.0,
+    )
+    assert not app._fleet_telemetrie_stream_wiederherstellung_reservieren(
+        "TESTVIN",
+        129.9,
+    )
+    assert app._fleet_telemetrie_stream_wiederherstellung_reservieren(
+        "TESTVIN",
+        130.0,
+    )
+
+
+def test_fleet_telemetrie_stummer_stream_startet_live_profilreparatur(
+    monkeypatch,
+):
+    status = app._fleet_telemetrie_profile_status_standard()
+    status.update({
+        "current": "live",
+        "target": "live",
+        "last_posted_profile": "live",
+        "config_synced": True,
+        "config_sync_state": "synced",
+        "config_sync_profile": "live",
+    })
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_STREAM_WIEDERHERSTELLUNG_NACH_SECONDS",
+        20.0,
+    )
+    monkeypatch.setattr(app, "_fleet_telemetry_profile_status", status)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_status_speichern",
+        lambda: None,
+    )
+    daten = {
+        "fleet_telemetry_received_at": 1_970_000,
+        "drive_state": {"shift_state": "D", "speed": 0},
+    }
+
+    assert app._fleet_telemetrie_streamprofil_wiederherstellung_anfordern(
+        daten,
+        2000.0,
+    )
+
+    assert status["live_retry_active"] is True
+    assert status["live_retry_motion_active"] is True
+    assert status["live_retry_last_moving_at"] == 2000.0
+    assert status["config_synced"] is False
+    assert status["config_sync_state"] == "active"
+
+
+def test_fleet_telemetrie_fahrzeugzustand_nutzt_nicht_weckenden_endpunkt(
+    monkeypatch,
+):
+    class Antwort:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"response": {"state": "online"}}
+
+    abfragen = []
+
+    def fake_get(url, **kwargs):
+        abfragen.append((url, kwargs))
+        return Antwort()
+
+    monkeypatch.setattr(app, "_fleet_telemetrie_oauth_token", lambda: "token")
+    monkeypatch.setattr(app.requests, "get", fake_get)
+    monkeypatch.setattr(
+        app,
+        "TESLA_FLEET_VEHICLE_COMMAND_URL",
+        "https://127.0.0.1:4443",
+    )
+
+    assert app._fleet_telemetrie_fahrzeugzustand_abrufen("TESTVIN") == "online"
+    assert abfragen[0][0].endswith("/api/1/vehicles/TESTVIN")
+    assert "params" not in abfragen[0][1]
+
+
+def test_fleet_telemetrie_fallback_korrigiert_festgefahrene_fahrt(monkeypatch):
+    gesendet = []
+    gespeichert = []
+    alt = {
+        "state": "online",
+        "drive_state": {
+            "shift_state": "D",
+            "speed": 70,
+            "power": 18,
+            "latitude": 51.0,
+            "longitude": 7.0,
+            "active_route_active": True,
+            "active_route_destination": "Altes Ziel",
+        },
+        "vehicle_state": {
+            "fd_window": 1,
+            "locked": False,
+            "brake_pedal": True,
+            "lights_turn_signal": "Left",
+        },
+        "climate_state": {"fan_status": 4},
+        "charge_state": {"dcdc_enable": True},
+        "fleet_telemetry_raw": {
+            "FdWindow": "Open",
+            "HvacFanSpeed": 4,
+            "DCDCEnable": True,
+        },
+    }
+    aktuell = {
+        "state": "online",
+        "drive_state": {
+            "shift_state": "P",
+            "speed": None,
+            "power": None,
+            "latitude": 51.5,
+            "longitude": 7.5,
+            "timestamp": 2_000_000_000_000,
+        },
+        "vehicle_state": {
+            "fd_window": 0,
+            "locked": True,
+            "timestamp": 2_000_000_000_000,
+        },
+        "climate_state": {
+            "fan_status": 0,
+            "is_climate_on": False,
+            "timestamp": 2_000_000_000_000,
+        },
+        "charge_state": {
+            "charging_state": "Disconnected",
+            "timestamp": 2_000_000_000_000,
+        },
+    }
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
+    monkeypatch.setattr(app, "latest_data", {"veh-1": alt})
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_dashboard_daten_anreichern",
+        lambda _cache_id, data: data,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_aktualisieren",
+        lambda _cache_id, data: data,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_parkstatus_aufzeichnen",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda cache_id, _data: gespeichert.append(cache_id),
+    )
+    monkeypatch.setattr(
+        app,
+        "_subscriber_daten_senden",
+        lambda cache_id, _data: gesendet.append(cache_id),
+    )
+    monkeypatch.setattr(app, "_aprs_spaeter_senden", lambda _data: None)
+
+    assert app._fleet_telemetrie_fallbackdaten_uebernehmen(
+        "TESTVIN",
+        aktuell,
+        2_000_000_001_000,
+    )
+
+    daten = app.latest_data["veh-1"]
+    assert daten["drive_state"]["shift_state"] == "P"
+    assert daten["drive_state"]["speed"] == 0
+    assert daten["drive_state"]["power"] == 0
+    assert daten["drive_state"]["latitude"] == 51.5
+    assert daten["drive_state"]["active_route_active"] is False
+    assert "active_route_destination" not in daten["drive_state"]
+    assert daten["vehicle_state"]["fd_window"] == 0
+    assert "brake_pedal" not in daten["vehicle_state"]
+    assert "lights_turn_signal" not in daten["vehicle_state"]
+    assert daten["climate_state"]["fan_status"] == 0
+    assert daten["charge_state"]["dcdc_enable"] is True
+    assert "FdWindow" not in daten["fleet_telemetry_raw"]
+    assert "HvacFanSpeed" not in daten["fleet_telemetry_raw"]
+    assert daten["fleet_telemetry_raw"]["DCDCEnable"] is True
+    assert daten["fleet_vehicle_data_source"] == "stream_recovery"
+    assert daten["fleet_vehicle_data_received_at"] == 2_000_000_001_000
+    assert gespeichert == ["veh-1"]
+    assert gesendet == ["veh-1"]
+
+
 def test_fleet_telemetrie_positionsabfrage_nutzt_nur_location_data(monkeypatch):
     class Antwort:
         def raise_for_status(self):
@@ -2115,6 +2365,26 @@ def test_telemetrie_cache_markiert_veraltete_daten_als_offline(monkeypatch):
     assert daten["api_error"] == "Noch keine aktuellen Fleet-Telemetry-Daten empfangen"
     assert daten["state_checked_at"] == 2_000_000
     assert daten["state_since_ms"] == update_ms + 300_000
+
+
+def test_telemetrie_cache_akzeptiert_frischen_rest_fallback(monkeypatch):
+    monkeypatch.setattr(app, "_fleet_telemetrie_aktiv", lambda: True)
+    monkeypatch.setattr(app, "TESLA_FLEET_TELEMETRY_STALE_SECONDS", 300.0)
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(app, "latest_data", {})
+    cache = {
+        "state": "online",
+        "fleet_telemetry_updated_at": 1_000_000,
+        "fleet_vehicle_data_received_at": 1_999_000,
+        "charge_state": {},
+        "drive_state": {"shift_state": "P", "speed": 0},
+    }
+
+    daten = app._fleet_telemetrie_cache_fuer_dashboard("veh-1", cache)
+
+    assert daten["state"] == "online"
+    assert daten["_live"] is True
+    assert "api_error" not in daten
 
 
 def test_telemetrie_cache_entfernt_owner_api_schiebedachstatus(monkeypatch):

@@ -903,6 +903,14 @@ FLEET_TELEMETRIE_PARKABGLEICH_WIEDERHOLUNG_SECONDS = max(
     30.0,
     float(os.getenv("TESLA_FLEET_PARK_RECONCILE_RETRY_SECONDS", "60")),
 )
+FLEET_TELEMETRIE_STREAM_WIEDERHERSTELLUNG_NACH_SECONDS = max(
+    FLEET_TELEMETRIE_POSITION_STREAM_MAX_ALTER_SECONDS,
+    float(os.getenv("TESLA_FLEET_STREAM_RECOVERY_AFTER_SECONDS", "20")),
+)
+FLEET_TELEMETRIE_STREAM_WIEDERHERSTELLUNG_WIEDERHOLUNG_SECONDS = max(
+    15.0,
+    float(os.getenv("TESLA_FLEET_STREAM_RECOVERY_RETRY_SECONDS", "30")),
+)
 TESLA_FLEET_VEHICLE_COMMAND_URL = os.getenv(
     "TESLA_FLEET_VEHICLE_COMMAND_URL",
     "https://127.0.0.1:4443",
@@ -1911,6 +1919,7 @@ _fleet_telemetry_profile_lock = threading.Lock()
 _fleet_telemetry_position_lock = threading.Lock()
 _fleet_telemetry_position_letzte_abfrage = {}
 _fleet_telemetry_parkabgleich_letzte_abfrage = {}
+_fleet_telemetry_stream_wiederherstellung_letzte_abfrage = {}
 _fleet_telemetry_vehicle_cache = {"mtime": None, "vehicles": []}
 FLEET_TELEMETRY_MQTT_QUEUE_MAX = max(
     1000, int(os.getenv("TESLA_FLEET_TELEMETRY_MQTT_QUEUE_MAX", "20000"))
@@ -8835,6 +8844,162 @@ def _fleet_telemetrie_gueltige_fahrzeugkoordinaten(lat, lon):
     return lat, lon
 
 
+def _fleet_telemetrie_aktualitaetszeit_ms(data):
+    """Liefere den jüngsten bestätigten Telemetrie- oder REST-Zeitpunkt."""
+
+    if not isinstance(data, dict):
+        return None
+    kandidaten = []
+    for feld in (
+        "fleet_telemetry_updated_at",
+        "fleet_vehicle_data_received_at",
+    ):
+        zeitpunkt = _as_float(data.get(feld))
+        if isinstance(zeitpunkt, (int, float)):
+            kandidaten.append(zeitpunkt)
+    return max(kandidaten) if kandidaten else None
+
+
+def _fleet_telemetrie_stream_ist_veraltet(data, jetzt_ms=None):
+    """Erkenne einen vollständig ausgebliebenen Telemetrie-Datenstrom."""
+
+    if not isinstance(data, dict):
+        return False
+    if jetzt_ms is None:
+        jetzt_ms = time.time() * 1000
+    stream_empfangen = _as_float(
+        data.get("fleet_telemetry_received_at")
+        or data.get("fleet_telemetry_updated_at")
+    )
+    if not isinstance(stream_empfangen, (int, float)):
+        return False
+    alter_seconds = max(0.0, (float(jetzt_ms) - stream_empfangen) / 1000.0)
+    return (
+        alter_seconds
+        > FLEET_TELEMETRIE_STREAM_WIEDERHERSTELLUNG_NACH_SECONDS
+    )
+
+
+def _fleet_telemetrie_streamprofil_wiederherstellung_anfordern(
+    data,
+    jetzt=None,
+):
+    """Starte bei einem stummen Stream die Live-Profilreparatur erneut."""
+
+    jetzt = time.time() if jetzt is None else float(jetzt)
+    if not _fleet_telemetrie_stream_ist_veraltet(data, jetzt * 1000):
+        return False
+    drive = data.get("drive_state") if isinstance(data, dict) else None
+    if not isinstance(drive, dict):
+        return False
+    if _normalize_shift_state(drive.get("shift_state")) not in {"R", "N", "D"}:
+        return False
+    with _fleet_telemetry_profile_lock:
+        status = _fleet_telemetry_profile_status
+        geändert = False
+        if status.get("target") != "live":
+            status["target"] = "live"
+            status["target_since"] = jetzt
+            geändert = True
+        if status.get("live_retry_motion_active") is not True:
+            status["live_retry_motion_active"] = True
+            geändert = True
+        if status.get("live_retry_last_moving_at") != jetzt:
+            status["live_retry_last_moving_at"] = jetzt
+            geändert = True
+        geändert = (
+            _fleet_telemetrie_profile_live_neuversand_starten(status, jetzt)
+            or geändert
+        )
+        if geändert:
+            status["updated_at"] = jetzt
+            _fleet_telemetrie_profile_status_speichern()
+    return geändert
+
+
+def _fleet_telemetrie_stream_wiederherstellung_soll_aktualisiert_werden(
+    data,
+    jetzt_ms=None,
+):
+    """Erkenne aktive Fahrzeugdaten, die wegen eines Streamabbruchs festhängen."""
+
+    if not _fleet_telemetrie_stream_ist_veraltet(data, jetzt_ms):
+        return False
+    if jetzt_ms is None:
+        jetzt_ms = time.time() * 1000
+    letzter_fallback = _as_float(
+        data.get("fleet_vehicle_data_received_at")
+    )
+    if isinstance(letzter_fallback, (int, float)):
+        alter = max(0.0, (float(jetzt_ms) - letzter_fallback) / 1000.0)
+        if (
+            alter
+            < FLEET_TELEMETRIE_STREAM_WIEDERHERSTELLUNG_WIEDERHOLUNG_SECONDS
+        ):
+            return False
+
+    drive = data.get("drive_state")
+    charge = data.get("charge_state")
+    climate = data.get("climate_state")
+    if not isinstance(drive, dict):
+        drive = {}
+    if not isinstance(charge, dict):
+        charge = {}
+    if not isinstance(climate, dict):
+        climate = {}
+    shift = _normalize_shift_state(drive.get("shift_state"))
+    speed = _as_float(drive.get("speed"))
+    power = _as_float(drive.get("power"))
+    bewegt = (
+        shift in {"R", "N", "D"}
+        and (
+            (
+                speed is not None
+                and abs(speed)
+                > FLEET_TELEMETRIE_POSITION_MIN_GESCHWINDIGKEIT_MPH
+            )
+            or (power is not None and abs(power) > 1)
+        )
+    )
+    if bewegt:
+        return True
+    if shift in {"R", "N", "D"}:
+        return False
+    if charge.get("charging_state") in {"Charging", "Starting"}:
+        return True
+    return any(
+        _wert_ist_aktiv(climate.get(feld))
+        for feld in (
+            "is_climate_on",
+            "is_auto_conditioning_on",
+            "is_preconditioning",
+        )
+    )
+
+
+def _fleet_telemetrie_stream_wiederherstellung_reservieren(vin, jetzt=None):
+    """Drossele REST-Wiederherstellungen eines stummen Telemetrie-Streams."""
+
+    if not vin:
+        return False
+    if jetzt is None:
+        jetzt = time.monotonic()
+    with _fleet_telemetry_position_lock:
+        letzte_abfrage = (
+            _fleet_telemetry_stream_wiederherstellung_letzte_abfrage.get(
+                str(vin)
+            )
+        )
+        if (
+            letzte_abfrage is not None
+            and jetzt - letzte_abfrage
+            < FLEET_TELEMETRIE_STREAM_WIEDERHERSTELLUNG_WIEDERHOLUNG_SECONDS
+        ):
+            return False
+        _fleet_telemetry_stream_wiederherstellung_letzte_abfrage[str(vin)] = jetzt
+    return True
+
+
 def _fleet_telemetrie_position_soll_aktualisiert_werden(data, jetzt_ms=None):
     """Erkenne eine veraltete Position bei nachweislich aktiver Fahrt."""
 
@@ -8989,6 +9154,168 @@ def _fleet_telemetrie_parkdaten_abrufen(vin):
     if not isinstance(antwort, dict):
         raise RuntimeError("Tesla lieferte keine Fahrzeugdaten")
     return antwort
+
+
+def _fleet_telemetrie_fahrzeugzustand_abrufen(vin):
+    """Prüfe den Fahrzeugzustand über den nicht weckenden Fleet-Endpunkt."""
+
+    token = _fleet_telemetrie_oauth_token()
+    if not token:
+        raise RuntimeError("Kein gültiger Fleet-OAuth-Zugriffstoken verfügbar")
+    url = (
+        TESLA_FLEET_VEHICLE_COMMAND_URL.rstrip("/")
+        + f"/api/1/vehicles/{vin}"
+    )
+    response = requests.get(
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT,
+        verify=False,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    antwort = payload.get("response") if isinstance(payload, dict) else None
+    if not isinstance(antwort, dict):
+        raise RuntimeError("Tesla lieferte keinen Fahrzeugzustand")
+    return _normalisiere_dashboard_state(antwort.get("state"))
+
+
+def _fleet_telemetrie_fallback_rohwerte_bereinigen(data, fahrzeugdaten):
+    """Verwirf Rohwerte, die ein frischer REST-Datensatz ersetzt hat."""
+
+    if not isinstance(data, dict) or not isinstance(fahrzeugdaten, dict):
+        return
+    rohwerte = data.get("fleet_telemetry_raw")
+    if not isinstance(rohwerte, dict):
+        return
+    vehicle = fahrzeugdaten.get("vehicle_state")
+    climate = fahrzeugdaten.get("climate_state")
+    charge = fahrzeugdaten.get("charge_state")
+    if not isinstance(vehicle, dict):
+        vehicle = {}
+    if not isinstance(climate, dict):
+        climate = {}
+    if not isinstance(charge, dict):
+        charge = {}
+    for raw_feld, owner_feld in FLEET_TELEMETRIE_FENSTER_FELDER.items():
+        if owner_feld in vehicle:
+            rohwerte.pop(raw_feld, None)
+    if "is_rear_defroster_on" in climate:
+        rohwerte.pop("RearDefrostEnabled", None)
+    if "fan_status" in climate:
+        rohwerte.pop("HvacFanSpeed", None)
+        rohwerte.pop("HvacFanStatus", None)
+    if "battery_heater_on" in charge or "battery_heater" in climate:
+        rohwerte.pop("BatteryHeaterOn", None)
+
+
+def _fleet_telemetrie_fallbackdaten_uebernehmen(
+    vin,
+    fahrzeugdaten,
+    abgerufen_at_ms=None,
+):
+    """Übernehme einen vollständigen REST-Stand nach einem Streamabbruch."""
+
+    if not isinstance(fahrzeugdaten, dict):
+        return False
+    if abgerufen_at_ms is None:
+        abgerufen_at_ms = int(time.time() * 1000)
+    aktualisierte_daten = []
+    with _fleet_telemetry_lock:
+        for cache_id in _fleet_telemetrie_cache_ids(vin):
+            data = latest_data.get(cache_id)
+            if not isinstance(data, dict):
+                data = _load_cached(cache_id)
+            if not isinstance(data, dict):
+                continue
+            vorheriger_state = _normalisiere_dashboard_state(data.get("state"))
+            for abschnitt in (
+                "drive_state",
+                "vehicle_state",
+                "climate_state",
+                "charge_state",
+                "vehicle_config",
+                "gui_settings",
+            ):
+                quelle = fahrzeugdaten.get(abschnitt)
+                if not isinstance(quelle, dict):
+                    continue
+                ziel = data.setdefault(abschnitt, {})
+                if not isinstance(ziel, dict):
+                    ziel = {}
+                    data[abschnitt] = ziel
+                for key, value in quelle.items():
+                    ziel[key] = copy.deepcopy(value)
+            _fleet_telemetrie_fallback_rohwerte_bereinigen(data, fahrzeugdaten)
+
+            drive = data.setdefault("drive_state", {})
+            vehicle = data.setdefault("vehicle_state", {})
+            for feld in (
+                "brake_pedal",
+                "brake_pedal_pos",
+                "pedal_position",
+                "lights_hazards_active",
+                "lights_turn_signal",
+                "lights_high_beams",
+            ):
+                vehicle.pop(feld, None)
+            shift = _normalize_shift_state(drive.get("shift_state"))
+            if shift == "P":
+                drive["shift_state"] = "P"
+                if drive.get("speed") is None:
+                    drive["speed"] = 0
+                if drive.get("power") is None:
+                    drive["power"] = 0
+                data["fleet_telemetry_park_reconciled_at"] = int(
+                    abgerufen_at_ms
+                )
+                _fleet_telemetrie_navigation_beenden(
+                    drive,
+                    int(abgerufen_at_ms),
+                )
+            if _fleet_telemetrie_gueltige_fahrzeugkoordinaten(
+                drive.get("latitude"),
+                drive.get("longitude"),
+            ) is not None:
+                data["fleet_telemetry_position_source"] = "vehicle_data"
+
+            state = _normalisiere_dashboard_state(fahrzeugdaten.get("state"))
+            if state is not None:
+                data["state"] = state
+            if vorheriger_state != data.get("state"):
+                data["state_since_ms"] = int(abgerufen_at_ms)
+                data["state_since_at"] = int(abgerufen_at_ms)
+            data["state_checked_at"] = int(abgerufen_at_ms)
+            data["fleet_vehicle_data_received_at"] = int(abgerufen_at_ms)
+            data["fleet_vehicle_data_source"] = "stream_recovery"
+            zeitpunkte = [int(abgerufen_at_ms)]
+            for abschnitt in (
+                "drive_state",
+                "vehicle_state",
+                "climate_state",
+                "charge_state",
+            ):
+                quelle = fahrzeugdaten.get(abschnitt)
+                if not isinstance(quelle, dict):
+                    continue
+                zeitpunkt = _fleet_telemetrie_zeitstempel_ms(
+                    quelle.get("timestamp")
+                )
+                if isinstance(zeitpunkt, (int, float)):
+                    zeitpunkte.append(int(zeitpunkt))
+            data["timestamp"] = max(zeitpunkte)
+            data["_live"] = data.get("state") == "online"
+            data.pop("api_error", None)
+            data = _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data)
+            data = _fleet_telemetrie_profile_aktualisieren(cache_id, data)
+            _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, data)
+            latest_data[cache_id] = data
+            _fleet_telemetrie_cache_spaeter_speichern(cache_id, data)
+            aktualisierte_daten.append((cache_id, data))
+    for cache_id, data in aktualisierte_daten:
+        _subscriber_daten_senden(cache_id, data)
+        _aprs_spaeter_senden(data)
+    return bool(aktualisierte_daten)
 
 
 def _fleet_telemetrie_parkdaten_uebernehmen(
@@ -9167,6 +9494,8 @@ def _fleet_telemetrie_position_snapshot(vin):
         for cache_id in _fleet_telemetrie_cache_ids(vin):
             data = latest_data.get(cache_id)
             if not isinstance(data, dict):
+                data = _load_cached(cache_id)
+            if not isinstance(data, dict):
                 continue
             empfangen = _fleet_telemetrie_zeitstempel_ms(
                 data.get("fleet_telemetry_received_at")
@@ -9187,6 +9516,46 @@ def _fleet_telemetrie_position_worker_loop():
             if not vin:
                 continue
             data = _fleet_telemetrie_position_snapshot(vin)
+            _fleet_telemetrie_streamprofil_wiederherstellung_anfordern(data)
+            if _fleet_telemetrie_stream_wiederherstellung_soll_aktualisiert_werden(
+                data
+            ):
+                if _fleet_telemetrie_stream_wiederherstellung_reservieren(vin):
+                    try:
+                        state = _fleet_telemetrie_fahrzeugzustand_abrufen(vin)
+                        if state == "online":
+                            fahrzeugdaten = _fleet_telemetrie_parkdaten_abrufen(vin)
+                            try:
+                                position = _fleet_telemetrie_position_abrufen(vin)
+                                drive = fahrzeugdaten.setdefault("drive_state", {})
+                                drive.update(position)
+                            except Exception as exc:
+                                logging.warning(
+                                    "Position bei Stream-Wiederherstellung "
+                                    "nicht verfügbar (%s): %s",
+                                    vin,
+                                    exc,
+                                )
+                            übernommen = (
+                                _fleet_telemetrie_fallbackdaten_uebernehmen(
+                                    vin,
+                                    fahrzeugdaten,
+                                )
+                            )
+                            if übernommen:
+                                logging.warning(
+                                    "Stummen Fleet-Telemetry-Stream über "
+                                    "vehicle_data wiederhergestellt: %s",
+                                    vin,
+                                )
+                    except Exception as exc:
+                        logging.warning(
+                            "Fleet-Telemetry-Stream konnte nicht über "
+                            "vehicle_data wiederhergestellt werden (%s): %s",
+                            vin,
+                            exc,
+                        )
+                data = _fleet_telemetrie_position_snapshot(vin)
             if _fleet_telemetrie_parkabgleich_soll_aktualisiert_werden(data):
                 if _fleet_telemetrie_parkabgleich_reservieren(vin):
                     try:
@@ -9949,7 +10318,7 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
         data = cached if isinstance(cached, dict) else _load_cached(cache_id)
     if not isinstance(data, dict):
         return None
-    updated_at = data.get("fleet_telemetry_updated_at")
+    updated_at = _fleet_telemetrie_aktualitaetszeit_ms(data)
     if updated_at is not None:
         try:
             age = time.time() - (float(updated_at) / 1000.0)
@@ -12384,10 +12753,12 @@ def get_vehicle_state(vehicle_id=None):
             telemetry_state = _normalisiere_dashboard_state(
                 telemetry_data.get("state")
             )
-            checked_at = telemetry_data.get(
-                "fleet_telemetry_updated_at",
-                telemetry_data.get("state_checked_at", int(now * 1000)),
-            )
+            checked_at = _fleet_telemetrie_aktualitaetszeit_ms(telemetry_data)
+            if checked_at is None:
+                checked_at = telemetry_data.get(
+                    "state_checked_at",
+                    int(now * 1000),
+                )
             if telemetry_state is not None:
                 log_vehicle_state(vid, telemetry_state)
                 antwort = {
@@ -13925,6 +14296,9 @@ def api_data():
     data = latest_data.get("default")
     if data is None:
         data = _fetch_data_once("default")
+    telemetry_data = _fleet_telemetrie_cache_fuer_dashboard("default", data)
+    if telemetry_data is not None:
+        data = telemetry_data
     _fleet_telemetrie_rohdaten_anreichern(data)
     _fahrtpfad_nach_parkzeit_bereinigen(data)
     return jsonify(data)
@@ -13938,6 +14312,9 @@ def api_data_vehicle(vehicle_id):
     data = latest_data.get(vehicle_id)
     if data is None:
         data = _fetch_data_once(vehicle_id)
+    telemetry_data = _fleet_telemetrie_cache_fuer_dashboard(vehicle_id, data)
+    if telemetry_data is not None:
+        data = telemetry_data
     _fleet_telemetrie_rohdaten_anreichern(data)
     _fahrtpfad_nach_parkzeit_bereinigen(data)
     return jsonify(data)
@@ -14043,7 +14420,13 @@ def stream_vehicle(vehicle_id="default"):
             # Send the latest data immediately if available
             if vehicle_id in latest_data:
                 _fahrtpfad_nach_parkzeit_bereinigen(latest_data[vehicle_id])
-                initial = _subscriber_stream_payload(latest_data[vehicle_id])
+                initial_data = _fleet_telemetrie_cache_fuer_dashboard(
+                    vehicle_id,
+                    latest_data[vehicle_id],
+                )
+                if initial_data is None:
+                    initial_data = latest_data[vehicle_id]
+                initial = _subscriber_stream_payload(initial_data)
                 if isinstance(initial, dict):
                     path = initial.get("path")
                     if isinstance(path, list):
