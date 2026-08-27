@@ -1045,6 +1045,63 @@ def test_fleet_telemetrie_connectivity_wertet_disconnected_als_offline(monkeypat
     assert sammler.daten[-1]["state_since_ms"] == disconnected_ms
 
 
+def test_fleet_telemetrie_disconnected_startet_parkprofil_countdown(monkeypatch):
+    angefordert = []
+    disconnected_ms = 1_800_000_000_000
+
+    monkeypatch.setattr(app.time, "time", lambda: 1_800_000_000.0)
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: True)
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    app._fleet_telemetry_profile_status.update({
+        "current": "live",
+        "target": "live",
+        "target_since": 1_799_999_900.0,
+        "last_sent": 1_799_999_990.0,
+        "last_sent_profile": "live",
+        "last_posted_profile": "live",
+        "config_synced": True,
+        "config_sync_state": "synced",
+        "config_sync_profile": "live",
+        "config_sync_details": _telemetrie_stream_details(),
+        "live_retry_active": True,
+        "live_retry_motion_active": True,
+    })
+    monkeypatch.setattr(app, "latest_data", {
+        "veh-1": {
+            "state": "online",
+            "drive_state": {"shift_state": "R", "speed": 5},
+            "vehicle_state": {"is_user_present": True},
+        },
+    })
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(app, "_subscriber_daten_senden", lambda *args: None)
+
+    assert app._fleet_telemetrie_verbindung_aktualisieren(
+        "TESTVIN",
+        {"Status": "DISCONNECTED"},
+        disconnected_ms,
+    )
+
+    status = app._fleet_telemetry_profile_status
+    daten = app.latest_data["veh-1"]
+    assert angefordert == []
+    assert status["target"] == "parked"
+    assert status["target_since"] == 1_800_000_000.0
+    assert status["live_retry_active"] is False
+    assert status["live_retry_motion_active"] is False
+    assert daten["telemetry_profile"] == "live"
+    assert daten["telemetry_profile_target"] == "parked"
+
+
 def test_fleet_telemetrie_ignoriert_retained_fahrzeugfelder(monkeypatch):
     monkeypatch.setattr(app, "latest_data", {})
 
@@ -5279,6 +5336,101 @@ def test_fleet_telemetrie_profile_pending_prueft_vor_timeout_nur_sync(monkeypatc
     assert pruefungen == ["sync"]
     assert app._fleet_telemetry_profile_status["last_sent"] == 1000.0
     assert app._fleet_telemetry_profile_status["config_sync_state"] == "pending"
+
+
+def test_fleet_telemetrie_profile_worker_stuft_offline_nach_parkfrist_ab(
+    monkeypatch,
+):
+    angefordert = []
+
+    monkeypatch.setattr(app.time, "time", lambda: 1_800_000_301.0)
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: True)
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS",
+        120.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    monkeypatch.setattr(app, "latest_data", {
+        "veh-1": {
+            "state": "offline",
+            "state_since_ms": 1_800_000_000_000,
+            "drive_state": {"shift_state": "R", "speed": 12},
+            "vehicle_state": {
+                "center_display_state": "DisplayStateDriving",
+                "is_user_present": True,
+            },
+            "climate_state": {"is_climate_on": True},
+            "charge_state": {"charging_state": "Charging"},
+            "v2l_active": True,
+        },
+    })
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        _bestaetigter_profilstatus(
+            "live",
+            1_799_999_900.0,
+            live_retry_active=True,
+            live_retry_started_at=1_799_999_950.0,
+            live_retry_last_moving_at=1_799_999_990.0,
+            live_retry_motion_active=True,
+        ),
+    )
+
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+
+    status = app._fleet_telemetry_profile_status
+    assert angefordert == ["parked"]
+    assert status["target"] == "parked"
+    assert status["target_since"] == 1_800_000_000.0
+    assert status["last_sent_profile"] == "parked"
+    assert status["config_sync_profile"] == "parked"
+    assert status["config_sync_state"] == "pending"
+    assert status["live_retry_active"] is False
+    assert status["live_retry_motion_active"] is False
+
+
+def test_fleet_telemetrie_profile_worker_wartet_offline_parkfrist_ab(monkeypatch):
+    angefordert = []
+
+    monkeypatch.setattr(app.time, "time", lambda: 1_800_000_090.0)
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: True)
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS",
+        120.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: angefordert.append(profil),
+    )
+    monkeypatch.setattr(app, "latest_data", {
+        "veh-1": {
+            "state": "offline",
+            "state_since_ms": 1_800_000_000_000,
+            "drive_state": {"shift_state": "R", "speed": 12},
+        },
+    })
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        _bestaetigter_profilstatus("live", 1_799_999_900.0),
+    )
+
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+
+    status = app._fleet_telemetry_profile_status
+    assert angefordert == []
+    assert status["target"] == "parked"
+    assert status["target_since"] == 1_800_000_000.0
+    assert status["last_sent_profile"] == "live"
+    assert status["config_sync_state"] == "synced"
 
 
 def test_fleet_telemetrie_profile_prueft_nach_wechsel_schnell(monkeypatch):

@@ -6718,9 +6718,30 @@ def _fleet_telemetrie_profile_fahrzeug_aktiv(data):
     return False
 
 
+def _fleet_telemetrie_profile_offline_seit(data, jetzt=None):
+    """Liefere den Beginn eines belastbaren Offline-Zustands in Sekunden."""
+
+    if not isinstance(data, dict):
+        return None
+    if _normalisiere_dashboard_state(data.get("state")) != "offline":
+        return None
+    jetzt = time.time() if jetzt is None else float(jetzt)
+    for key in ("state_since_ms", "state_since_at", "state_checked_at"):
+        zeitpunkt_ms = _fleet_telemetrie_zeitstempel_ms(data.get(key))
+        if not isinstance(zeitpunkt_ms, (int, float)):
+            continue
+        zeitpunkt = float(zeitpunkt_ms) / 1000.0
+        if zeitpunkt <= 0:
+            continue
+        return min(zeitpunkt, jetzt)
+    return jetzt
+
+
 def _fleet_telemetrie_profile_ziel(data):
     """Ermittle das passende Kostenprofil aus den letzten Fahrzeugdaten."""
 
+    if _fleet_telemetrie_profile_offline_seit(data) is not None:
+        return "parked"
     if _fleet_telemetrie_profile_fahrzeug_fährt(data):
         return "live"
     if _fleet_telemetrie_wahr(data.get("v2l_active")):
@@ -7459,6 +7480,8 @@ def _fleet_telemetrie_profile_sync_erneut_pruefen():
         return
     jetzt = time.time()
     datenstand = _fleet_telemetrie_profile_aktueller_datenstand()
+    if _fleet_telemetrie_profile_offline_seit(datenstand, jetzt) is not None:
+        _fleet_telemetrie_profile_aktualisieren("profile-worker", datenstand)
     with _fleet_telemetry_profile_lock:
         status = _fleet_telemetry_profile_status
         neuverbindung_pendelt_sich_ein = (
@@ -7795,6 +7818,8 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
             status_geändert = True
         ziel_geändert = status.get("target") != ziel
         if ziel_geändert:
+            if parkbeginn is None and ziel == "parked":
+                parkbeginn = _fleet_telemetrie_profile_offline_seit(data, jetzt)
             status["target"] = ziel
             status["target_since"] = (
                 parkbeginn if parkbeginn is not None else jetzt
@@ -10394,7 +10419,10 @@ def _fleet_telemetrie_verbindung_aktualisieren(vin, payload, timestamp_ms=None):
             else:
                 data["state_since_at"] = state_since_ms
             data["fleet_telemetry_connectivity"] = payload
-            data = _fleet_telemetrie_profile_status_an_daten(data)
+            if state == "offline":
+                data = _fleet_telemetrie_profile_aktualisieren(cache_id, data)
+            else:
+                data = _fleet_telemetrie_profile_status_an_daten(data)
             _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, data)
             data["_live"] = True
             latest_data[cache_id] = data
