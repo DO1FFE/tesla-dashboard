@@ -2014,6 +2014,56 @@ def test_fleet_telemetrie_zieht_alte_routeline_nicht_nach():
     assert "active_route_line" not in drive
 
 
+def test_fleet_telemetrie_zieht_passende_alte_routeline_nach():
+    polyline = "_}hfaB_{fjL~oR_pR~oR_pR"
+    daten = {
+        "fleet_telemetry_raw": {"RouteLine": _routeline_protobuf(polyline)},
+        "fleet_telemetry_field_received_at": {"RouteLine": 1200},
+        "drive_state": {
+            "latitude": 51.49,
+            "longitude": 7.01,
+            "active_route_active": False,
+        },
+    }
+    timestamp = 1200 + app.FLEET_TELEMETRIE_NAVIGATION_ROUTE_LINE_MAX_ALTER_MS + 1
+
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "DestinationLocation",
+        {"latitude": 51.48, "longitude": 7.02},
+        timestamp,
+    )
+
+    drive = daten["drive_state"]
+    assert drive["active_route_active"] is True
+    assert drive["active_route_line"] == polyline
+
+
+def test_fleet_telemetrie_zieht_fremde_alte_routeline_nicht_nach():
+    polyline = "_}hfaB_{fjL~oR_pR~oR_pR"
+    daten = {
+        "fleet_telemetry_raw": {"RouteLine": _routeline_protobuf(polyline)},
+        "fleet_telemetry_field_received_at": {"RouteLine": 1200},
+        "drive_state": {
+            "latitude": 51.8,
+            "longitude": 7.8,
+            "active_route_active": False,
+        },
+    }
+    timestamp = 1200 + app.FLEET_TELEMETRIE_NAVIGATION_ROUTE_LINE_MAX_ALTER_MS + 1
+
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "DestinationLocation",
+        {"latitude": 51.9, "longitude": 7.9},
+        timestamp,
+    )
+
+    drive = daten["drive_state"]
+    assert drive["active_route_active"] is True
+    assert "active_route_line" not in drive
+
+
 def test_fleet_telemetrie_entpackt_base64_protobuf_routeline():
     polyline = "{wrcaBczhlLr@fZbWc@TcOF{Sd@"
     routeline = _routeline_protobuf(polyline)
@@ -2964,8 +3014,12 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     live = app._fleet_telemetrie_profile_config_erstellen(basis, "live")
     live_fields = live["config"]["fields"]
 
+    assert live["config"]["delivery_policy"] == "latest"
     assert live_fields["Location"]["interval_seconds"] == 1
     assert "minimum_delta" not in live_fields["Location"]
+    assert set(live_fields["Location"]["include_fields"]) == (
+        app.FLEET_TELEMETRIE_PROFILE_LIVE_BEWEGUNGS_INKLUSIVFELDER
+    )
     assert live_fields["VehicleSpeed"]["interval_seconds"] == 1
     assert "minimum_delta" not in live_fields["VehicleSpeed"]
     assert live_fields["PackCurrent"]["interval_seconds"] == 1
@@ -2992,11 +3046,17 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "minimum_delta" not in live_fields["InsideTemp"]
     assert live_fields["MilesToArrival"]["interval_seconds"] == 5
     assert live_fields["MinutesToArrival"]["interval_seconds"] == 5
+    assert live_fields["Odometer"]["interval_seconds"] == 10
+    assert set(live_fields["Odometer"]["include_fields"]) == (
+        app.FLEET_TELEMETRIE_PROFILE_LIVE_NAVIGATIONS_INKLUSIVFELDER
+    )
     assert live_fields["ModuleTempMax"]["interval_seconds"] == 60
     assert live_fields["ModuleTempMin"]["interval_seconds"] == 60
     assert "minimum_delta" not in live_fields["ModuleTempMax"]
     assert "minimum_delta" not in live_fields["ModuleTempMin"]
     assert "RouteLine" not in live_fields
+    assert "RouteLine" in live_fields["DestinationLocation"]["include_fields"]
+    assert "RouteLine" in live_fields["DestinationName"]["include_fields"]
     assert live_fields["RouteTrafficMinutesDelay"]["interval_seconds"] == 5
     assert live_fields["RdWindow"]["interval_seconds"] == 10
     assert live_fields["RearDefrostEnabled"]["interval_seconds"] == 10
@@ -3028,6 +3088,14 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     )
     assert wiederherstellungsfelder["VehicleSpeed"]["interval_seconds"] == 1
     assert wiederherstellungsfelder["Location"]["interval_seconds"] == 1
+    assert set(wiederherstellungsfelder["Location"]["include_fields"]) == (
+        app.FLEET_TELEMETRIE_PROFILE_LIVE_BEWEGUNGS_INKLUSIVFELDER
+        & app.FLEET_TELEMETRIE_PROFILE_LIVE_WIEDERHERSTELLUNGSFELDER
+    )
+    assert (
+        "RouteLine"
+        not in wiederherstellungsfelder["Location"]["include_fields"]
+    )
     assert wiederherstellungsfelder["PackCurrent"]["interval_seconds"] == 1
     assert wiederherstellungsfelder["DCDCEnable"]["interval_seconds"] == 30
 
@@ -3038,11 +3106,15 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     erweitert_fields = erweitert["config"]["fields"]
 
     assert erweitert_fields["VehicleSpeed"]["interval_seconds"] == 1
+    assert set(erweitert_fields["Location"]["include_fields"]) == (
+        app.FLEET_TELEMETRIE_PROFILE_LIVE_BEWEGUNGS_INKLUSIVFELDER
+    )
     assert erweitert_fields["DestinationLocation"]["interval_seconds"] == 1
     assert erweitert_fields["DestinationName"]["interval_seconds"] == 30
     assert erweitert_fields["HvacLeftTemperatureRequest"]["interval_seconds"] == 1
     assert erweitert_fields["HvacRightTemperatureRequest"]["interval_seconds"] == 1
     assert "RouteLine" not in erweitert_fields
+    assert "RouteLine" in erweitert_fields["Odometer"]["include_fields"]
     assert erweitert_fields["DCDCEnable"]["interval_seconds"] == 30
     assert erweitert_fields["BatteryHeaterOn"]["interval_seconds"] == 10
     assert erweitert_fields["MediaNowPlayingTitle"]["interval_seconds"] == 60
@@ -3067,6 +3139,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "Location" not in fields
     assert "MediaNowPlayingTitle" not in fields
     assert "RouteLine" not in fields
+    assert all("include_fields" not in config for config in fields.values())
     assert fields["BatteryLevel"]["interval_seconds"] == 60
     assert "minimum_delta" not in fields["BatteryLevel"]
     assert fields["BatteryHeaterOn"]["interval_seconds"] == 60
@@ -3085,6 +3158,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     charging = app._fleet_telemetrie_profile_config_erstellen(basis, "charging")
     charging_fields = charging["config"]["fields"]
 
+    assert charging["config"]["delivery_policy"] == "latest"
     assert charging_fields["DCDCEnable"]["interval_seconds"] == 30
     assert charging_fields["BatteryLevel"]["interval_seconds"] == 10
     assert "minimum_delta" not in charging_fields["BatteryLevel"]
@@ -3100,6 +3174,10 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "DestinationName" not in charging_fields
     assert "MediaNowPlayingTitle" not in charging_fields
     assert "VehicleName" not in charging_fields
+    assert all(
+        "include_fields" not in config
+        for config in charging_fields.values()
+    )
     assert all(
         "minimum_delta" not in feld_config
         for feld_config in charging_fields.values()
@@ -3176,7 +3254,13 @@ def test_fleet_telemetrie_live_reparatur_sendet_basis_dann_vollprofil(
 
     assert gesendete_felder == [
         {"DCDCEnable", "Location", "VehicleSpeed"},
-        {"DCDCEnable", "InsideTemp", "Location", "VehicleSpeed"},
+        {
+            "DCDCEnable",
+            "InsideTemp",
+            "Location",
+            "Odometer",
+            "VehicleSpeed",
+        },
     ]
     status = app._fleet_telemetry_profile_status
     assert status["live_retry_attempts"] == 2

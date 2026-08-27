@@ -1963,7 +1963,7 @@ _fleet_telemetry_queue_verworfen = 0
 _fleet_telemetry_queue_warnung = 0.0
 FLEET_TELEMETRIE_PROFILE = {"live", "live_extended", "parked", "charging"}
 FLEET_TELEMETRIE_PROFILE_STANDARD = "live"
-FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 1
+FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 2
 FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS = max(
     0.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_PARK_PROFILE_DELAY_SECONDS", "120")),
@@ -2102,6 +2102,35 @@ FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER = frozenset({
 FLEET_TELEMETRIE_PROFILE_OPTIONALE_FELDER = frozenset({
     "DCDCEnable",
 })
+FLEET_TELEMETRIE_PROFILE_LIVE_BEWEGUNGS_INKLUSIVFELDER = frozenset({
+    "BrakePedal",
+    "BrakePedalPos",
+    "DCDCEnable",
+    "Gear",
+    "GpsHeading",
+    "GpsState",
+    "LightsHazardsActive",
+    "LightsHighBeams",
+    "LightsTurnSignal",
+    "Odometer",
+    "PackCurrent",
+    "PackVoltage",
+    "PedalPosition",
+    "VehicleSpeed",
+})
+FLEET_TELEMETRIE_PROFILE_LIVE_NAVIGATIONS_INKLUSIVFELDER = frozenset({
+    "DestinationLocation",
+    "DestinationName",
+    "ExpectedEnergyPercentAtTripArrival",
+    "MilesToArrival",
+    "MinutesToArrival",
+    "RouteLine",
+    "RouteTrafficMinutesDelay",
+})
+FLEET_TELEMETRIE_PROFILE_LIVE_NAVIGATION_NEUVERSAND_SECONDS = max(
+    5,
+    int(float(os.getenv("TESLA_FLEET_NAVIGATION_RESEND_SECONDS", "10"))),
+)
 FLEET_TELEMETRIE_PROFILE_LIVE_1S_FELDER = frozenset({
     "BrakePedal",
     "BrakePedalPos",
@@ -6746,11 +6775,18 @@ def _fleet_telemetrie_profile_config_erstellen(
         raise ValueError(f"Unbekanntes Telemetry-Profil: {profil}")
     config_request = copy.deepcopy(request_data)
     config = config_request.setdefault("config", {})
+    config["delivery_policy"] = "latest"
     fields = config.setdefault("fields", {})
     if not isinstance(fields, dict):
         return config_request
+    for feld_config in fields.values():
+        if isinstance(feld_config, dict):
+            feld_config.pop("include_fields", None)
     for feld in FLEET_TELEMETRIE_PROFILE_OPTIONALE_FELDER:
         fields.setdefault(feld, {})
+    if profil in {"live", "live_extended"}:
+        fields.setdefault("Location", {})
+        fields.setdefault("Odometer", {})
     for feld in FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER:
         fields.pop(feld, None)
     if profil == "live":
@@ -6784,6 +6820,37 @@ def _fleet_telemetrie_profile_config_erstellen(
             continue
         feld_config["interval_seconds"] = intervall
         feld_config.pop("minimum_delta", None)
+
+    if profil in {"live", "live_extended"}:
+        bewegungsfelder = FLEET_TELEMETRIE_PROFILE_LIVE_BEWEGUNGS_INKLUSIVFELDER
+        if wiederherstellung:
+            bewegungsfelder &= (
+                FLEET_TELEMETRIE_PROFILE_LIVE_WIEDERHERSTELLUNGSFELDER
+            )
+        location_config = fields.get("Location")
+        if isinstance(location_config, dict):
+            location_config["include_fields"] = sorted(bewegungsfelder)
+
+        if not wiederherstellung:
+            navigationsfelder = (
+                FLEET_TELEMETRIE_PROFILE_LIVE_NAVIGATIONS_INKLUSIVFELDER
+            )
+            for ausloeser in (
+                "DestinationLocation",
+                "DestinationName",
+                "Odometer",
+            ):
+                feld_config = fields.get(ausloeser)
+                if not isinstance(feld_config, dict):
+                    continue
+                feld_config["include_fields"] = sorted(
+                    navigationsfelder - {ausloeser}
+                )
+            odometer_config = fields.get("Odometer")
+            if isinstance(odometer_config, dict):
+                odometer_config["interval_seconds"] = (
+                    FLEET_TELEMETRIE_PROFILE_LIVE_NAVIGATION_NEUVERSAND_SECONDS
+                )
     return config_request
 
 
@@ -8215,6 +8282,8 @@ FLEET_TELEMETRIE_NAVIGATIONSFELDER = (
     "active_route_updated_at",
 )
 FLEET_TELEMETRIE_NAVIGATION_ROUTE_LINE_MAX_ALTER_MS = 60_000
+FLEET_TELEMETRIE_NAVIGATION_ROUTE_ZIEL_MAX_ABSTAND_KM = 5.0
+FLEET_TELEMETRIE_NAVIGATION_ROUTE_POSITION_MAX_ABSTAND_KM = 10.0
 
 
 def _fleet_telemetrie_navigation_beenden(drive, timestamp_ms):
@@ -8327,6 +8396,81 @@ def _fleet_telemetrie_routeline_normalisieren(value):
     return polyline or value
 
 
+def _fleet_telemetrie_polyline_punkte(polyline):
+    """Dekodiere eine Google-Polyline mit Teslas Genauigkeit von sechs Stellen."""
+
+    if not _fleet_telemetrie_routeline_ist_polyline(polyline):
+        return []
+    index = 0
+    latitude = 0
+    longitude = 0
+    punkte = []
+
+    def wert_lesen(start):
+        ergebnis = 0
+        verschiebung = 0
+        while start < len(polyline) and verschiebung <= 60:
+            byte = ord(polyline[start]) - 63
+            start += 1
+            if byte < 0:
+                return None, start
+            ergebnis |= (byte & 0x1F) << verschiebung
+            if byte < 0x20:
+                delta = ~(ergebnis >> 1) if ergebnis & 1 else ergebnis >> 1
+                return delta, start
+            verschiebung += 5
+        return None, start
+
+    while index < len(polyline) and len(punkte) < 100_000:
+        delta_latitude, index = wert_lesen(index)
+        delta_longitude, index = wert_lesen(index)
+        if delta_latitude is None or delta_longitude is None:
+            return []
+        latitude += delta_latitude
+        longitude += delta_longitude
+        punkt = (latitude / 1_000_000, longitude / 1_000_000)
+        if _fleet_telemetrie_gueltige_zielkoordinaten(*punkt) is None:
+            return []
+        punkte.append(punkt)
+    if index != len(polyline):
+        return []
+    return punkte
+
+
+def _fleet_telemetrie_routeline_passt_zu_navigation(route_line, drive):
+    """Prüfe Ziel und Fahrzeugposition gegen eine ältere Routenlinie."""
+
+    if not isinstance(drive, dict):
+        return False
+    ziel = _fleet_telemetrie_gueltige_zielkoordinaten(
+        drive.get("active_route_latitude"),
+        drive.get("active_route_longitude"),
+    )
+    position = _fleet_telemetrie_gueltige_zielkoordinaten(
+        drive.get("latitude"),
+        drive.get("longitude"),
+    )
+    if ziel is None or position is None:
+        return False
+    punkte = _fleet_telemetrie_polyline_punkte(route_line)
+    if len(punkte) < 2:
+        return False
+    ziel_abstand = min(
+        _haversine(ziel[0], ziel[1], punkt[0], punkt[1])
+        for punkt in (punkte[0], punkte[-1])
+    )
+    if ziel_abstand > FLEET_TELEMETRIE_NAVIGATION_ROUTE_ZIEL_MAX_ABSTAND_KM:
+        return False
+    position_abstand = min(
+        _haversine(position[0], position[1], punkt[0], punkt[1])
+        for punkt in punkte
+    )
+    return (
+        position_abstand
+        <= FLEET_TELEMETRIE_NAVIGATION_ROUTE_POSITION_MAX_ABSTAND_KM
+    )
+
+
 def _fleet_telemetrie_routeline_in_daten_normalisieren(data):
     """Normalisiere eine gecachte RouteLine im Dashboard-Datensatz."""
 
@@ -8358,7 +8502,13 @@ def _fleet_telemetrie_navigation_routeline_nachziehen(data, drive, timestamp_ms)
         route_empfang = _as_float(feld_empfang.get("RouteLine"))
     if route_empfang is not None:
         alter = abs(float(timestamp_ms) - route_empfang)
-        if alter > FLEET_TELEMETRIE_NAVIGATION_ROUTE_LINE_MAX_ALTER_MS:
+        if (
+            alter > FLEET_TELEMETRIE_NAVIGATION_ROUTE_LINE_MAX_ALTER_MS
+            and not _fleet_telemetrie_routeline_passt_zu_navigation(
+                route_line,
+                drive,
+            )
+        ):
             return
     drive["active_route_line"] = route_line
 
@@ -8424,13 +8574,14 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
                 value.get("longitude"),
             )
             if koordinaten is not None:
-                if (
-                    drive.get("active_route_active") is not False
-                    or _fleet_telemetrie_navigation_hat_zielkern(drive)
-                ):
-                    lat, lon = koordinaten
-                    drive["active_route_latitude"] = lat
-                    drive["active_route_longitude"] = lon
+                lat, lon = koordinaten
+                drive["active_route_latitude"] = lat
+                drive["active_route_longitude"] = lon
+                _fleet_telemetrie_navigation_aktivieren(
+                    drive,
+                    timestamp_ms,
+                    data,
+                )
             else:
                 drive.pop("active_route_latitude", None)
                 drive.pop("active_route_longitude", None)
