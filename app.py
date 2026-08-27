@@ -7408,11 +7408,17 @@ def _fleet_telemetrie_profile_spaeter_anwenden(profil):
 
 
 def _fleet_telemetrie_profile_neuverbindung_erwartet(status, jetzt):
-    """Erkenne den erwarteten Websocket-Neustart nach einer Live+-Config."""
+    """Erkenne den erwarteten Websocket-Neustart nach einem Profilwechsel."""
 
     if not isinstance(status, dict):
         return False
-    if status.get("last_sent_profile") != "live_extended":
+    letztes_profil = status.get("last_sent_profile")
+    live_reparaturwechsel = (
+        status.get("live_retry_active") is True
+        and int(status.get("live_retry_attempts") or 0) >= 2
+        and letztes_profil in {"live", "live_extended"}
+    )
+    if letztes_profil != "live_extended" and not live_reparaturwechsel:
         return False
     letzter_versand = _as_float(status.get("last_sent"))
     if letzter_versand is None:

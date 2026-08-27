@@ -3422,7 +3422,7 @@ def test_fleet_telemetrie_profile_sendet_live_dann_live_plus_und_wartet(
     monkeypatch.setattr(
         app,
         "FLEET_TELEMETRIE_PROFILE_LIVE_NEUVERSAND_BEWEGUNGSNACHLAUF_SECONDS",
-        60.0,
+        90.0,
     )
     monkeypatch.setattr(
         app,
@@ -3502,6 +3502,25 @@ def test_fleet_telemetrie_profile_sendet_live_dann_live_plus_und_wartet(
         ("live", 2015.0),
         ("live_extended", 2020.0),
         ("live", 2050.1),
+    ]
+
+    jetzt[0] = 2055.1
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+
+    assert gesendet == [
+        ("live", 2015.0),
+        ("live_extended", 2020.0),
+        ("live", 2050.1),
+    ]
+
+    jetzt[0] = 2080.2
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+
+    assert gesendet == [
+        ("live", 2015.0),
+        ("live_extended", 2020.0),
+        ("live", 2050.1),
+        ("live_extended", 2080.2),
     ]
 
 
