@@ -2055,6 +2055,15 @@ FLEET_TELEMETRIE_PROFILE_LIVE_NEUVERSAND_EINPENDEL_SECONDS = max(
     10.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_RESEND_SETTLE_SECONDS", "20")),
 )
+FLEET_TELEMETRIE_PROFILE_LIVE_REPARATUR_NEUVERBINDUNG_SECONDS = max(
+    30.0,
+    float(
+        os.getenv(
+            "TESLA_FLEET_TELEMETRY_LIVE_REPAIR_RECONNECT_SECONDS",
+            "120",
+        )
+    ),
+)
 FLEET_TELEMETRIE_PROFILE_LIVE_NEUVERSAND_STARTVERZOEGERUNG_SECONDS = max(
     3.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_RESEND_GRACE_SECONDS", "5")),
@@ -6308,10 +6317,27 @@ def _fleet_telemetrie_profile_live_neuversand_fahrt_aktuell(status, jetzt):
     )
 
 
-def _fleet_telemetrie_profile_live_wiederherstellungsprofil(status, jetzt=None):
+def _fleet_telemetrie_profile_live_plus_erlaubt(data):
+    """Deaktiviere Live+ für Legacy-Fahrzeuge ohne Schlüssel-Pairing."""
+
+    if not isinstance(data, dict):
+        return True
+    config = data.get("vehicle_config")
+    if not isinstance(config, dict):
+        return True
+    return config.get("supports_qr_pairing") is not False
+
+
+def _fleet_telemetrie_profile_live_wiederherstellungsprofil(
+    status,
+    jetzt=None,
+    data=None,
+):
     """Wechsle einmal von Live zu Live+, danach warte auf die Neuverbindung."""
 
     if not isinstance(status, dict):
+        return "live"
+    if not _fleet_telemetrie_profile_live_plus_erlaubt(data):
         return "live"
     versuche = int(status.get("live_retry_attempts") or 0)
     if versuche <= 0:
@@ -7295,6 +7321,7 @@ def _fleet_telemetrie_profile_sync_erneut_pruefen():
             profil = _fleet_telemetrie_profile_live_wiederherstellungsprofil(
                 status,
                 jetzt,
+                datenstand,
             )
         else:
             profil = (
@@ -7424,10 +7451,12 @@ def _fleet_telemetrie_profile_neuverbindung_erwartet(status, jetzt):
     if letzter_versand is None:
         return False
     alter = float(jetzt) - letzter_versand
-    return (
-        0 <= alter
-        <= FLEET_TELEMETRIE_PROFILE_ERWARTETE_NEUVERBINDUNG_SECONDS
-    )
+    wartezeit = FLEET_TELEMETRIE_PROFILE_ERWARTETE_NEUVERBINDUNG_SECONDS
+    if live_reparaturwechsel:
+        wartezeit = (
+            FLEET_TELEMETRIE_PROFILE_LIVE_REPARATUR_NEUVERBINDUNG_SECONDS
+        )
+    return 0 <= alter <= wartezeit
 
 
 def _fleet_telemetrie_profile_nach_neuverbindung_anfordern(vin, jetzt=None):
@@ -7537,6 +7566,7 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
     ladezustand = _fleet_telemetrie_profile_ladezustand(data)
     jetzt = time.time()
     live_takt_stabil = _fleet_telemetrie_profile_live_takt_stabil(data, jetzt)
+    live_plus_erlaubt = _fleet_telemetrie_profile_live_plus_erlaubt(data)
     fahrzeug_bewegt_sich = _fleet_telemetrie_profile_fahrzeug_bewegt_sich(
         data,
         jetzt,
@@ -7703,6 +7733,7 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                     _fleet_telemetrie_profile_live_wiederherstellungsprofil(
                         status,
                         jetzt,
+                        data,
                     )
                 )
             elif ladebruecke_aktiv:
@@ -7713,8 +7744,11 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                 aktivierbares_ziel = (
                     "live_extended"
                     if (
-                        live_takt_akzeptiert
-                        or live_erweitert_neuverbindung_erwartet
+                        live_plus_erlaubt
+                        and (
+                            live_takt_akzeptiert
+                            or live_erweitert_neuverbindung_erwartet
+                        )
                     )
                     else "live"
                 )
@@ -7722,13 +7756,17 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                 aktivierbares_ziel = (
                     "live_extended"
                     if (
-                        live_takt_akzeptiert
-                        or live_erweitert_neuverbindung_erwartet
+                        live_plus_erlaubt
+                        and (
+                            live_takt_akzeptiert
+                            or live_erweitert_neuverbindung_erwartet
+                        )
                     )
                     else "live"
                 )
             elif (
                 current == "live"
+                and live_plus_erlaubt
                 and _fleet_telemetrie_profile_sync_bestaetigt(status, "live")
                 and live_takt_stabil
                 and live_stable_lang_genug
