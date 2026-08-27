@@ -3407,7 +3407,7 @@ def test_fleet_telemetrie_profile_sendet_live_bei_10s_takt_erneut(monkeypatch):
     assert app._fleet_telemetry_profile_status["config_sync_state"] == "pending"
 
 
-def test_fleet_telemetrie_profile_sendet_live_alle_fuenf_sekunden_erneut(
+def test_fleet_telemetrie_profile_sendet_live_dann_live_plus_und_wartet(
     monkeypatch,
 ):
     jetzt = [2014.9]
@@ -3422,7 +3422,12 @@ def test_fleet_telemetrie_profile_sendet_live_alle_fuenf_sekunden_erneut(
     monkeypatch.setattr(
         app,
         "FLEET_TELEMETRIE_PROFILE_LIVE_NEUVERSAND_BEWEGUNGSNACHLAUF_SECONDS",
-        15.0,
+        60.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_ERWARTETE_NEUVERBINDUNG_SECONDS",
+        30.0,
     )
     monkeypatch.setattr(app, "latest_data", {})
 
@@ -3442,6 +3447,18 @@ def test_fleet_telemetrie_profile_sendet_live_alle_fuenf_sekunden_erneut(
         app,
         "_fleet_telemetrie_profile_anwenden",
         profil_anwenden,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_sync_pruefen",
+        lambda: {
+            "synced": False,
+            "key_paired": None,
+            "state": "pending",
+            "details": [],
+            "checked_at": jetzt[0],
+            "error": None,
+        },
     )
     monkeypatch.setattr(
         app,
@@ -3471,12 +3488,21 @@ def test_fleet_telemetrie_profile_sendet_live_alle_fuenf_sekunden_erneut(
     jetzt[0] = 2020.0
     app._fleet_telemetrie_profile_sync_erneut_pruefen()
 
-    assert gesendet == [("live", 2015.0), ("live", 2020.0)]
+    assert gesendet == [("live", 2015.0), ("live_extended", 2020.0)]
 
     jetzt[0] = 2025.1
     app._fleet_telemetrie_profile_sync_erneut_pruefen()
 
-    assert gesendet == [("live", 2015.0), ("live", 2020.0)]
+    assert gesendet == [("live", 2015.0), ("live_extended", 2020.0)]
+
+    jetzt[0] = 2050.1
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+
+    assert gesendet == [
+        ("live", 2015.0),
+        ("live_extended", 2020.0),
+        ("live", 2050.1),
+    ]
 
 
 def test_fleet_telemetrie_profile_worker_laesst_live_stream_einpendeln(
