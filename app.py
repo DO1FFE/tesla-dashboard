@@ -895,6 +895,10 @@ FLEET_TELEMETRIE_POSITION_MIN_GESCHWINDIGKEIT_MPH = max(
     0.1,
     float(os.getenv("TESLA_FLEET_POSITION_MIN_SPEED_MPH", "0.5")),
 )
+FLEET_TELEMETRIE_LIVE_REPARATUR_MIN_GESCHWINDIGKEIT_MPH = max(
+    FLEET_TELEMETRIE_POSITION_MIN_GESCHWINDIGKEIT_MPH,
+    float(os.getenv("TESLA_FLEET_LIVE_REPAIR_MIN_SPEED_MPH", "3")),
+)
 FLEET_TELEMETRIE_PARKABGLEICH_VERZOEGERUNG_SECONDS = max(
     1.0,
     float(os.getenv("TESLA_FLEET_PARK_RECONCILE_DELAY_SECONDS", "10")),
@@ -2221,6 +2225,22 @@ FLEET_TELEMETRIE_PROFILE_LIVE_FELDER = frozenset({
     "Soc",
     "VehicleSpeed",
 })
+FLEET_TELEMETRIE_PROFILE_LIVE_WIEDERHERSTELLUNGSFELDER = frozenset({
+    "BrakePedal",
+    "BrakePedalPos",
+    "DCDCEnable",
+    "Gear",
+    "GpsHeading",
+    "GpsState",
+    "LightsHazardsActive",
+    "LightsHighBeams",
+    "LightsTurnSignal",
+    "Location",
+    "PackCurrent",
+    "PackVoltage",
+    "PedalPosition",
+    "VehicleSpeed",
+})
 FLEET_TELEMETRIE_PROFILE_LIVE_ERWEITERT_60S_FELDER = frozenset({
     "ChargePort",
     "ChargePortDoorOpen",
@@ -2456,6 +2476,9 @@ def _fleet_telemetrie_profile_status_standard():
         "live_retry_confirmed_at": 0.0,
         "live_retry_attempts": 0,
         "live_reconnect_seen_at": 0.0,
+        "live_recovery_bootstrap_active": False,
+        "live_recovery_full_pending": False,
+        "live_recovery_bootstrap_confirmed_at": 0.0,
         "charging_observed": None,
         "post_charge_live_since": 0.0,
         "post_charge_live_until": 0.0,
@@ -2516,6 +2539,7 @@ def _fleet_telemetrie_profile_status_laden():
         "live_retry_last_moving_at",
         "live_retry_confirmed_at",
         "live_reconnect_seen_at",
+        "live_recovery_bootstrap_confirmed_at",
         "post_charge_live_since",
         "post_charge_live_until",
     ):
@@ -2530,6 +2554,12 @@ def _fleet_telemetrie_profile_status_laden():
         status["live_retry_motion_active"] = geladen.get(
             "live_retry_motion_active"
         )
+    for key in (
+        "live_recovery_bootstrap_active",
+        "live_recovery_full_pending",
+    ):
+        if isinstance(geladen.get(key), bool):
+            status[key] = geladen.get(key)
     try:
         status["live_retry_attempts"] = max(
             0,
@@ -6376,6 +6406,9 @@ def _fleet_telemetrie_profile_live_neuversand_starten(status, jetzt):
     status["live_retry_started_at"] = jetzt
     status["live_retry_confirmed_at"] = 0.0
     status["live_retry_attempts"] = 0
+    status["live_recovery_bootstrap_active"] = False
+    status["live_recovery_full_pending"] = False
+    status["live_recovery_bootstrap_confirmed_at"] = 0.0
     status["config_synced"] = False
     status["config_sync_state"] = "active"
     status["config_sync_error"] = (
@@ -6450,23 +6483,36 @@ def _fleet_telemetrie_profile_fahrzeug_bewegt_sich(data, jetzt=None):
     speed = _as_float(drive.get("speed"))
     if (
         speed is None
-        or abs(speed) <= FLEET_TELEMETRIE_POSITION_MIN_GESCHWINDIGKEIT_MPH
+        or abs(speed)
+        <= FLEET_TELEMETRIE_LIVE_REPARATUR_MIN_GESCHWINDIGKEIT_MPH
     ):
         return False
     jetzt = time.time() if jetzt is None else float(jetzt)
     empfangen = data.get("fleet_telemetry_field_received_at")
-    if not isinstance(empfangen, dict):
-        return False
-    speed_empfangen = _fleet_telemetrie_timestamp_sekunden(
-        empfangen.get("VehicleSpeed"),
+    speed_empfangen = None
+    if isinstance(empfangen, dict):
+        speed_empfangen = _fleet_telemetrie_timestamp_sekunden(
+            empfangen.get("VehicleSpeed"),
+            jetzt,
+        )
+    fallback_empfangen = _fleet_telemetrie_timestamp_sekunden(
+        data.get("fleet_vehicle_data_received_at"),
         jetzt,
     )
-    if speed_empfangen is None:
-        return False
-    return (
-        0 <= jetzt - speed_empfangen
+    telemetrie_aktuell = (
+        speed_empfangen is not None
+        and 0 <= jetzt - speed_empfangen
         <= FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS
     )
+    fallback_max_alter = (
+        FLEET_TELEMETRIE_STREAM_WIEDERHERSTELLUNG_WIEDERHOLUNG_SECONDS
+        + FLEET_TELEMETRIE_POSITION_PRUEFINTERVALL_SECONDS
+    )
+    fallback_aktuell = (
+        fallback_empfangen is not None
+        and 0 <= jetzt - fallback_empfangen <= fallback_max_alter
+    )
+    return telemetrie_aktuell or fallback_aktuell
 
 
 def _fleet_telemetrie_profile_stream_bestaetigt(
@@ -6689,7 +6735,11 @@ def _fleet_telemetrie_profile_intervall(profil, feld):
     return None
 
 
-def _fleet_telemetrie_profile_config_erstellen(request_data, profil):
+def _fleet_telemetrie_profile_config_erstellen(
+    request_data,
+    profil,
+    wiederherstellung=False,
+):
     """Erzeuge eine Tesla-Fleet-Telemetry-Konfiguration für ein Profil."""
 
     if profil not in FLEET_TELEMETRIE_PROFILE:
@@ -6707,6 +6757,13 @@ def _fleet_telemetrie_profile_config_erstellen(request_data, profil):
         for feld in list(fields):
             if feld not in FLEET_TELEMETRIE_PROFILE_LIVE_FELDER:
                 fields.pop(feld, None)
+        if wiederherstellung:
+            for feld in list(fields):
+                if (
+                    feld
+                    not in FLEET_TELEMETRIE_PROFILE_LIVE_WIEDERHERSTELLUNGSFELDER
+                ):
+                    fields.pop(feld, None)
     if profil == "live_extended":
         for feld in list(fields):
             if feld not in FLEET_TELEMETRIE_PROFILE_LIVE_EXTENDED_FELDER:
@@ -7157,7 +7214,11 @@ def _fleet_telemetrie_profile_config_speichern(config_request):
         pass
 
 
-def _fleet_telemetrie_profile_versand_vermerken(profil, jetzt=None):
+def _fleet_telemetrie_profile_versand_vermerken(
+    profil,
+    jetzt=None,
+    wiederherstellung=False,
+):
     """Merke das Profil erst nach einem erfolgreichen HTTP-POST als gesendet."""
 
     if profil not in FLEET_TELEMETRIE_PROFILE:
@@ -7176,6 +7237,14 @@ def _fleet_telemetrie_profile_versand_vermerken(profil, jetzt=None):
             status["live_retry_attempts"] = int(
                 status.get("live_retry_attempts") or 0
             ) + 1
+            status["live_recovery_bootstrap_active"] = bool(
+                wiederherstellung
+            )
+            if not wiederherstellung:
+                status["live_recovery_full_pending"] = False
+        elif profil in {"live", "live_extended"}:
+            status["live_recovery_bootstrap_active"] = False
+            status["live_recovery_full_pending"] = False
         status["updated_at"] = jetzt
         _fleet_telemetrie_profile_status_speichern()
     return True
@@ -7189,8 +7258,28 @@ def _fleet_telemetrie_profile_anwenden(profil):
     token = _fleet_telemetrie_oauth_token()
     if not token:
         raise RuntimeError("Kein gültiger Fleet-OAuth-Zugriffstoken verfügbar")
+    with _fleet_telemetry_profile_lock:
+        status = _fleet_telemetry_profile_status
+        live_reparatur = (
+            profil == "live"
+            and status.get("target") == "live"
+            and status.get("live_retry_active") is True
+        )
+        vollprofil_ausstehend = (
+            status.get("live_recovery_full_pending") is True
+        )
+        versuche = int(status.get("live_retry_attempts") or 0)
+    wiederherstellung = (
+        live_reparatur
+        and not vollprofil_ausstehend
+        and versuche % 2 == 0
+    )
     basis_request = _fleet_telemetrie_profile_request_laden()
-    config_request = _fleet_telemetrie_profile_config_erstellen(basis_request, profil)
+    config_request = _fleet_telemetrie_profile_config_erstellen(
+        basis_request,
+        profil,
+        wiederherstellung=wiederherstellung,
+    )
     url = (
         TESLA_FLEET_VEHICLE_COMMAND_URL.rstrip("/")
         + "/api/1/vehicles/fleet_telemetry_config"
@@ -7204,7 +7293,10 @@ def _fleet_telemetrie_profile_anwenden(profil):
     )
     response.raise_for_status()
     _fleet_telemetrie_profile_config_speichern(config_request)
-    _fleet_telemetrie_profile_versand_vermerken(profil)
+    _fleet_telemetrie_profile_versand_vermerken(
+        profil,
+        wiederherstellung=wiederherstellung,
+    )
     try:
         return _fleet_telemetrie_profile_sync_pruefen(token, config_request)
     except Exception as exc:
@@ -7613,6 +7705,7 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
         jetzt,
     )
     profil_anfordern = None
+    bootstrap_ausbau_angefordert = False
     with _fleet_telemetry_profile_lock:
         status = _fleet_telemetry_profile_status
         status_geändert = False
@@ -7702,10 +7795,8 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
         aktuelle_geschwindigkeit = _as_float(drive.get("speed"))
         bewegung_aktiv = (
             ziel == "live"
-            and _normalize_shift_state(drive.get("shift_state")) != "P"
             and aktuelle_geschwindigkeit is not None
-            and abs(aktuelle_geschwindigkeit)
-            > FLEET_TELEMETRIE_POSITION_MIN_GESCHWINDIGKEIT_MPH
+            and _fleet_telemetrie_profile_fahrzeug_bewegt_sich(data, jetzt)
         )
         if status.get("live_retry_motion_active") is not bewegung_aktiv:
             status["live_retry_motion_active"] = bewegung_aktiv
@@ -7716,17 +7807,39 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
         if status.get("live_retry_active") is True:
             if ziel != "live":
                 status["live_retry_active"] = False
+                status["live_recovery_bootstrap_active"] = False
+                status["live_recovery_full_pending"] = False
                 status_geändert = True
             elif live_takt_bestaetigt:
-                status["live_retry_active"] = False
-                status["live_retry_confirmed_at"] = jetzt
-                status["live_reconnect_seen_at"] = 0.0
-                status["config_sync_error"] = None
-                status_geändert = True
-                logging.info(
-                    "Fleet-Telemetry-Live-Takt nach %s Neuversandversuchen bestätigt",
-                    int(status.get("live_retry_attempts") or 0),
-                )
+                if status.get("live_recovery_bootstrap_active") is True:
+                    status["live_recovery_bootstrap_active"] = False
+                    status["live_recovery_full_pending"] = True
+                    status["live_recovery_bootstrap_confirmed_at"] = jetzt
+                    _fleet_telemetrie_profile_sync_ausstehend_setzen(
+                        status,
+                        "live",
+                        jetzt,
+                    )
+                    profil_anfordern = "live"
+                    bootstrap_ausbau_angefordert = True
+                    status_geändert = True
+                    logging.info(
+                        "Fleet-Telemetry-Basisprofil bestätigt; "
+                        "vollständiges Live-Profil wird angefordert"
+                    )
+                elif status.get("live_recovery_full_pending") is not True:
+                    status["live_retry_active"] = False
+                    status["live_retry_confirmed_at"] = jetzt
+                    status["live_reconnect_seen_at"] = 0.0
+                    status["live_recovery_bootstrap_active"] = False
+                    status["live_recovery_full_pending"] = False
+                    status["config_sync_error"] = None
+                    status_geändert = True
+                    logging.info(
+                        "Fleet-Telemetry-Live-Takt nach %s "
+                        "Neuversandversuchen bestätigt",
+                        int(status.get("live_retry_attempts") or 0),
+                    )
         letzter_versand = float(status.get("last_sent") or 0)
         live_neuversand_pruefbar = (
             ziel == "live"
@@ -7869,7 +7982,9 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
             or (physisches_profil_weicht_ab and not auftrag_ausstehend)
         )
         if (
-            status.get("config_sync_profile") == aktivierbares_ziel
+            not bootstrap_ausbau_angefordert
+            and status.get("live_recovery_full_pending") is not True
+            and status.get("config_sync_profile") == aktivierbares_ziel
             and not _fleet_telemetrie_profile_sync_bestaetigt(
                 status,
                 aktivierbares_ziel,
@@ -9085,6 +9200,8 @@ def _fleet_telemetrie_streamprofil_wiederherstellung_anfordern(
         return False
     if _normalize_shift_state(drive.get("shift_state")) not in {"R", "N", "D"}:
         return False
+    if not _fleet_telemetrie_profile_fahrzeug_bewegt_sich(data, jetzt):
+        return False
     with _fleet_telemetry_profile_lock:
         status = _fleet_telemetry_profile_status
         geändert = False
@@ -9147,7 +9264,7 @@ def _fleet_telemetrie_stream_wiederherstellung_soll_aktualisiert_werden(
             (
                 speed is not None
                 and abs(speed)
-                > FLEET_TELEMETRIE_POSITION_MIN_GESCHWINDIGKEIT_MPH
+                > FLEET_TELEMETRIE_LIVE_REPARATUR_MIN_GESCHWINDIGKEIT_MPH
             )
             or (power is not None and abs(power) > 1)
         )
@@ -10012,6 +10129,28 @@ def _fleet_telemetrie_ist_neuverbindung(vorher, aktuell):
     )
 
 
+def _fleet_telemetrie_verbindungsabbruch_ist_veraltet(vorher, aktuell):
+    """Ignoriere den späten Abbruch einer bereits ersetzten Verbindung."""
+
+    if not isinstance(vorher, dict) or not isinstance(aktuell, dict):
+        return False
+    vorheriger_status = str(
+        vorher.get("Status") or vorher.get("status") or ""
+    ).strip().lower()
+    aktueller_status = str(
+        aktuell.get("Status") or aktuell.get("status") or ""
+    ).strip().lower()
+    if vorheriger_status != "connected" or aktueller_status != "disconnected":
+        return False
+    vorherige_kennung = _fleet_telemetrie_verbindungskennung(vorher)
+    aktuelle_kennung = _fleet_telemetrie_verbindungskennung(aktuell)
+    return bool(
+        vorherige_kennung
+        and aktuelle_kennung
+        and vorherige_kennung != aktuelle_kennung
+    )
+
+
 def _fleet_telemetrie_statusbeginn_ms(payload, fallback_ms):
     """Lese den Beginn eines Fleet-Telemetry-Verbindungsstatus."""
     if not isinstance(payload, dict):
@@ -10063,7 +10202,14 @@ def _fleet_telemetrie_verbindung_aktualisieren(vin, payload, timestamp_ms=None):
             data = latest_data.get(cache_id)
             if not isinstance(data, dict):
                 data = _load_cached(cache_id) or {}
+            if _fleet_telemetrie_verbindungsabbruch_ist_veraltet(
+                data.get("fleet_telemetry_connectivity"),
+                payload,
+            ):
+                continue
             cache_daten.append((cache_id, data))
+        if not cache_daten:
+            return False
         neuverbindung = any(
             _fleet_telemetrie_ist_neuverbindung(
                 data.get("fleet_telemetry_connectivity"),
