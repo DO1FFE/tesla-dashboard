@@ -7658,7 +7658,10 @@ def _fleet_telemetrie_profile_neuverbindung_erwartet(status, jetzt):
         wartezeit = (
             FLEET_TELEMETRIE_PROFILE_LIVE_REPARATUR_NEUVERBINDUNG_SECONDS
         )
-    return 0 <= alter <= wartezeit
+    # Eine parallel gestartete Profilberechnung kann einen minimal älteren
+    # Zeitwert tragen als der inzwischen gesetzte Versandzeitpunkt. Auch dann
+    # ist die Konfiguration frisch und darf nicht sofort zurückgestuft werden.
+    return alter <= wartezeit
 
 
 def _fleet_telemetrie_profile_neuverbindung_pendelt_sich_ein(status, jetzt):
