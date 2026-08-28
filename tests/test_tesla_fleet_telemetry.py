@@ -2162,7 +2162,7 @@ def test_fleet_telemetrie_bereinigt_alte_navigation_aus_cache():
         },
     }
 
-    app._fleet_telemetrie_navigation_cache_bereinigen(daten)
+    assert app._fleet_telemetrie_navigation_cache_bereinigen(daten)
 
     drive = daten["drive_state"]
     assert "active_route_line" not in drive
@@ -2747,6 +2747,48 @@ def test_telemetrie_cache_markiert_veraltete_daten_als_offline(monkeypatch):
     assert daten["api_error"] == "Noch keine aktuellen Fleet-Telemetry-Daten empfangen"
     assert daten["state_checked_at"] == 2_000_000
     assert daten["state_since_ms"] == update_ms + 300_000
+
+
+def test_telemetrie_cache_speichert_bereinigte_offline_navigation(monkeypatch):
+    gespeichert = []
+    monkeypatch.setattr(app, "_fleet_telemetrie_aktiv", lambda: True)
+    monkeypatch.setattr(app, "TESLA_FLEET_TELEMETRY_STALE_SECONDS", 300.0)
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS",
+        120.0,
+    )
+    monkeypatch.setattr(app.time, "time", lambda: 1_800_000_301.0)
+    monkeypatch.setattr(app, "latest_data", {})
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda cache_id, data: gespeichert.append((cache_id, data)),
+    )
+    cache = {
+        "state": "offline",
+        "state_since_ms": 1_800_000_000_000,
+        "fleet_telemetry_updated_at": 1_800_000_000_000,
+        "fleet_telemetry_raw": {
+            "DestinationName": "Altes Ziel",
+            "RouteLine": "abcdef",
+        },
+        "drive_state": {
+            "active_route_active": True,
+            "active_route_destination": "Altes Ziel",
+            "active_route_line": "abcdef",
+        },
+    }
+
+    daten = app._fleet_telemetrie_cache_fuer_dashboard("veh-1", cache)
+
+    drive = daten["drive_state"]
+    assert drive["active_route_active"] is False
+    assert "active_route_destination" not in drive
+    assert "active_route_line" not in drive
+    assert daten["fleet_telemetry_raw"] == {}
+    assert app.latest_data["veh-1"] is daten
+    assert gespeichert == [("veh-1", daten)]
 
 
 def test_telemetrie_cache_akzeptiert_frischen_rest_fallback(monkeypatch):

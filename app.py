@@ -8501,10 +8501,10 @@ def _fleet_telemetrie_navigation_cache_bereinigen(data):
     """Bereinige alte Navigationsreste aus geladenen Cache-Daten."""
 
     if not isinstance(data, dict):
-        return
+        return False
     drive = data.get("drive_state")
     if not isinstance(drive, dict):
-        return
+        return False
     offline_seit = _fleet_telemetrie_profile_offline_seit(data)
     if (
         offline_seit is not None
@@ -8516,28 +8516,31 @@ def _fleet_telemetrie_navigation_cache_bereinigen(data):
             or _as_float(data.get("timestamp"))
             or int(time.time() * 1000)
         )
-        _fleet_telemetrie_navigation_beenden(
+        return _fleet_telemetrie_navigation_beenden(
             drive,
             int(timestamp_ms),
             data,
         )
-        return
     if drive.get("active_route_active") is True:
-        return
+        return False
     if _fleet_telemetrie_navigation_hat_zielkern(drive):
-        return
+        return False
     hat_alte_navigation = any(
         drive.get(feld) is not None
         for feld in FLEET_TELEMETRIE_NAVIGATIONSFELDER
     )
     if not hat_alte_navigation:
-        return
+        return False
     timestamp_ms = (
         _as_float(drive.get("timestamp"))
         or _as_float(data.get("timestamp"))
         or int(time.time() * 1000)
     )
-    _fleet_telemetrie_navigation_beenden(drive, int(timestamp_ms), data)
+    return _fleet_telemetrie_navigation_beenden(
+        drive,
+        int(timestamp_ms),
+        data,
+    )
 
 
 def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
@@ -10880,6 +10883,9 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
             _fleet_telemetrie_tpms_sollwerte_ergänzen(cache_id, data)
             _fleet_telemetrie_routeline_in_daten_normalisieren(data)
             _fleet_telemetrie_statusbeginn_ergänzen(data)
+            if _fleet_telemetrie_navigation_cache_bereinigen(data):
+                latest_data[cache_id] = data
+                _fleet_telemetrie_cache_spaeter_speichern(cache_id, data)
             _fleet_telemetrie_veraltete_oeffnungen_bereinigen(data)
             data = _fleet_telemetrie_profile_status_an_daten(data)
             data["_live"] = True
@@ -10904,6 +10910,9 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
         _fleet_telemetrie_tpms_sollwerte_ergänzen(cache_id, data)
         _fleet_telemetrie_routeline_in_daten_normalisieren(data)
         _fleet_telemetrie_statusbeginn_ergänzen(data)
+        if _fleet_telemetrie_navigation_cache_bereinigen(data):
+            latest_data[cache_id] = data
+            _fleet_telemetrie_cache_spaeter_speichern(cache_id, data)
         data = _fleet_telemetrie_profile_status_an_daten(data)
         data["_live"] = False
         data.setdefault("api_error", "Noch keine aktuellen Fleet-Telemetry-Daten empfangen")
