@@ -1963,7 +1963,7 @@ _fleet_telemetry_queue_verworfen = 0
 _fleet_telemetry_queue_warnung = 0.0
 FLEET_TELEMETRIE_PROFILE = {"live", "live_extended", "parked", "charging"}
 FLEET_TELEMETRIE_PROFILE_STANDARD = "live"
-FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 2
+FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 3
 FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS = max(
     0.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_PARK_PROFILE_DELAY_SECONDS", "120")),
@@ -2258,6 +2258,11 @@ FLEET_TELEMETRIE_PROFILE_LIVE_WIEDERHERSTELLUNGSFELDER = frozenset({
     "BrakePedal",
     "BrakePedalPos",
     "DCDCEnable",
+    "DestinationLocation",
+    "DestinationName",
+    "DoorState",
+    "FdWindow",
+    "FpWindow",
     "Gear",
     "GpsHeading",
     "GpsState",
@@ -2265,9 +2270,12 @@ FLEET_TELEMETRIE_PROFILE_LIVE_WIEDERHERSTELLUNGSFELDER = frozenset({
     "LightsHighBeams",
     "LightsTurnSignal",
     "Location",
+    "Odometer",
     "PackCurrent",
     "PackVoltage",
     "PedalPosition",
+    "RdWindow",
+    "RpWindow",
     "VehicleSpeed",
 })
 FLEET_TELEMETRIE_PROFILE_LIVE_ERWEITERT_60S_FELDER = frozenset({
@@ -6391,27 +6399,13 @@ def _fleet_telemetrie_profile_live_neuversand_fahrt_aktuell(status, jetzt):
     )
 
 
-def _fleet_telemetrie_profile_live_plus_erlaubt(data):
-    """Deaktiviere Live+ für Legacy-Fahrzeuge ohne Schlüssel-Pairing."""
-
-    if not isinstance(data, dict):
-        return True
-    config = data.get("vehicle_config")
-    if not isinstance(config, dict):
-        return True
-    return config.get("supports_qr_pairing") is not False
-
-
 def _fleet_telemetrie_profile_live_wiederherstellungsprofil(
     status,
     jetzt=None,
-    data=None,
 ):
     """Wechsle einmal von Live zu Live+, danach warte auf die Neuverbindung."""
 
     if not isinstance(status, dict):
-        return "live"
-    if not _fleet_telemetrie_profile_live_plus_erlaubt(data):
         return "live"
     versuche = int(status.get("live_retry_attempts") or 0)
     if versuche <= 0:
@@ -6852,26 +6846,25 @@ def _fleet_telemetrie_profile_config_erstellen(
         if isinstance(location_config, dict):
             location_config["include_fields"] = sorted(bewegungsfelder)
 
-        if not wiederherstellung:
-            navigationsfelder = (
-                FLEET_TELEMETRIE_PROFILE_LIVE_NAVIGATIONS_INKLUSIVFELDER
+        navigationsfelder = (
+            FLEET_TELEMETRIE_PROFILE_LIVE_NAVIGATIONS_INKLUSIVFELDER
+        )
+        for ausloeser in (
+            "DestinationLocation",
+            "DestinationName",
+            "Odometer",
+        ):
+            feld_config = fields.get(ausloeser)
+            if not isinstance(feld_config, dict):
+                continue
+            feld_config["include_fields"] = sorted(
+                navigationsfelder - {ausloeser}
             )
-            for ausloeser in (
-                "DestinationLocation",
-                "DestinationName",
-                "Odometer",
-            ):
-                feld_config = fields.get(ausloeser)
-                if not isinstance(feld_config, dict):
-                    continue
-                feld_config["include_fields"] = sorted(
-                    navigationsfelder - {ausloeser}
-                )
-            odometer_config = fields.get("Odometer")
-            if isinstance(odometer_config, dict):
-                odometer_config["interval_seconds"] = (
-                    FLEET_TELEMETRIE_PROFILE_LIVE_NAVIGATION_NEUVERSAND_SECONDS
-                )
+        odometer_config = fields.get("Odometer")
+        if isinstance(odometer_config, dict):
+            odometer_config["interval_seconds"] = (
+                FLEET_TELEMETRIE_PROFILE_LIVE_NAVIGATION_NEUVERSAND_SECONDS
+            )
     return config_request
 
 
@@ -7525,7 +7518,6 @@ def _fleet_telemetrie_profile_sync_erneut_pruefen():
             profil = _fleet_telemetrie_profile_live_wiederherstellungsprofil(
                 status,
                 jetzt,
-                datenstand,
             )
         else:
             profil = (
@@ -7789,7 +7781,6 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
     ladezustand = _fleet_telemetrie_profile_ladezustand(data)
     jetzt = time.time()
     live_takt_stabil = _fleet_telemetrie_profile_live_takt_stabil(data, jetzt)
-    live_plus_erlaubt = _fleet_telemetrie_profile_live_plus_erlaubt(data)
     fahrzeug_bewegt_sich = _fleet_telemetrie_profile_fahrzeug_bewegt_sich(
         data,
         jetzt,
@@ -7987,7 +7978,6 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                     _fleet_telemetrie_profile_live_wiederherstellungsprofil(
                         status,
                         jetzt,
-                        data,
                     )
                 )
             elif ladebruecke_aktiv:
@@ -7998,11 +7988,8 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                 aktivierbares_ziel = (
                     "live_extended"
                     if (
-                        live_plus_erlaubt
-                        and (
-                            live_takt_akzeptiert
-                            or live_erweitert_neuverbindung_erwartet
-                        )
+                        live_takt_akzeptiert
+                        or live_erweitert_neuverbindung_erwartet
                     )
                     else "live"
                 )
@@ -8010,17 +7997,13 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                 aktivierbares_ziel = (
                     "live_extended"
                     if (
-                        live_plus_erlaubt
-                        and (
-                            live_takt_akzeptiert
-                            or live_erweitert_neuverbindung_erwartet
-                        )
+                        live_takt_akzeptiert
+                        or live_erweitert_neuverbindung_erwartet
                     )
                     else "live"
                 )
             elif (
                 current == "live"
-                and live_plus_erlaubt
                 and _fleet_telemetrie_profile_sync_bestaetigt(status, "live")
                 and live_takt_stabil
                 and live_stable_lang_genug
@@ -8306,19 +8289,75 @@ FLEET_TELEMETRIE_NAVIGATIONSFELDER = (
     "active_route_line",
     "active_route_updated_at",
 )
+FLEET_TELEMETRIE_NAVIGATIONS_ROHFELDER = (
+    "DestinationLocation",
+    "DestinationName",
+    "ExpectedEnergyPercentAtTripArrival",
+    "MilesToArrival",
+    "MinutesToArrival",
+    "RouteLine",
+    "RouteTrafficMinutesDelay",
+)
 FLEET_TELEMETRIE_NAVIGATION_ROUTE_LINE_MAX_ALTER_MS = 60_000
-FLEET_TELEMETRIE_NAVIGATION_ROUTE_ZIEL_MAX_ABSTAND_KM = 5.0
-FLEET_TELEMETRIE_NAVIGATION_ROUTE_POSITION_MAX_ABSTAND_KM = 10.0
 
 
-def _fleet_telemetrie_navigation_beenden(drive, timestamp_ms):
+def _fleet_telemetrie_navigation_rohcache_leeren(data):
+    """Entferne Navigationswerte, damit eine neue Route frisch beginnen kann."""
+
+    if not isinstance(data, dict):
+        return False
+    raw = data.get("fleet_telemetry_raw")
+    if not isinstance(raw, dict):
+        return False
+    geändert = False
+    for feld in FLEET_TELEMETRIE_NAVIGATIONS_ROHFELDER:
+        if raw.pop(feld, None) is not None:
+            geändert = True
+    return geändert
+
+
+def _fleet_telemetrie_navigation_routenlinie_verwerfen(
+    data,
+    drive,
+    ziel_timestamp_ms=None,
+):
+    """Verhindere, dass eine Route zu einem vorherigen Ziel weiterläuft."""
+
+    feld_empfang = (
+        data.get("fleet_telemetry_field_received_at")
+        if isinstance(data, dict)
+        else None
+    )
+    route_empfang = (
+        _as_float(feld_empfang.get("RouteLine"))
+        if isinstance(feld_empfang, dict)
+        else None
+    )
+    if (
+        ziel_timestamp_ms is not None
+        and route_empfang is not None
+        and route_empfang >= float(ziel_timestamp_ms)
+    ):
+        return False
+    geändert = drive.pop("active_route_line", None) is not None
+    raw = data.get("fleet_telemetry_raw") if isinstance(data, dict) else None
+    if isinstance(raw, dict) and raw.pop("RouteLine", None) is not None:
+        geändert = True
+    return geändert
+
+
+def _fleet_telemetrie_navigation_beenden(drive, timestamp_ms, data=None):
     """Entferne veraltete Navigationsdaten aus der Dashboard-Struktur."""
 
+    geändert = drive.get("active_route_active") is not False
     for feld in FLEET_TELEMETRIE_NAVIGATIONSFELDER:
-        drive.pop(feld, None)
+        if drive.pop(feld, None) is not None:
+            geändert = True
+    geändert = _fleet_telemetrie_navigation_rohcache_leeren(data) or geändert
     drive["active_route_active"] = False
     drive["active_route_ended_at"] = timestamp_ms
     drive["timestamp"] = timestamp_ms
+    return geändert
 
 
 def _fleet_telemetrie_navigation_aktivieren(drive, timestamp_ms, data=None):
@@ -8421,81 +8460,6 @@ def _fleet_telemetrie_routeline_normalisieren(value):
     return polyline or value
 
 
-def _fleet_telemetrie_polyline_punkte(polyline):
-    """Dekodiere eine Google-Polyline mit Teslas Genauigkeit von sechs Stellen."""
-
-    if not _fleet_telemetrie_routeline_ist_polyline(polyline):
-        return []
-    index = 0
-    latitude = 0
-    longitude = 0
-    punkte = []
-
-    def wert_lesen(start):
-        ergebnis = 0
-        verschiebung = 0
-        while start < len(polyline) and verschiebung <= 60:
-            byte = ord(polyline[start]) - 63
-            start += 1
-            if byte < 0:
-                return None, start
-            ergebnis |= (byte & 0x1F) << verschiebung
-            if byte < 0x20:
-                delta = ~(ergebnis >> 1) if ergebnis & 1 else ergebnis >> 1
-                return delta, start
-            verschiebung += 5
-        return None, start
-
-    while index < len(polyline) and len(punkte) < 100_000:
-        delta_latitude, index = wert_lesen(index)
-        delta_longitude, index = wert_lesen(index)
-        if delta_latitude is None or delta_longitude is None:
-            return []
-        latitude += delta_latitude
-        longitude += delta_longitude
-        punkt = (latitude / 1_000_000, longitude / 1_000_000)
-        if _fleet_telemetrie_gueltige_zielkoordinaten(*punkt) is None:
-            return []
-        punkte.append(punkt)
-    if index != len(polyline):
-        return []
-    return punkte
-
-
-def _fleet_telemetrie_routeline_passt_zu_navigation(route_line, drive):
-    """Prüfe Ziel und Fahrzeugposition gegen eine ältere Routenlinie."""
-
-    if not isinstance(drive, dict):
-        return False
-    ziel = _fleet_telemetrie_gueltige_zielkoordinaten(
-        drive.get("active_route_latitude"),
-        drive.get("active_route_longitude"),
-    )
-    position = _fleet_telemetrie_gueltige_zielkoordinaten(
-        drive.get("latitude"),
-        drive.get("longitude"),
-    )
-    if ziel is None or position is None:
-        return False
-    punkte = _fleet_telemetrie_polyline_punkte(route_line)
-    if len(punkte) < 2:
-        return False
-    ziel_abstand = min(
-        _haversine(ziel[0], ziel[1], punkt[0], punkt[1])
-        for punkt in (punkte[0], punkte[-1])
-    )
-    if ziel_abstand > FLEET_TELEMETRIE_NAVIGATION_ROUTE_ZIEL_MAX_ABSTAND_KM:
-        return False
-    position_abstand = min(
-        _haversine(position[0], position[1], punkt[0], punkt[1])
-        for punkt in punkte
-    )
-    return (
-        position_abstand
-        <= FLEET_TELEMETRIE_NAVIGATION_ROUTE_POSITION_MAX_ABSTAND_KM
-    )
-
-
 def _fleet_telemetrie_routeline_in_daten_normalisieren(data):
     """Normalisiere eine gecachte RouteLine im Dashboard-Datensatz."""
 
@@ -8522,19 +8486,14 @@ def _fleet_telemetrie_navigation_routeline_nachziehen(data, drive, timestamp_ms)
     if not isinstance(route_line, str) or not route_line.strip():
         return
     feld_empfang = data.get("fleet_telemetry_field_received_at")
-    route_empfang = None
-    if isinstance(feld_empfang, dict):
-        route_empfang = _as_float(feld_empfang.get("RouteLine"))
-    if route_empfang is not None:
-        alter = abs(float(timestamp_ms) - route_empfang)
-        if (
-            alter > FLEET_TELEMETRIE_NAVIGATION_ROUTE_LINE_MAX_ALTER_MS
-            and not _fleet_telemetrie_routeline_passt_zu_navigation(
-                route_line,
-                drive,
-            )
-        ):
-            return
+    if not isinstance(feld_empfang, dict):
+        return
+    route_empfang = _as_float(feld_empfang.get("RouteLine"))
+    if route_empfang is None:
+        return
+    alter = abs(float(timestamp_ms) - route_empfang)
+    if alter > FLEET_TELEMETRIE_NAVIGATION_ROUTE_LINE_MAX_ALTER_MS:
+        return
     drive["active_route_line"] = route_line
 
 
@@ -8545,6 +8504,23 @@ def _fleet_telemetrie_navigation_cache_bereinigen(data):
         return
     drive = data.get("drive_state")
     if not isinstance(drive, dict):
+        return
+    offline_seit = _fleet_telemetrie_profile_offline_seit(data)
+    if (
+        offline_seit is not None
+        and time.time() - offline_seit
+        >= FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS
+    ):
+        timestamp_ms = (
+            _as_float(data.get("state_since_ms"))
+            or _as_float(data.get("timestamp"))
+            or int(time.time() * 1000)
+        )
+        _fleet_telemetrie_navigation_beenden(
+            drive,
+            int(timestamp_ms),
+            data,
+        )
         return
     if drive.get("active_route_active") is True:
         return
@@ -8561,7 +8537,7 @@ def _fleet_telemetrie_navigation_cache_bereinigen(data):
         or _as_float(data.get("timestamp"))
         or int(time.time() * 1000)
     )
-    _fleet_telemetrie_navigation_beenden(drive, int(timestamp_ms))
+    _fleet_telemetrie_navigation_beenden(drive, int(timestamp_ms), data)
 
 
 def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
@@ -8600,6 +8576,17 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
             )
             if koordinaten is not None:
                 lat, lon = koordinaten
+                altes_ziel = (
+                    drive.get("active_route_latitude"),
+                    drive.get("active_route_longitude"),
+                )
+                hat_altes_ziel = any(wert is not None for wert in altes_ziel)
+                if hat_altes_ziel and altes_ziel != (lat, lon):
+                    _fleet_telemetrie_navigation_routenlinie_verwerfen(
+                        data,
+                        drive,
+                        timestamp_ms,
+                    )
                 drive["active_route_latitude"] = lat
                 drive["active_route_longitude"] = lon
                 _fleet_telemetrie_navigation_aktivieren(
@@ -8608,17 +8595,25 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
                     data,
                 )
             else:
+                _fleet_telemetrie_navigation_routenlinie_verwerfen(data, drive)
                 drive.pop("active_route_latitude", None)
                 drive.pop("active_route_longitude", None)
         elif value is None:
-            _fleet_telemetrie_navigation_beenden(drive, timestamp_ms)
+            _fleet_telemetrie_navigation_beenden(drive, timestamp_ms, data)
             return True
         drive["timestamp"] = timestamp_ms
         return True
     if field == "DestinationName":
         if value is None or (isinstance(value, str) and not value.strip()):
-            _fleet_telemetrie_navigation_beenden(drive, timestamp_ms)
+            _fleet_telemetrie_navigation_beenden(drive, timestamp_ms, data)
         else:
+            altes_ziel = drive.get("active_route_destination")
+            if altes_ziel is not None and altes_ziel != value:
+                _fleet_telemetrie_navigation_routenlinie_verwerfen(
+                    data,
+                    drive,
+                    timestamp_ms,
+                )
             drive["active_route_destination"] = value
             _fleet_telemetrie_navigation_aktivieren(drive, timestamp_ms, data)
         drive["timestamp"] = timestamp_ms
@@ -8632,7 +8627,7 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         if value is None:
             drive.pop("active_route_miles_to_arrival", None)
             if not _fleet_telemetrie_navigation_hat_zielkern(drive):
-                _fleet_telemetrie_navigation_beenden(drive, timestamp_ms)
+                _fleet_telemetrie_navigation_beenden(drive, timestamp_ms, data)
                 return True
         else:
             drive["active_route_miles_to_arrival"] = value
@@ -8643,7 +8638,7 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         if value is None:
             drive.pop("active_route_minutes_to_arrival", None)
             if not _fleet_telemetrie_navigation_hat_zielkern(drive):
-                _fleet_telemetrie_navigation_beenden(drive, timestamp_ms)
+                _fleet_telemetrie_navigation_beenden(drive, timestamp_ms, data)
                 return True
         else:
             drive["active_route_minutes_to_arrival"] = value
@@ -8658,7 +8653,7 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
     if field == "RouteLine":
         value = _fleet_telemetrie_routeline_normalisieren(value)
         if value is None or (isinstance(value, str) and not value.strip()):
-            _fleet_telemetrie_navigation_beenden(drive, timestamp_ms)
+            _fleet_telemetrie_navigation_beenden(drive, timestamp_ms, data)
         else:
             if (
                 drive.get("active_route_active") is not False
@@ -8682,6 +8677,8 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         return True
     if field == "Gear":
         drive["shift_state"] = _fleet_telemetrie_shift(value)
+        if drive.get("shift_state") == "P":
+            _fleet_telemetrie_navigation_beenden(drive, timestamp_ms, data)
         drive["timestamp"] = timestamp_ms
         return True
 
@@ -10155,6 +10152,8 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
             letztes_feld = None
             letzter_empfangszeitstempel = None
             letztes_empfangenes_feld = None
+            parkposition_zeitstempel = None
+            navigation_zeitstempel = None
             for field, value, timestamp_ms in feldwerte:
                 if timestamp_ms is None:
                     timestamp_ms = int(time.time() * 1000)
@@ -10171,8 +10170,15 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
                     letztes_feld_merken=False,
                 )
                 value = _fleet_telemetrie_wert(value)
+                if field in FLEET_TELEMETRIE_NAVIGATIONS_ROHFELDER:
+                    navigation_zeitstempel = max(
+                        navigation_zeitstempel or 0,
+                        timestamp_ms,
+                    )
                 if _fleet_telemetrie_wert_unveraendert(data, field, value):
                     continue
+                if field == "Gear" and _fleet_telemetrie_shift(value) == "P":
+                    parkposition_zeitstempel = timestamp_ms
                 data = _fleet_telemetrie_basisdaten(
                     data, vin, cache_id, timestamp_ms
                 )
@@ -10183,6 +10189,32 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
                 geändert = True
                 letzter_zeitstempel = timestamp_ms
                 letztes_feld = field
+            if (
+                parkposition_zeitstempel is not None
+                and (
+                    navigation_zeitstempel is None
+                    or navigation_zeitstempel <= parkposition_zeitstempel
+                )
+            ):
+                drive = data.setdefault("drive_state", {})
+                hat_navigation = (
+                    drive.get("active_route_active") is True
+                    or any(
+                        drive.get(feld) is not None
+                        for feld in FLEET_TELEMETRIE_NAVIGATIONSFELDER
+                    )
+                )
+                if hat_navigation and _fleet_telemetrie_navigation_beenden(
+                    drive,
+                    parkposition_zeitstempel,
+                    data,
+                ):
+                    geändert = True
+                    letzter_zeitstempel = max(
+                        letzter_zeitstempel or 0,
+                        parkposition_zeitstempel,
+                    )
+                    letztes_feld = "Gear"
             if letzter_empfangszeitstempel is not None:
                 _fleet_telemetrie_empfang_vermerken(
                     data,

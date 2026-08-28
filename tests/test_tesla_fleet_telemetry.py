@@ -1981,6 +1981,10 @@ def test_fleet_telemetrie_verwirft_nicht_endliche_navigationskoordinaten():
 
 def test_fleet_telemetrie_navigation_beendet_loescht_kartendaten():
     daten = {
+        "fleet_telemetry_raw": {
+            "DestinationName": "Ziel",
+            "RouteLine": "abcdef",
+        },
         "drive_state": {
             "active_route_active": True,
             "active_route_destination": "Ziel",
@@ -2006,6 +2010,8 @@ def test_fleet_telemetrie_navigation_beendet_loescht_kartendaten():
         assert feld not in drive
     assert drive["active_route_active"] is False
     assert drive["active_route_ended_at"] == 1234
+    assert "DestinationName" not in daten["fleet_telemetry_raw"]
+    assert "RouteLine" not in daten["fleet_telemetry_raw"]
 
 
 def test_fleet_telemetrie_alte_routeline_nach_navigationsende_ignoriert():
@@ -2071,7 +2077,7 @@ def test_fleet_telemetrie_zieht_alte_routeline_nicht_nach():
     assert "active_route_line" not in drive
 
 
-def test_fleet_telemetrie_zieht_passende_alte_routeline_nach():
+def test_fleet_telemetrie_zieht_auch_passende_alte_routeline_nicht_nach():
     polyline = "_}hfaB_{fjL~oR_pR~oR_pR"
     daten = {
         "fleet_telemetry_raw": {"RouteLine": _routeline_protobuf(polyline)},
@@ -2093,7 +2099,7 @@ def test_fleet_telemetrie_zieht_passende_alte_routeline_nach():
 
     drive = daten["drive_state"]
     assert drive["active_route_active"] is True
-    assert drive["active_route_line"] == polyline
+    assert "active_route_line" not in drive
 
 
 def test_fleet_telemetrie_zieht_fremde_alte_routeline_nicht_nach():
@@ -2164,6 +2170,214 @@ def test_fleet_telemetrie_bereinigt_alte_navigation_aus_cache():
     assert "active_route_longitude" not in drive
     assert drive["active_route_active"] is False
     assert drive["active_route_ended_at"] == 1234
+
+
+def test_fleet_telemetrie_gang_p_beendet_navigation_und_rohcache():
+    daten = {
+        "fleet_telemetry_raw": {
+            "DestinationLocation": {"latitude": 51.1, "longitude": 7.1},
+            "DestinationName": "Ziel",
+            "RouteLine": "abcdef",
+        },
+        "drive_state": {
+            "active_route_active": True,
+            "active_route_destination": "Ziel",
+            "active_route_latitude": 51.1,
+            "active_route_longitude": 7.1,
+            "active_route_line": "abcdef",
+        },
+    }
+
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "Gear",
+        "ShiftStateP",
+        2000,
+    )
+
+    drive = daten["drive_state"]
+    assert drive["shift_state"] == "P"
+    assert drive["active_route_active"] is False
+    assert drive["active_route_ended_at"] == 2000
+    assert "active_route_destination" not in drive
+    assert "active_route_line" not in drive
+    assert daten["fleet_telemetry_raw"] == {"Gear": "ShiftStateP"}
+
+
+def test_fleet_telemetrie_gang_p_gewinnt_im_gleichen_datenpaket(monkeypatch):
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
+    monkeypatch.setattr(app, "_load_cached", lambda cache_id: {})
+    monkeypatch.setattr(app, "_subscriber_daten_senden", lambda *args: None)
+    monkeypatch.setattr(app, "_aprs_spaeter_senden", lambda *args: None)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(app, "latest_data", {
+        "veh-1": {
+            "state": "online",
+            "vin": "TESTVIN",
+            "fleet_telemetry_raw": {"Gear": "ShiftStateD"},
+            "drive_state": {
+                "shift_state": "D",
+                "active_route_active": True,
+                "active_route_destination": "Altes Ziel",
+                "active_route_line": "abcdef",
+            },
+        },
+    })
+
+    assert app._fleet_telemetrie_v_felder_aktualisieren(
+        "TESTVIN",
+        [
+            ("Gear", "ShiftStateP", 2000),
+            ("DestinationName", "Neues Ziel", 2000),
+            ("RouteLine", "ghijkl", 2000),
+        ],
+    )
+
+    daten = app.latest_data["veh-1"]
+    drive = daten["drive_state"]
+    assert drive["shift_state"] == "P"
+    assert drive["active_route_active"] is False
+    assert "active_route_destination" not in drive
+    assert "active_route_line" not in drive
+    assert "DestinationName" not in daten["fleet_telemetry_raw"]
+    assert "RouteLine" not in daten["fleet_telemetry_raw"]
+
+
+def test_fleet_telemetrie_unveraendertes_p_beendet_neue_navigation_nicht(
+    monkeypatch,
+):
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
+    monkeypatch.setattr(app, "_load_cached", lambda cache_id: {})
+    monkeypatch.setattr(app, "_subscriber_daten_senden", lambda *args: None)
+    monkeypatch.setattr(app, "_aprs_spaeter_senden", lambda *args: None)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(app, "latest_data", {
+        "veh-1": {
+            "state": "online",
+            "vin": "TESTVIN",
+            "fleet_telemetry_raw": {
+                "DestinationName": "Neues Ziel",
+                "Gear": "ShiftStateP",
+                "RouteLine": "abcdef",
+            },
+            "drive_state": {
+                "shift_state": "P",
+                "active_route_active": True,
+                "active_route_destination": "Neues Ziel",
+                "active_route_line": "abcdef",
+            },
+        },
+    })
+
+    assert app._fleet_telemetrie_v_felder_aktualisieren(
+        "TESTVIN",
+        [("Gear", "ShiftStateP", 3000)],
+    )
+
+    drive = app.latest_data["veh-1"]["drive_state"]
+    assert drive["shift_state"] == "P"
+    assert drive["active_route_active"] is True
+    assert drive["active_route_destination"] == "Neues Ziel"
+    assert drive["active_route_line"] == "abcdef"
+
+
+def test_fleet_telemetrie_neues_ziel_verwirft_vorherige_routenlinie():
+    daten = {
+        "fleet_telemetry_raw": {
+            "RouteLine": "abcdef",
+        },
+        "fleet_telemetry_field_received_at": {"RouteLine": 1999},
+        "drive_state": {
+            "active_route_active": True,
+            "active_route_destination": "Altes Ziel",
+            "active_route_latitude": 51.1,
+            "active_route_longitude": 7.1,
+            "active_route_line": "abcdef",
+        },
+    }
+
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "DestinationLocation",
+        {"latitude": 51.2, "longitude": 7.2},
+        2000,
+    )
+
+    drive = daten["drive_state"]
+    assert drive["active_route_active"] is True
+    assert drive["active_route_latitude"] == 51.2
+    assert drive["active_route_longitude"] == 7.2
+    assert "active_route_line" not in drive
+    assert "RouteLine" not in daten["fleet_telemetry_raw"]
+
+
+def test_fleet_telemetrie_neues_ziel_behaelt_gleichzeitig_empfangene_route():
+    daten = {
+        "fleet_telemetry_raw": {
+            "RouteLine": "neue-route",
+        },
+        "fleet_telemetry_field_received_at": {"RouteLine": 2000},
+        "drive_state": {
+            "active_route_active": True,
+            "active_route_destination": "Altes Ziel",
+            "active_route_latitude": 51.1,
+            "active_route_longitude": 7.1,
+            "active_route_line": "neue-route",
+        },
+    }
+
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "DestinationLocation",
+        {"latitude": 51.2, "longitude": 7.2},
+        2000,
+    )
+
+    drive = daten["drive_state"]
+    assert drive["active_route_active"] is True
+    assert drive["active_route_latitude"] == 51.2
+    assert drive["active_route_longitude"] == 7.2
+    assert drive["active_route_line"] == "neue-route"
+    assert daten["fleet_telemetry_raw"]["RouteLine"] == "neue-route"
+
+
+def test_fleet_telemetrie_beendet_navigation_nach_längerem_offline(monkeypatch):
+    monkeypatch.setattr(app.time, "time", lambda: 1_800_000_301.0)
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS",
+        120.0,
+    )
+    daten = {
+        "state": "offline",
+        "state_since_ms": 1_800_000_000_000,
+        "timestamp": 1_800_000_000_000,
+        "fleet_telemetry_raw": {
+            "DestinationName": "Ziel",
+            "RouteLine": "abcdef",
+        },
+        "drive_state": {
+            "active_route_active": True,
+            "active_route_destination": "Ziel",
+            "active_route_line": "abcdef",
+        },
+    }
+
+    app._fleet_telemetrie_navigation_cache_bereinigen(daten)
+
+    drive = daten["drive_state"]
+    assert drive["active_route_active"] is False
+    assert "active_route_destination" not in drive
+    assert "active_route_line" not in drive
+    assert daten["fleet_telemetry_raw"] == {}
 
 
 def test_fleet_telemetrie_reichert_tpms_und_spiegel_aus_rohdaten_an():
@@ -3031,6 +3245,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
                 "ChargeState": {"interval_seconds": 1},
                 "DestinationLocation": {"interval_seconds": 60},
                 "DestinationName": {"interval_seconds": 60},
+                "DoorState": {"interval_seconds": 60},
                 "ExpectedEnergyPercentAtTripArrival": {"interval_seconds": 60},
                 "FdWindow": {"interval_seconds": 60},
                 "FpWindow": {"interval_seconds": 60},
@@ -3145,6 +3360,11 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     )
     assert wiederherstellungsfelder["VehicleSpeed"]["interval_seconds"] == 1
     assert wiederherstellungsfelder["Location"]["interval_seconds"] == 1
+    assert wiederherstellungsfelder["DoorState"]["interval_seconds"] == 10
+    assert wiederherstellungsfelder["FdWindow"]["interval_seconds"] == 10
+    assert wiederherstellungsfelder["FpWindow"]["interval_seconds"] == 10
+    assert wiederherstellungsfelder["RdWindow"]["interval_seconds"] == 10
+    assert wiederherstellungsfelder["RpWindow"]["interval_seconds"] == 10
     assert set(wiederherstellungsfelder["Location"]["include_fields"]) == (
         app.FLEET_TELEMETRIE_PROFILE_LIVE_BEWEGUNGS_INKLUSIVFELDER
         & app.FLEET_TELEMETRIE_PROFILE_LIVE_WIEDERHERSTELLUNGSFELDER
@@ -3152,6 +3372,17 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert (
         "RouteLine"
         not in wiederherstellungsfelder["Location"]["include_fields"]
+    )
+    assert set(wiederherstellungsfelder["Odometer"]["include_fields"]) == (
+        app.FLEET_TELEMETRIE_PROFILE_LIVE_NAVIGATIONS_INKLUSIVFELDER
+    )
+    assert (
+        "RouteLine"
+        in wiederherstellungsfelder["DestinationLocation"]["include_fields"]
+    )
+    assert (
+        "RouteLine"
+        in wiederherstellungsfelder["DestinationName"]["include_fields"]
     )
     assert wiederherstellungsfelder["PackCurrent"]["interval_seconds"] == 1
     assert wiederherstellungsfelder["DCDCEnable"]["interval_seconds"] == 30
@@ -3310,7 +3541,7 @@ def test_fleet_telemetrie_live_reparatur_sendet_basis_dann_vollprofil(
     app._fleet_telemetrie_profile_anwenden("live")
 
     assert gesendete_felder == [
-        {"DCDCEnable", "Location", "VehicleSpeed"},
+        {"DCDCEnable", "Location", "Odometer", "VehicleSpeed"},
         {
             "DCDCEnable",
             "InsideTemp",
@@ -4587,7 +4818,7 @@ def test_fleet_telemetrie_profile_erweitert_stabiles_live(monkeypatch):
     assert app._fleet_telemetry_profile_status["config_sync_state"] == "pending"
 
 
-def test_fleet_telemetrie_profile_erweitert_legacy_models_nicht(monkeypatch):
+def test_fleet_telemetrie_profile_erweitert_auch_ohne_qr_pairing(monkeypatch):
     angefordert = []
 
     monkeypatch.setattr(app.time, "time", lambda: 2100.0)
@@ -4629,12 +4860,12 @@ def test_fleet_telemetrie_profile_erweitert_legacy_models_nicht(monkeypatch):
 
     daten = app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
 
-    assert angefordert == []
+    assert angefordert == ["live_extended"]
     assert daten["telemetry_profile"] == "live"
-    assert daten["telemetry_config_sync_profile"] == "live"
+    assert daten["telemetry_config_sync_profile"] == "live_extended"
 
 
-def test_fleet_telemetrie_profile_stuft_legacy_live_plus_zurueck(monkeypatch):
+def test_fleet_telemetrie_profile_behaelt_live_plus_ohne_qr_pairing(monkeypatch):
     angefordert = []
 
     monkeypatch.setattr(app.time, "time", lambda: 2100.0)
@@ -4672,9 +4903,9 @@ def test_fleet_telemetrie_profile_stuft_legacy_live_plus_zurueck(monkeypatch):
 
     daten = app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
 
-    assert angefordert == ["live"]
+    assert angefordert == []
     assert daten["telemetry_profile"] == "live_extended"
-    assert daten["telemetry_config_sync_profile"] == "live"
+    assert daten["telemetry_config_sync_profile"] == "live_extended"
 
 
 def test_fleet_telemetrie_profile_erweitert_wartet_auf_stabilitaet(monkeypatch):
