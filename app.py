@@ -907,6 +907,18 @@ FLEET_TELEMETRIE_PARKABGLEICH_WIEDERHOLUNG_SECONDS = max(
     30.0,
     float(os.getenv("TESLA_FLEET_PARK_RECONCILE_RETRY_SECONDS", "60")),
 )
+FLEET_TELEMETRIE_LADEABGLEICH_MAX_ALTER_SECONDS = max(
+    10.0,
+    float(os.getenv("TESLA_FLEET_CHARGE_RECONCILE_MAX_AGE_SECONDS", "20")),
+)
+FLEET_TELEMETRIE_LADEABGLEICH_WIEDERHOLUNG_SECONDS = max(
+    30.0,
+    float(os.getenv("TESLA_FLEET_CHARGE_RECONCILE_RETRY_SECONDS", "60")),
+)
+FLEET_TELEMETRIE_LADEABGLEICH_MIN_LEISTUNG_KW = max(
+    0.1,
+    float(os.getenv("TESLA_FLEET_CHARGE_RECONCILE_MIN_POWER_KW", "1")),
+)
 FLEET_TELEMETRIE_STREAM_WIEDERHERSTELLUNG_NACH_SECONDS = max(
     FLEET_TELEMETRIE_POSITION_STREAM_MAX_ALTER_SECONDS,
     float(os.getenv("TESLA_FLEET_STREAM_RECOVERY_AFTER_SECONDS", "20")),
@@ -1923,6 +1935,7 @@ _fleet_telemetry_profile_lock = threading.Lock()
 _fleet_telemetry_position_lock = threading.Lock()
 _fleet_telemetry_position_letzte_abfrage = {}
 _fleet_telemetry_parkabgleich_letzte_abfrage = {}
+_fleet_telemetry_ladeabgleich_letzte_abfrage = {}
 _fleet_telemetry_stream_wiederherstellung_letzte_abfrage = {}
 _fleet_telemetry_vehicle_cache = {"mtime": None, "vehicles": []}
 FLEET_TELEMETRY_MQTT_QUEUE_MAX = max(
@@ -1963,7 +1976,7 @@ _fleet_telemetry_queue_verworfen = 0
 _fleet_telemetry_queue_warnung = 0.0
 FLEET_TELEMETRIE_PROFILE = {"live", "live_extended", "parked", "charging"}
 FLEET_TELEMETRIE_PROFILE_STANDARD = "live"
-FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 3
+FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 4
 FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS = max(
     0.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_PARK_PROFILE_DELAY_SECONDS", "120")),
@@ -2162,10 +2175,12 @@ FLEET_TELEMETRIE_PROFILE_LIVE_5S_FELDER = frozenset({
     "Soc",
 })
 FLEET_TELEMETRIE_PROFILE_LIVE_10S_FELDER = frozenset({
+    "ACChargingPower",
     "BatteryHeaterOn",
     "CenterDisplay",
     "ChargeState",
     "DetailedChargeState",
+    "DCChargingPower",
     "DoorState",
     "DriverSeatOccupied",
     "FdWindow",
@@ -2198,6 +2213,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_30S_FELDER = frozenset({
     "WiperHeatEnabled",
 })
 FLEET_TELEMETRIE_PROFILE_LIVE_FELDER = frozenset({
+    "ACChargingPower",
     "BatteryHeaterOn",
     "BatteryLevel",
     "BrakePedal",
@@ -2209,6 +2225,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_FELDER = frozenset({
     "DestinationLocation",
     "DestinationName",
     "DetailedChargeState",
+    "DCChargingPower",
     "DoorState",
     "DriverSeatOccupied",
     "EstBatteryRange",
@@ -2255,11 +2272,13 @@ FLEET_TELEMETRIE_PROFILE_LIVE_FELDER = frozenset({
     "VehicleSpeed",
 })
 FLEET_TELEMETRIE_PROFILE_LIVE_WIEDERHERSTELLUNGSFELDER = frozenset({
+    "ACChargingPower",
     "BrakePedal",
     "BrakePedalPos",
     "DCDCEnable",
     "DestinationLocation",
     "DestinationName",
+    "DCChargingPower",
     "DoorState",
     "FdWindow",
     "FpWindow",
@@ -2340,12 +2359,14 @@ FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MIN_FELDER = max(
     int(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_CONFIRM_MIN_FIELDS", "2")),
 )
 FLEET_TELEMETRIE_PROFILE_PARKED_10S_FELDER = frozenset({
+    "ACChargingPower",
     "BrakePedal",
     "CenterDisplay",
     "ChargePortDoorOpen",
     "ChargePortLatch",
     "ChargeState",
     "DetailedChargeState",
+    "DCChargingPower",
     "DoorState",
     "DriverSeatOccupied",
     "FdWindow",
@@ -6645,9 +6666,36 @@ def _fleet_telemetrie_profile_ladezustand(data):
     status = str(charge.get("charging_state") or "").strip().lower()
     if status in {"charging", "starting"}:
         return True
-    if status in {"complete", "stopped", "disconnected", "nopower", "standby"}:
-        return False
+    inaktive_status = {"complete", "stopped", "disconnected", "nopower", "standby"}
     charger_power = _as_float(charge.get("charger_power"))
+    feld_empfang = data.get("fleet_telemetry_field_received_at")
+    status_empfangen = None
+    leistung_empfangen = None
+    if isinstance(feld_empfang, dict):
+        status_zeiten = [
+            _fleet_telemetrie_zeitstempel_ms(feld_empfang.get(feld))
+            for feld in ("ChargeState", "DetailedChargeState")
+        ]
+        leistung_zeiten = [
+            _fleet_telemetrie_zeitstempel_ms(feld_empfang.get(feld))
+            for feld in ("ACChargingPower", "DCChargingPower")
+        ]
+        status_zeiten = [wert for wert in status_zeiten if wert is not None]
+        leistung_zeiten = [wert for wert in leistung_zeiten if wert is not None]
+        status_empfangen = max(status_zeiten) if status_zeiten else None
+        leistung_empfangen = max(leistung_zeiten) if leistung_zeiten else None
+    leistung_ist_neuer = (
+        leistung_empfangen is not None
+        and (status_empfangen is None or leistung_empfangen >= status_empfangen)
+    )
+    if (
+        charger_power is not None
+        and charger_power > 0
+        and (status not in inaktive_status or leistung_ist_neuer)
+    ):
+        return True
+    if status in inaktive_status:
+        return False
     if charger_power is not None and charger_power > 0:
         return True
     return None
@@ -9619,6 +9667,92 @@ def _fleet_telemetrie_parkabgleich_reservieren(vin, jetzt=None):
     return True
 
 
+def _fleet_telemetrie_ladeabgleich_soll_aktualisiert_werden(
+    data,
+    jetzt_ms=None,
+):
+    """Erkenne einen Ladevorgang trotz ausgebliebener Ladezustandsfelder."""
+
+    if not isinstance(data, dict):
+        return False
+    if _normalisiere_dashboard_state(data.get("state")) != "online":
+        return False
+    drive = data.get("drive_state")
+    if not isinstance(drive, dict):
+        return False
+    if _normalize_shift_state(drive.get("shift_state")) != "P":
+        return False
+    if _fleet_telemetrie_profile_ladezustand(data) is True:
+        return False
+    if jetzt_ms is None:
+        jetzt_ms = int(time.time() * 1000)
+
+    gear_alter = _fleet_telemetrie_feldalter_sekunden(data, "Gear", jetzt_ms)
+    if (
+        gear_alter is None
+        or gear_alter < FLEET_TELEMETRIE_PARKABGLEICH_VERZOEGERUNG_SECONDS
+    ):
+        return False
+    for feld in ("PackCurrent", "PackVoltage"):
+        alter = _fleet_telemetrie_feldalter_sekunden(data, feld, jetzt_ms)
+        if (
+            alter is None
+            or alter > FLEET_TELEMETRIE_POSITION_PRUEFINTERVALL_SECONDS * 2
+        ):
+            return False
+
+    rohwerte = data.get("fleet_telemetry_raw")
+    if not isinstance(rohwerte, dict):
+        return False
+    strom = _as_float(rohwerte.get("PackCurrent"))
+    spannung = _as_float(rohwerte.get("PackVoltage"))
+    if strom is None or spannung is None or strom <= 0 or spannung <= 0:
+        return False
+    leistung_kw = strom * spannung / 1000.0
+    if leistung_kw < FLEET_TELEMETRIE_LADEABGLEICH_MIN_LEISTUNG_KW:
+        return False
+
+    ladefelder = (
+        "ChargeState",
+        "DetailedChargeState",
+        "ACChargingPower",
+        "DCChargingPower",
+        "ChargePortDoorOpen",
+        "ChargePortLatch",
+    )
+    feld_empfang = data.get("fleet_telemetry_field_received_at")
+    if not isinstance(feld_empfang, dict):
+        return True
+    ladezeiten = [
+        _fleet_telemetrie_zeitstempel_ms(feld_empfang.get(feld))
+        for feld in ladefelder
+    ]
+    ladezeiten = [wert for wert in ladezeiten if wert is not None]
+    if not ladezeiten:
+        return True
+    ladealter = max(0.0, (float(jetzt_ms) - max(ladezeiten)) / 1000.0)
+    return ladealter > FLEET_TELEMETRIE_LADEABGLEICH_MAX_ALTER_SECONDS
+
+
+def _fleet_telemetrie_ladeabgleich_reservieren(vin, jetzt=None):
+    """Drossele REST-Abgleiche bei fehlenden Ladezustandsmeldungen."""
+
+    if not vin:
+        return False
+    if jetzt is None:
+        jetzt = time.monotonic()
+    with _fleet_telemetry_position_lock:
+        letzte_abfrage = _fleet_telemetry_ladeabgleich_letzte_abfrage.get(str(vin))
+        if (
+            letzte_abfrage is not None
+            and jetzt - letzte_abfrage
+            < FLEET_TELEMETRIE_LADEABGLEICH_WIEDERHOLUNG_SECONDS
+        ):
+            return False
+        _fleet_telemetry_ladeabgleich_letzte_abfrage[str(vin)] = jetzt
+    return True
+
+
 def _fleet_telemetrie_parkdaten_abrufen(vin):
     """Rufe einmalig den vollständigen Fahrzeugstand nach dem Parken ab."""
 
@@ -10059,6 +10193,28 @@ def _fleet_telemetrie_position_worker_loop():
                     except Exception as exc:
                         logging.warning(
                             "Fleet-Parkzustand konnte nicht abgeglichen werden "
+                            "(%s): %s",
+                            vin,
+                            exc,
+                        )
+                data = _fleet_telemetrie_position_snapshot(vin)
+            if _fleet_telemetrie_ladeabgleich_soll_aktualisiert_werden(data):
+                if _fleet_telemetrie_ladeabgleich_reservieren(vin):
+                    try:
+                        fahrzeugdaten = _fleet_telemetrie_parkdaten_abrufen(vin)
+                        übernommen = _fleet_telemetrie_fallbackdaten_uebernehmen(
+                            vin,
+                            fahrzeugdaten,
+                        )
+                        if übernommen:
+                            logging.warning(
+                                "Fehlenden Fleet-Ladezustand über vehicle_data "
+                                "wiederhergestellt: %s",
+                                vin,
+                            )
+                    except Exception as exc:
+                        logging.warning(
+                            "Fleet-Ladezustand konnte nicht abgeglichen werden "
                             "(%s): %s",
                             vin,
                             exc,

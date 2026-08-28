@@ -335,6 +335,85 @@ def test_fleet_telemetrie_parkabgleich_startet_nur_nach_p(monkeypatch):
     )
 
 
+def test_fleet_telemetrie_ladeabgleich_erkennt_frischen_hv_ladestrom(
+    monkeypatch,
+):
+    jetzt_ms = 2_000_000_000_000
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PARKABGLEICH_VERZOEGERUNG_SECONDS",
+        10.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_LADEABGLEICH_MAX_ALTER_SECONDS",
+        20.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_LADEABGLEICH_MIN_LEISTUNG_KW",
+        1.0,
+    )
+    daten = {
+        "state": "online",
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "charge_state": {
+            "charging_state": "Disconnected",
+            "charger_power": 0,
+        },
+        "fleet_telemetry_raw": {
+            "PackCurrent": 67.9,
+            "PackVoltage": 402.5,
+        },
+        "fleet_telemetry_field_received_at": {
+            "Gear": jetzt_ms - 120_000,
+            "PackCurrent": jetzt_ms - 500,
+            "PackVoltage": jetzt_ms - 500,
+            "ChargeState": jetzt_ms - 120_000,
+            "DetailedChargeState": jetzt_ms - 120_000,
+        },
+    }
+
+    assert app._fleet_telemetrie_ladeabgleich_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms,
+    )
+
+    daten["drive_state"]["shift_state"] = "D"
+    assert not app._fleet_telemetrie_ladeabgleich_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms,
+    )
+    daten["drive_state"]["shift_state"] = "P"
+    daten["fleet_telemetry_raw"]["PackCurrent"] = -8
+    assert not app._fleet_telemetrie_ladeabgleich_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms,
+    )
+    daten["fleet_telemetry_raw"]["PackCurrent"] = 67.9
+    daten["fleet_telemetry_field_received_at"]["ChargeState"] = jetzt_ms - 5_000
+    assert not app._fleet_telemetrie_ladeabgleich_soll_aktualisiert_werden(
+        daten,
+        jetzt_ms,
+    )
+
+
+def test_fleet_telemetrie_ladeabgleich_hat_sperrfrist(monkeypatch):
+    monkeypatch.setattr(app, "_fleet_telemetry_ladeabgleich_letzte_abfrage", {})
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_LADEABGLEICH_WIEDERHOLUNG_SECONDS",
+        60.0,
+    )
+
+    assert app._fleet_telemetrie_ladeabgleich_reservieren("TESTVIN", 100.0)
+    assert not app._fleet_telemetrie_ladeabgleich_reservieren(
+        "TESTVIN",
+        159.9,
+    )
+    assert app._fleet_telemetrie_ladeabgleich_reservieren("TESTVIN", 160.0)
+
+
 def test_fleet_telemetrie_parkabgleich_korrigiert_veraltete_abschaltwerte(
     monkeypatch,
 ):
@@ -3086,6 +3165,25 @@ def test_fleet_telemetrie_profile_verlaesst_charging_nach_ladeende():
     }) == "parked"
 
 
+def test_fleet_telemetrie_neue_ladeleistung_ueberstimmt_alten_ladestatus():
+    daten = {
+        "charge_state": {
+            "charging_state": "Disconnected",
+            "charger_power": 29,
+        },
+        "fleet_telemetry_field_received_at": {
+            "ChargeState": 1_000_000,
+            "DetailedChargeState": 1_000_000,
+            "DCChargingPower": 2_000_000,
+        },
+    }
+
+    assert app._fleet_telemetrie_profile_ladezustand(daten) is True
+
+    daten["fleet_telemetry_field_received_at"]["ChargeState"] = 3_000_000
+    assert app._fleet_telemetrie_profile_ladezustand(daten) is False
+
+
 def test_fleet_telemetrie_profile_nutzt_nach_ladeende_zuerst_live(monkeypatch):
     angefordert = []
     jetzt = [2000.0]
@@ -3277,6 +3375,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
         "vins": ["TESTVIN"],
         "config": {
             "fields": {
+                "ACChargingPower": {"interval_seconds": 60},
                 "InsideTemp": {"interval_seconds": 1, "minimum_delta": 0.1},
                 "Location": {"interval_seconds": 1, "minimum_delta": 0},
                 "MediaNowPlayingTitle": {"interval_seconds": 30},
@@ -3285,6 +3384,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
                 "BrakePedal": {"interval_seconds": 10},
                 "BrakePedalPos": {"interval_seconds": 10},
                 "ChargeState": {"interval_seconds": 1},
+                "DCChargingPower": {"interval_seconds": 60},
                 "DestinationLocation": {"interval_seconds": 60},
                 "DestinationName": {"interval_seconds": 60},
                 "DoorState": {"interval_seconds": 60},
@@ -3340,12 +3440,14 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "minimum_delta" not in live_fields["PackCurrent"]
     assert live_fields["BatteryLevel"]["interval_seconds"] == 5
     assert "minimum_delta" not in live_fields["BatteryLevel"]
+    assert live_fields["ACChargingPower"]["interval_seconds"] == 10
     assert live_fields["BatteryHeaterOn"]["interval_seconds"] == 10
     assert live_fields["BrakePedal"]["interval_seconds"] == 1
     assert live_fields["BrakePedalPos"]["interval_seconds"] == 1
     assert live_fields["ChargeState"]["interval_seconds"] == 10
     assert live_fields["DestinationLocation"]["interval_seconds"] == 1
     assert live_fields["DestinationName"]["interval_seconds"] == 30
+    assert live_fields["DCChargingPower"]["interval_seconds"] == 10
     assert live_fields["ExpectedEnergyPercentAtTripArrival"]["interval_seconds"] == 5
     assert live_fields["FdWindow"]["interval_seconds"] == 10
     assert live_fields["FpWindow"]["interval_seconds"] == 10
@@ -3427,6 +3529,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
         in wiederherstellungsfelder["DestinationName"]["include_fields"]
     )
     assert wiederherstellungsfelder["PackCurrent"]["interval_seconds"] == 1
+    assert wiederherstellungsfelder["ACChargingPower"]["interval_seconds"] == 10
+    assert wiederherstellungsfelder["DCChargingPower"]["interval_seconds"] == 10
     assert wiederherstellungsfelder["DCDCEnable"]["interval_seconds"] == 30
 
     erweitert = app._fleet_telemetrie_profile_config_erstellen(
@@ -3447,6 +3551,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "RouteLine" in erweitert_fields["Odometer"]["include_fields"]
     assert erweitert_fields["DCDCEnable"]["interval_seconds"] == 30
     assert erweitert_fields["BatteryHeaterOn"]["interval_seconds"] == 10
+    assert erweitert_fields["ACChargingPower"]["interval_seconds"] == 10
+    assert erweitert_fields["DCChargingPower"]["interval_seconds"] == 10
     assert erweitert_fields["MediaNowPlayingTitle"]["interval_seconds"] == 60
     assert erweitert_fields["ModuleTempMax"]["interval_seconds"] == 60
     assert erweitert_fields["ModuleTempMin"]["interval_seconds"] == 60
@@ -3474,6 +3580,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "minimum_delta" not in fields["BatteryLevel"]
     assert fields["BatteryHeaterOn"]["interval_seconds"] == 60
     assert fields["DCDCEnable"]["interval_seconds"] == 60
+    assert fields["ACChargingPower"]["interval_seconds"] == 10
+    assert fields["DCChargingPower"]["interval_seconds"] == 10
     assert fields["ChargeState"]["interval_seconds"] == 10
     assert fields["FdWindow"]["interval_seconds"] == 10
     assert fields["RearDefrostEnabled"]["interval_seconds"] == 10
@@ -3493,6 +3601,8 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert charging_fields["BatteryLevel"]["interval_seconds"] == 10
     assert "minimum_delta" not in charging_fields["BatteryLevel"]
     assert charging_fields["BatteryHeaterOn"]["interval_seconds"] == 10
+    assert charging_fields["ACChargingPower"]["interval_seconds"] == 10
+    assert charging_fields["DCChargingPower"]["interval_seconds"] == 10
     assert charging_fields["FdWindow"]["interval_seconds"] == 10
     assert charging_fields["RearDefrostEnabled"]["interval_seconds"] == 10
     assert charging_fields["HvacLeftTemperatureRequest"]["interval_seconds"] == 10
