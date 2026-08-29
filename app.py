@@ -7924,22 +7924,29 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                 status["live_stable_since"] = live_stable_since
                 status_geändert = True
         elif ziel == "live" and current in {"live", "live_extended"}:
-            if live_unstable_since is None or live_unstable_since <= 0:
-                live_unstable_since = jetzt
-                status["live_unstable_since"] = live_unstable_since
-                status_geändert = True
-            live_takt_toleriert = (
-                jetzt - live_unstable_since
-                < FLEET_TELEMETRIE_PROFILE_LIVE_INSTABIL_TOLERANZ_SECONDS
-            )
-            if (
-                not live_takt_toleriert
-                and live_stable_since is not None
-                and live_stable_since > 0
-            ):
-                status["live_stable_since"] = 0.0
-                status_geändert = True
-                live_stable_since = None
+            if not fahrzeug_bewegt_sich:
+                if live_unstable_since is not None and live_unstable_since > 0:
+                    status["live_unstable_since"] = 0.0
+                    status_geändert = True
+                live_unstable_since = None
+                live_takt_toleriert = True
+            else:
+                if live_unstable_since is None or live_unstable_since <= 0:
+                    live_unstable_since = jetzt
+                    status["live_unstable_since"] = live_unstable_since
+                    status_geändert = True
+                live_takt_toleriert = (
+                    jetzt - live_unstable_since
+                    < FLEET_TELEMETRIE_PROFILE_LIVE_INSTABIL_TOLERANZ_SECONDS
+                )
+                if (
+                    not live_takt_toleriert
+                    and live_stable_since is not None
+                    and live_stable_since > 0
+                ):
+                    status["live_stable_since"] = 0.0
+                    status_geändert = True
+                    live_stable_since = None
         else:
             if live_unstable_since is not None and live_unstable_since > 0:
                 status["live_unstable_since"] = 0.0
@@ -8018,8 +8025,7 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
             >= FLEET_TELEMETRIE_PROFILE_LIVE_NEUVERSAND_STARTVERZOEGERUNG_SECONDS
             and (
                 current not in {"live", "live_extended"}
-                or live_takt_stabil
-                or not live_takt_toleriert
+                or not live_takt_akzeptiert
             )
         )
         if (
