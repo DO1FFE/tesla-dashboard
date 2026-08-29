@@ -8643,11 +8643,15 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
                     )
                 drive["active_route_latitude"] = lat
                 drive["active_route_longitude"] = lon
-                _fleet_telemetrie_navigation_aktivieren(
-                    drive,
-                    timestamp_ms,
-                    data,
-                )
+                if (
+                    drive.get("active_route_active") is True
+                    or _fleet_telemetrie_navigation_hat_zielkern(drive)
+                ):
+                    _fleet_telemetrie_navigation_aktivieren(
+                        drive,
+                        timestamp_ms,
+                        data,
+                    )
             else:
                 _fleet_telemetrie_navigation_routenlinie_verwerfen(data, drive)
                 drive.pop("active_route_latitude", None)

@@ -2177,7 +2177,7 @@ def test_fleet_telemetrie_zieht_auch_passende_alte_routeline_nicht_nach():
     )
 
     drive = daten["drive_state"]
-    assert drive["active_route_active"] is True
+    assert drive["active_route_active"] is False
     assert "active_route_line" not in drive
 
 
@@ -2202,8 +2202,59 @@ def test_fleet_telemetrie_zieht_fremde_alte_routeline_nicht_nach():
     )
 
     drive = daten["drive_state"]
-    assert drive["active_route_active"] is True
+    assert drive["active_route_active"] is False
     assert "active_route_line" not in drive
+
+
+def test_fleet_telemetrie_letzte_zielkoordinate_aktiviert_navigation_nicht(
+    monkeypatch,
+):
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
+    monkeypatch.setattr(app, "_load_cached", lambda cache_id: {})
+    monkeypatch.setattr(app, "_subscriber_daten_senden", lambda *args: None)
+    monkeypatch.setattr(app, "_aprs_spaeter_senden", lambda *args: None)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_aktualisieren",
+        lambda cache_id, data: data,
+    )
+    monkeypatch.setattr(app, "latest_data", {
+        "veh-1": {
+            "state": "online",
+            "vin": "TESTVIN",
+            "drive_state": {
+                "active_route_active": False,
+                "active_route_ended_at": 1900,
+            },
+        },
+    })
+
+    assert app._fleet_telemetrie_v_felder_aktualisieren(
+        "TESTVIN",
+        [
+            ("MilesToArrival", None, 2000),
+            ("ExpectedEnergyPercentAtTripArrival", 90, 2000),
+            ("DestinationName", None, 2000),
+            ("MinutesToArrival", None, 2000),
+            ("DestinationLocation", {
+                "latitude": 51.455719,
+                "longitude": 7.033862,
+            }, 2000),
+        ],
+    )
+
+    daten = app.latest_data["veh-1"]
+    drive = daten["drive_state"]
+    assert drive["active_route_active"] is False
+    assert drive["active_route_ended_at"] == 2000
+    assert "active_route_latitude" not in drive
+    assert "active_route_longitude" not in drive
+    assert "DestinationLocation" not in daten["fleet_telemetry_raw"]
 
 
 def test_fleet_telemetrie_entpackt_base64_protobuf_routeline():
