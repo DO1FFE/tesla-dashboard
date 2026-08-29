@@ -1976,7 +1976,7 @@ _fleet_telemetry_queue_verworfen = 0
 _fleet_telemetry_queue_warnung = 0.0
 FLEET_TELEMETRIE_PROFILE = {"live", "live_extended", "parked", "charging"}
 FLEET_TELEMETRIE_PROFILE_STANDARD = "live"
-FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 4
+FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 5
 FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS = max(
     0.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_PARK_PROFILE_DELAY_SECONDS", "120")),
@@ -2109,9 +2109,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_FELDER = max(
     1,
     int(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MIN_FIELDS", "2")),
 )
-FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER = frozenset({
-    "RouteLine",
-})
+FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER = frozenset()
 FLEET_TELEMETRIE_PROFILE_OPTIONALE_FELDER = frozenset({
     "DCDCEnable",
 })
@@ -2294,6 +2292,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_WIEDERHERSTELLUNGSFELDER = frozenset({
     "PackVoltage",
     "PedalPosition",
     "RdWindow",
+    "RouteLine",
     "RpWindow",
     "VehicleSpeed",
 })

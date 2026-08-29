@@ -3588,7 +3588,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert live_fields["ModuleTempMin"]["interval_seconds"] == 60
     assert "minimum_delta" not in live_fields["ModuleTempMax"]
     assert "minimum_delta" not in live_fields["ModuleTempMin"]
-    assert "RouteLine" not in live_fields
+    assert live_fields["RouteLine"]["interval_seconds"] == 10
     assert "RouteLine" in live_fields["DestinationLocation"]["include_fields"]
     assert "RouteLine" in live_fields["DestinationName"]["include_fields"]
     assert live_fields["RouteTrafficMinutesDelay"]["interval_seconds"] == 5
@@ -3626,6 +3626,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert wiederherstellungsfelder["FdWindow"]["interval_seconds"] == 10
     assert wiederherstellungsfelder["FpWindow"]["interval_seconds"] == 10
     assert wiederherstellungsfelder["RdWindow"]["interval_seconds"] == 10
+    assert wiederherstellungsfelder["RouteLine"]["interval_seconds"] == 10
     assert wiederherstellungsfelder["RpWindow"]["interval_seconds"] == 10
     assert set(wiederherstellungsfelder["Location"]["include_fields"]) == (
         app.FLEET_TELEMETRIE_PROFILE_LIVE_BEWEGUNGS_INKLUSIVFELDER
@@ -3665,7 +3666,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert erweitert_fields["DestinationName"]["interval_seconds"] == 30
     assert erweitert_fields["HvacLeftTemperatureRequest"]["interval_seconds"] == 1
     assert erweitert_fields["HvacRightTemperatureRequest"]["interval_seconds"] == 1
-    assert "RouteLine" not in erweitert_fields
+    assert erweitert_fields["RouteLine"]["interval_seconds"] == 10
     assert "RouteLine" in erweitert_fields["Odometer"]["include_fields"]
     assert erweitert_fields["DCDCEnable"]["interval_seconds"] == 30
     assert erweitert_fields["BatteryHeaterOn"]["interval_seconds"] == 10
