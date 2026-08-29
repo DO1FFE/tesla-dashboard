@@ -8459,13 +8459,16 @@ def _fleet_telemetrie_navigation_aktivieren(drive, timestamp_ms, data=None):
 def _fleet_telemetrie_navigation_hat_zielkern(drive):
     """Prüfe, ob ein neues Ziel mehr als nur eine alte Routenlinie meldet."""
 
-    return bool(drive.get("active_route_destination")) or any(
-        drive.get(feld) is not None
-        for feld in (
-            "active_route_miles_to_arrival",
-            "active_route_minutes_to_arrival",
-        )
-    )
+    if str(drive.get("active_route_destination") or "").strip():
+        return True
+    for feld in (
+        "active_route_miles_to_arrival",
+        "active_route_minutes_to_arrival",
+    ):
+        wert = _as_float(drive.get(feld))
+        if wert is not None and wert > 0:
+            return True
+    return False
 
 
 def _fleet_telemetrie_varint_lesen(payload, index=0):
@@ -8607,8 +8610,6 @@ def _fleet_telemetrie_navigation_cache_bereinigen(data):
             int(timestamp_ms),
             data,
         )
-    if drive.get("active_route_active") is True:
-        return False
     if _fleet_telemetrie_navigation_hat_zielkern(drive):
         return False
     hat_alte_navigation = any(
@@ -8678,10 +8679,7 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
                     )
                 drive["active_route_latitude"] = lat
                 drive["active_route_longitude"] = lon
-                if (
-                    drive.get("active_route_active") is True
-                    or _fleet_telemetrie_navigation_hat_zielkern(drive)
-                ):
+                if _fleet_telemetrie_navigation_hat_zielkern(drive):
                     _fleet_telemetrie_navigation_aktivieren(
                         drive,
                         timestamp_ms,
@@ -8714,6 +8712,8 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
     if field == "ExpectedEnergyPercentAtTripArrival":
         if drive.get("active_route_active") is not False:
             drive["active_route_energy_at_arrival"] = value
+        else:
+            rohwerte.pop(field, None)
         drive["timestamp"] = timestamp_ms
         return True
     if field == "MilesToArrival":
@@ -8724,7 +8724,18 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
                 return True
         else:
             drive["active_route_miles_to_arrival"] = value
-            _fleet_telemetrie_navigation_aktivieren(drive, timestamp_ms, data)
+            if _fleet_telemetrie_navigation_hat_zielkern(drive):
+                _fleet_telemetrie_navigation_aktivieren(
+                    drive,
+                    timestamp_ms,
+                    data,
+                )
+            else:
+                _fleet_telemetrie_navigation_beenden(
+                    drive,
+                    timestamp_ms,
+                    data,
+                )
         drive["timestamp"] = timestamp_ms
         return True
     if field == "MinutesToArrival":
@@ -8735,12 +8746,25 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
                 return True
         else:
             drive["active_route_minutes_to_arrival"] = value
-            _fleet_telemetrie_navigation_aktivieren(drive, timestamp_ms, data)
+            if _fleet_telemetrie_navigation_hat_zielkern(drive):
+                _fleet_telemetrie_navigation_aktivieren(
+                    drive,
+                    timestamp_ms,
+                    data,
+                )
+            else:
+                _fleet_telemetrie_navigation_beenden(
+                    drive,
+                    timestamp_ms,
+                    data,
+                )
         drive["timestamp"] = timestamp_ms
         return True
     if field == "RouteTrafficMinutesDelay":
         if drive.get("active_route_active") is not False:
             drive["active_route_traffic_minutes_delay"] = value
+        else:
+            rohwerte.pop(field, None)
         drive["timestamp"] = timestamp_ms
         return True
     if field == "RouteLine":
@@ -8748,10 +8772,7 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         if value is None or (isinstance(value, str) and not value.strip()):
             _fleet_telemetrie_navigation_beenden(drive, timestamp_ms, data)
         else:
-            if (
-                drive.get("active_route_active") is not False
-                or _fleet_telemetrie_navigation_hat_zielkern(drive)
-            ):
+            if _fleet_telemetrie_navigation_hat_zielkern(drive):
                 drive["active_route_line"] = value
                 _fleet_telemetrie_navigation_aktivieren(drive, timestamp_ms)
         drive["timestamp"] = timestamp_ms

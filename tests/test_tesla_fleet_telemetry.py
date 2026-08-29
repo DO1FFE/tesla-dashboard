@@ -2257,6 +2257,73 @@ def test_fleet_telemetrie_letzte_zielkoordinate_aktiviert_navigation_nicht(
     assert "DestinationLocation" not in daten["fleet_telemetry_raw"]
 
 
+def test_fleet_telemetrie_nullwerte_am_ziel_beenden_navigation(monkeypatch):
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
+    monkeypatch.setattr(app, "_load_cached", lambda cache_id: {})
+    monkeypatch.setattr(app, "_subscriber_daten_senden", lambda *args: None)
+    monkeypatch.setattr(app, "_aprs_spaeter_senden", lambda *args: None)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_aktualisieren",
+        lambda cache_id, data: data,
+    )
+    monkeypatch.setattr(app, "latest_data", {
+        "veh-1": {
+            "state": "online",
+            "vin": "TESTVIN",
+            "fleet_telemetry_raw": {
+                "DestinationName": "Altes Ziel",
+                "DestinationLocation": {
+                    "latitude": 51.455404,
+                    "longitude": 6.997049,
+                },
+                "MilesToArrival": 0.1,
+                "MinutesToArrival": 1,
+            },
+            "drive_state": {
+                "shift_state": "D",
+                "active_route_active": True,
+                "active_route_destination": "Altes Ziel",
+                "active_route_latitude": 51.455404,
+                "active_route_longitude": 6.997049,
+                "active_route_miles_to_arrival": 0.1,
+                "active_route_minutes_to_arrival": 1,
+            },
+        },
+    })
+
+    assert app._fleet_telemetrie_v_felder_aktualisieren(
+        "TESTVIN",
+        [
+            ("DestinationName", None, 2000),
+            ("DestinationLocation", {
+                "latitude": 51.455404,
+                "longitude": 6.997049,
+            }, 2000),
+            ("ExpectedEnergyPercentAtTripArrival", 87, 2000),
+            ("MilesToArrival", 0, 2000),
+            ("MinutesToArrival", 0, 2000),
+            ("RouteTrafficMinutesDelay", 0, 2000),
+        ],
+    )
+
+    daten = app.latest_data["veh-1"]
+    drive = daten["drive_state"]
+    assert drive["active_route_active"] is False
+    assert drive["active_route_ended_at"] == 2000
+    assert "active_route_latitude" not in drive
+    assert "active_route_longitude" not in drive
+    assert not any(
+        feld in daten["fleet_telemetry_raw"]
+        for feld in app.FLEET_TELEMETRIE_NAVIGATIONS_ROHFELDER
+    )
+
+
 def test_fleet_telemetrie_entpackt_base64_protobuf_routeline():
     polyline = "{wrcaBczhlLr@fZbWc@TcOF{Sd@"
     routeline = _routeline_protobuf(polyline)
