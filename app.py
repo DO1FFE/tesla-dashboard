@@ -7724,6 +7724,33 @@ def _fleet_telemetrie_profile_neuverbindung_pendelt_sich_ein(status, jetzt):
     return 0 <= alter < FLEET_TELEMETRIE_PROFILE_RECONNECT_SETTLE_SECONDS
 
 
+def _fleet_telemetrie_profile_offline_nach_profilwechsel_ueberbruecken(
+    status,
+    ziel,
+    data,
+    jetzt,
+):
+    """Ignoriere den erwarteten kurzen Abbruch nach einem Profil-POST."""
+
+    if ziel != "parked" or not isinstance(status, dict):
+        return ziel
+    if _fleet_telemetrie_profile_offline_seit(data, jetzt) is None:
+        return ziel
+    vorheriges_ziel = status.get("target")
+    if vorheriges_ziel not in {"live", "charging"}:
+        return ziel
+    letztes_profil = status.get("last_posted_profile")
+    if letztes_profil not in {"live", "live_extended", "charging"}:
+        return ziel
+    letzter_post = _as_float(status.get("last_posted_at"))
+    if letzter_post is None or letzter_post <= 0:
+        return ziel
+    alter = float(jetzt) - letzter_post
+    if 0 <= alter <= FLEET_TELEMETRIE_PROFILE_ERWARTETE_NEUVERBINDUNG_SECONDS:
+        return vorheriges_ziel
+    return ziel
+
+
 def _fleet_telemetrie_profile_nach_neuverbindung_vermerken(vin, jetzt=None):
     """Merke eine Neuverbindung, ohne den neuen Stream sofort neu zu konfigurieren."""
 
@@ -7858,6 +7885,14 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
         if ladezustand_geändert:
             status["updated_at"] = jetzt
             status_geändert = True
+        ziel = (
+            _fleet_telemetrie_profile_offline_nach_profilwechsel_ueberbruecken(
+                status,
+                ziel,
+                data,
+                jetzt,
+            )
+        )
         ziel_geändert = status.get("target") != ziel
         if ziel_geändert:
             if parkbeginn is None and ziel == "parked":

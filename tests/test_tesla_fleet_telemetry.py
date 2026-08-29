@@ -5111,6 +5111,130 @@ def test_fleet_telemetrie_profile_behaelt_live_plus_ohne_qr_pairing(monkeypatch)
     assert daten["telemetry_config_sync_profile"] == "live_extended"
 
 
+def test_fleet_telemetrie_profile_ignoriert_abbruch_nach_live_plus_post(
+    monkeypatch,
+):
+    angefordert = []
+
+    monkeypatch.setattr(app.time, "time", lambda: 2100.5)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        angefordert.append,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        _bestaetigter_profilstatus(
+            "live",
+            2000.0,
+            target="live",
+            last_sent=2100.0,
+            last_sent_profile="live_extended",
+            last_posted_at=2100.1,
+            last_posted_profile="live_extended",
+            config_synced=False,
+            config_sync_state="pending",
+            config_sync_profile="live_extended",
+            live_stable_since=2000.0,
+        ),
+    )
+    daten = {
+        "state": "offline",
+        "state_since_ms": 2_100_400,
+        "drive_state": {"shift_state": "R", "speed": 3.6},
+        "charge_state": {"charging_state": "Disconnected"},
+    }
+
+    daten = app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    status = app._fleet_telemetry_profile_status
+    assert angefordert == []
+    assert status["target"] == "live"
+    assert status["live_stable_since"] == 2000.0
+    assert status["last_sent_profile"] == "live_extended"
+    assert daten["telemetry_profile_target"] == "live"
+
+
+def test_fleet_telemetrie_profile_ignoriert_abbruch_nach_erstem_live_post(
+    monkeypatch,
+):
+    angefordert = []
+
+    monkeypatch.setattr(app.time, "time", lambda: 2100.5)
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        angefordert.append,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        _bestaetigter_profilstatus(
+            "parked",
+            2000.0,
+            target="live",
+            target_since=2100.0,
+            last_sent=2100.0,
+            last_sent_profile="live",
+            last_posted_at=2100.1,
+            last_posted_profile="live",
+            config_synced=False,
+            config_sync_state="pending",
+            config_sync_profile="live",
+        ),
+    )
+    daten = {
+        "state": "offline",
+        "state_since_ms": 2_100_400,
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "charge_state": {"charging_state": "Disconnected"},
+    }
+
+    daten = app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    status = app._fleet_telemetry_profile_status
+    assert angefordert == []
+    assert status["target"] == "live"
+    assert status["last_sent_profile"] == "live"
+    assert daten["telemetry_profile_target"] == "live"
+
+
+def test_fleet_telemetrie_profile_wertet_spaeten_abbruch_als_offline(
+    monkeypatch,
+):
+    monkeypatch.setattr(app.time, "time", lambda: 2200.0)
+    monkeypatch.setattr(
+        app,
+        "FLEET_TELEMETRIE_PROFILE_ERWARTETE_NEUVERBINDUNG_SECONDS",
+        30.0,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        _bestaetigter_profilstatus(
+            "live_extended",
+            2000.0,
+            target="live",
+            last_posted_at=2100.0,
+            last_posted_profile="live_extended",
+            live_stable_since=2000.0,
+        ),
+    )
+    daten = {
+        "state": "offline",
+        "state_since_ms": 2_199_000,
+        "drive_state": {"shift_state": "D", "speed": 20},
+    }
+
+    daten = app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    status = app._fleet_telemetry_profile_status
+    assert status["target"] == "parked"
+    assert status["live_stable_since"] == 0.0
+    assert daten["telemetry_profile_target"] == "parked"
+
+
 def test_fleet_telemetrie_profile_erweitert_wartet_auf_stabilitaet(monkeypatch):
     angefordert = []
 
