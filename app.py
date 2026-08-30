@@ -6574,6 +6574,10 @@ def _fleet_telemetrie_profile_live_takt_stabil(data, jetzt=None):
     if not isinstance(data, dict):
         return False
     jetzt = time.time() if jetzt is None else float(jetzt)
+    fahrzeug_bewegt_sich = _fleet_telemetrie_profile_fahrzeug_bewegt_sich(
+        data,
+        jetzt,
+    )
     empfangen = data.get("fleet_telemetry_field_received_at")
     abstände = data.get("fleet_telemetry_field_interval_ms")
     if not isinstance(empfangen, dict) or not isinstance(abstände, dict):
@@ -6586,7 +6590,13 @@ def _fleet_telemetrie_profile_live_takt_stabil(data, jetzt=None):
         if letzter is None or intervall is None:
             continue
         alter = jetzt - letzter
-        if alter > FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS:
+        max_alter = FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ALTER_SECONDS
+        if fahrzeug_bewegt_sich:
+            max_alter = min(
+                max_alter,
+                FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MAX_ALTER_SECONDS,
+            )
+        if alter > max_alter:
             continue
         intervall_sekunden = intervall / 1000.0
         max_abstand = FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MAX_ABSTAND_SECONDS
@@ -6608,7 +6618,7 @@ def _fleet_telemetrie_profile_live_takt_stabil(data, jetzt=None):
             if feld in FLEET_TELEMETRIE_PROFILE_LIVE_FAHR_FELDER:
                 stabile_fahrfelder += 1
     if (
-        _fleet_telemetrie_profile_fahrzeug_bewegt_sich(data, jetzt)
+        fahrzeug_bewegt_sich
         and stabile_fahrfelder < 1
     ):
         return False
@@ -7622,7 +7632,19 @@ def _fleet_telemetrie_profile_sync_erneut_pruefen():
         return
     jetzt = time.time()
     datenstand = _fleet_telemetrie_profile_aktueller_datenstand()
-    if _fleet_telemetrie_profile_offline_seit(datenstand, jetzt) is not None:
+    status_vorprüfung = _fleet_telemetrie_profile_status_kopie()
+    live_takt_prüfen = (
+        isinstance(datenstand, dict)
+        and status_vorprüfung.get("target") == "live"
+        and _fleet_telemetrie_profile_fahrzeug_bewegt_sich(
+            datenstand,
+            jetzt,
+        )
+    )
+    if (
+        _fleet_telemetrie_profile_offline_seit(datenstand, jetzt) is not None
+        or live_takt_prüfen
+    ):
         _fleet_telemetrie_profile_aktualisieren("profile-worker", datenstand)
     with _fleet_telemetry_profile_lock:
         status = _fleet_telemetry_profile_status

@@ -4605,6 +4605,74 @@ def test_fleet_telemetrie_profile_startet_live_reparatur_ohne_neues_paket(
     assert status["live_retry_attempts"] == 1
 
 
+def test_fleet_telemetrie_profile_worker_erkennt_stillen_fahrtstream(
+    monkeypatch,
+):
+    jetzt = [2004.0]
+    angefordert = []
+    daten = {
+        "vin": "TESTVIN",
+        "state": "online",
+        "fleet_telemetry_received_at": 2_000_000,
+        "fleet_telemetry_field_received_at": {
+            "VehicleSpeed": 2_000_000,
+            "PackCurrent": 2_000_000,
+            "PackVoltage": 2_000_000,
+            "Location": 2_000_000,
+        },
+        "fleet_telemetry_field_previous_received_at": {
+            "VehicleSpeed": 1_999_000,
+            "PackCurrent": 1_999_000,
+            "PackVoltage": 1_999_000,
+            "Location": 1_999_000,
+        },
+        "fleet_telemetry_field_interval_ms": {
+            "VehicleSpeed": 1000,
+            "PackCurrent": 1000,
+            "PackVoltage": 1000,
+            "Location": 1000,
+        },
+        "drive_state": {"shift_state": "D", "speed": 12},
+        "charge_state": {"charging_state": "Disconnected"},
+    }
+
+    monkeypatch.setattr(app.time, "time", lambda: jetzt[0])
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: True)
+    monkeypatch.setattr(app, "latest_data", {"veh-1": daten})
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_spaeter_anwenden",
+        angefordert.append,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetry_profile_status",
+        _bestaetigter_profilstatus(
+            "live_extended",
+            1900.0,
+            target="live",
+            target_since=1800.0,
+            live_stable_since=1900.0,
+            live_retry_motion_active=True,
+            live_retry_last_moving_at=2000.0,
+        ),
+    )
+
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+
+    assert angefordert == []
+    assert app._fleet_telemetry_profile_status["live_unstable_since"] == 2004.0
+
+    jetzt[0] = 2009.0
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+
+    status = app._fleet_telemetry_profile_status
+    assert angefordert == ["live"]
+    assert status["live_retry_active"] is True
+    assert status["config_sync_state"] == "pending"
+    assert status["config_sync_profile"] == "live"
+
+
 def test_fleet_telemetrie_profile_wartet_nach_wiederanlauf_vor_neuversand(
     monkeypatch,
 ):
@@ -5129,6 +5197,27 @@ def test_fleet_telemetrie_profile_live_stabil_verwirft_10s_takt():
     }
 
     assert app._fleet_telemetrie_profile_live_takt_stabil(daten, 2000.0) is False
+
+
+def test_fleet_telemetrie_profile_live_stabil_verwirft_stillen_fahrtstream():
+    daten = {
+        "fleet_telemetry_field_received_at": {
+            "VehicleSpeed": 2_000_000,
+            "PackCurrent": 2_000_000,
+            "PackVoltage": 2_000_000,
+            "Location": 2_000_000,
+        },
+        "fleet_telemetry_field_interval_ms": {
+            "VehicleSpeed": 1000,
+            "PackCurrent": 1000,
+            "PackVoltage": 1000,
+            "Location": 1000,
+        },
+        "drive_state": {"shift_state": "D", "speed": 12},
+    }
+
+    assert app._fleet_telemetrie_profile_live_takt_stabil(daten, 2003.0)
+    assert not app._fleet_telemetrie_profile_live_takt_stabil(daten, 2003.1)
 
 
 def test_fleet_telemetrie_profile_bewegung_verlangt_frische_geschwindigkeit():
