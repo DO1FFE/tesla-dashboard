@@ -1943,6 +1943,111 @@ def test_fahrtpfad_wird_waehrend_fahrt_nicht_nach_parkzeit_geloescht(
     assert app.trip_path_generation == 12
 
 
+def test_fahrtpfad_worker_bereinigt_ohne_telemetrie_oder_browser(monkeypatch):
+    parkbeginn = 1_788_100_000_000
+    pfad = [[51.0, 7.0], [51.1, 7.1]]
+    fahrzeug = {
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "fleet_telemetry_updated_at": parkbeginn,
+        "park_start": parkbeginn,
+        "path": pfad,
+    }
+    standard = {
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "fleet_telemetry_updated_at": parkbeginn + 1000,
+        "park_start": parkbeginn,
+        "path": pfad,
+    }
+    gespeichert = []
+    gesendet = []
+    monkeypatch.setattr(app, "trip_path", pfad)
+    monkeypatch.setattr(app, "current_trip_file", "/tmp/trip.csv")
+    monkeypatch.setattr(app, "current_trip_date", "20260830")
+    monkeypatch.setattr(app, "trip_path_generation", 20)
+    monkeypatch.setattr(app, "drive_pause_ms", parkbeginn)
+    monkeypatch.setattr(
+        app,
+        "latest_data",
+        {"veh-1": fahrzeug, "default": standard},
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda cache_id, data: gespeichert.append((cache_id, list(data["path"]))),
+    )
+    monkeypatch.setattr(
+        app,
+        "_subscriber_daten_senden",
+        lambda cache_id, data: gesendet.append((cache_id, list(data["path"]))),
+    )
+
+    geändert = app._fleet_telemetrie_fahrtpfad_bereinigungs_tick(
+        parkbeginn + app.FAHRTPFAD_NACH_PARKEN_MS
+    )
+
+    assert geändert is True
+    assert app.trip_path == []
+    assert app.current_trip_file is None
+    assert app.current_trip_date is None
+    assert app.trip_path_generation == 21
+    assert fahrzeug["path"] == []
+    assert standard["path"] == []
+    assert gespeichert == [("veh-1", []), ("default", [])]
+    assert gesendet == [("veh-1", []), ("default", [])]
+
+
+def test_fahrtpfad_worker_loescht_nicht_bei_frischer_fahrbewegung(monkeypatch):
+    jetzt_ms = 1_788_100_700_000
+    parkbeginn = jetzt_ms - app.FAHRTPFAD_NACH_PARKEN_MS
+    pfad = [[51.0, 7.0], [51.1, 7.1]]
+    geparkt = {
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "fleet_telemetry_updated_at": jetzt_ms - 5000,
+        "park_start": parkbeginn,
+        "path": pfad,
+    }
+    fahrend = {
+        "drive_state": {"shift_state": "D", "speed": 20},
+        "fleet_telemetry_updated_at": jetzt_ms,
+        "park_start": parkbeginn,
+        "path": pfad,
+    }
+    monkeypatch.setattr(app, "trip_path", pfad)
+    monkeypatch.setattr(app, "trip_path_generation", 30)
+    monkeypatch.setattr(app, "drive_pause_ms", parkbeginn)
+    monkeypatch.setattr(
+        app,
+        "latest_data",
+        {"default": geparkt, "veh-1": fahrend},
+    )
+
+    geändert = app._fleet_telemetrie_fahrtpfad_bereinigungs_tick(jetzt_ms)
+
+    assert geändert is False
+    assert app.trip_path == pfad
+    assert app.trip_path_generation == 30
+
+
+def test_fahrtpfad_worker_prueft_auch_ohne_neue_ereignisse(monkeypatch):
+    aufrufe = []
+    aktiv = iter((True, False))
+    monkeypatch.setattr(app, "_fleet_telemetrie_aktiv", lambda: next(aktiv))
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_fahrtpfad_bereinigungs_tick",
+        lambda: aufrufe.append("tick"),
+    )
+    monkeypatch.setattr(
+        app.time,
+        "sleep",
+        lambda sekunden: aufrufe.append(sekunden),
+    )
+
+    app._fleet_telemetrie_fahrtpfad_worker_loop()
+
+    assert aufrufe == ["tick", app.FLEET_TELEMETRY_TRIP_PATH_CLEANUP_SECONDS]
+
+
 def test_fahrtpfad_wird_nach_neustart_aus_tagesdatei_geladen(
     monkeypatch,
     tmp_path,

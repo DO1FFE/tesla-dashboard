@@ -1954,6 +1954,7 @@ _fleet_telemetry_cache_thread = None
 _fleet_telemetry_profile_thread = None
 _fleet_telemetry_token_thread = None
 _fleet_telemetry_position_thread = None
+_fleet_telemetry_trip_path_thread = None
 _fleet_telemetry_lock = threading.Lock()
 _fleet_telemetry_start_lock = threading.Lock()
 _fleet_telemetry_profile_lock = threading.Lock()
@@ -1980,6 +1981,10 @@ FLEET_TELEMETRY_STREAM_QUEUE_MAX = max(
 )
 FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS = max(
     0.25, float(os.getenv("TESLA_FLEET_TELEMETRY_STREAM_KEEPALIVE_SECONDS", "0.5"))
+)
+FLEET_TELEMETRY_TRIP_PATH_CLEANUP_SECONDS = max(
+    0.25,
+    float(os.getenv("TESLA_FLEET_TELEMETRY_TRIP_PATH_CLEANUP_SECONDS", "1.0")),
 )
 FLEET_TELEMETRY_STREAM_MIN_INTERVAL_SECONDS = max(
     0.05, float(os.getenv("TESLA_FLEET_TELEMETRY_STREAM_MIN_INTERVAL_SECONDS", "0.25"))
@@ -3949,6 +3954,59 @@ def _fahrtpfad_nach_parkzeit_bereinigen(vehicle_data=None, jetzt_ms=None):
     if int(jetzt_ms) - int(parkbeginn_ms) < FAHRTPFAD_NACH_PARKEN_MS:
         return False
     return _fahrtpfad_zurücksetzen(vehicle_data)
+
+
+def _fleet_telemetrie_fahrtpfad_bereinigungs_tick(
+    jetzt_ms=None,
+    vehicle_data=None,
+):
+    """Bereinige und verteile einen abgelaufenen Fahrtpfad atomar."""
+
+    snapshots = []
+    with _fleet_telemetry_lock:
+        kandidaten = [
+            (cache_id, data)
+            for cache_id, data in latest_data.items()
+            if isinstance(data, dict)
+        ]
+        if not kandidaten:
+            return False
+        if isinstance(vehicle_data, dict):
+            aktuelle_daten = vehicle_data
+        else:
+            _cache_id, aktuelle_daten = max(
+                kandidaten,
+                key=lambda eintrag: (
+                    _fleet_telemetrie_aktualitaetszeit_ms(eintrag[1]) or 0
+                ),
+            )
+        if jetzt_ms is None:
+            geändert = _fahrtpfad_nach_parkzeit_bereinigen(aktuelle_daten)
+        else:
+            geändert = _fahrtpfad_nach_parkzeit_bereinigen(
+                aktuelle_daten,
+                jetzt_ms=jetzt_ms,
+            )
+        if not geändert:
+            return False
+        for cache_id, data in kandidaten:
+            _fleet_telemetrie_cache_spaeter_speichern(cache_id, data)
+            snapshots.append((cache_id, _subscriber_daten_kopie(data)))
+
+    for cache_id, snapshot in snapshots:
+        _subscriber_daten_senden(cache_id, snapshot)
+    return True
+
+
+def _fleet_telemetrie_fahrtpfad_worker_loop():
+    """Prüfe die Zehn-Minuten-Frist unabhängig von Fahrzeugereignissen."""
+
+    while _fleet_telemetrie_aktiv():
+        try:
+            _fleet_telemetrie_fahrtpfad_bereinigungs_tick()
+        except Exception:
+            logging.exception("Zeitgesteuerte Fahrtpfad-Bereinigung fehlgeschlagen")
+        time.sleep(FLEET_TELEMETRY_TRIP_PATH_CLEANUP_SECONDS)
 
 
 def _laufenden_fahrtpfad_laden(dateiname):
@@ -11182,6 +11240,7 @@ def _start_fleet_telemetry_listener():
     global _fleet_telemetry_profile_thread
     global _fleet_telemetry_token_thread
     global _fleet_telemetry_position_thread
+    global _fleet_telemetry_trip_path_thread
     if not _fleet_telemetrie_aktiv():
         return
     with _fleet_telemetry_start_lock:
@@ -11231,6 +11290,16 @@ def _start_fleet_telemetry_listener():
                 daemon=True,
             )
             _fleet_telemetry_profile_thread.start()
+        if (
+            _fleet_telemetry_trip_path_thread is None
+            or not _fleet_telemetry_trip_path_thread.is_alive()
+        ):
+            _fleet_telemetry_trip_path_thread = threading.Thread(
+                target=_fleet_telemetrie_fahrtpfad_worker_loop,
+                name="fleet_telemetrie_fahrtpfadwaechter",
+                daemon=True,
+            )
+            _fleet_telemetry_trip_path_thread.start()
         if (
             _fleet_telemetry_thread is not None
             and _fleet_telemetry_thread.is_alive()
@@ -15241,7 +15310,7 @@ def api_data():
     if telemetry_data is not None:
         data = telemetry_data
     _fleet_telemetrie_rohdaten_anreichern(data)
-    _fahrtpfad_nach_parkzeit_bereinigen(data)
+    _fleet_telemetrie_fahrtpfad_bereinigungs_tick(vehicle_data=data)
     return jsonify(data)
 
 
@@ -15257,7 +15326,7 @@ def api_data_vehicle(vehicle_id):
     if telemetry_data is not None:
         data = telemetry_data
     _fleet_telemetrie_rohdaten_anreichern(data)
-    _fahrtpfad_nach_parkzeit_bereinigen(data)
+    _fleet_telemetrie_fahrtpfad_bereinigungs_tick(vehicle_data=data)
     return jsonify(data)
 
 
@@ -15360,7 +15429,9 @@ def stream_vehicle(vehicle_id="default"):
             yield ": verbunden\n\n"
             # Send the latest data immediately if available
             if vehicle_id in latest_data:
-                _fahrtpfad_nach_parkzeit_bereinigen(latest_data[vehicle_id])
+                _fleet_telemetrie_fahrtpfad_bereinigungs_tick(
+                    vehicle_data=latest_data[vehicle_id]
+                )
                 initial_data = _fleet_telemetrie_cache_fuer_dashboard(
                     vehicle_id,
                     latest_data[vehicle_id],
@@ -15438,7 +15509,9 @@ def stream_vehicle(vehicle_id="default"):
                     msg = f"data: {json.dumps(payload)}\n\n"
                 except queue.Empty:
                     aktuelle_daten = latest_data.get(vehicle_id)
-                    _fahrtpfad_nach_parkzeit_bereinigen(aktuelle_daten)
+                    _fleet_telemetrie_fahrtpfad_bereinigungs_tick(
+                        vehicle_data=aktuelle_daten
+                    )
                     aktueller_pfad = (
                         aktuelle_daten.get("path")
                         if isinstance(aktuelle_daten, dict)
