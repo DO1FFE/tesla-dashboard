@@ -1943,6 +1943,47 @@ def test_fahrtpfad_wird_waehrend_fahrt_nicht_nach_parkzeit_geloescht(
     assert app.trip_path_generation == 12
 
 
+def test_fahrtpfad_wird_nach_neustart_aus_tagesdatei_geladen(
+    monkeypatch,
+    tmp_path,
+):
+    timestamp = 1_788_092_900_000
+    datum = datetime.fromtimestamp(timestamp / 1000, app.LOCAL_TZ).strftime(
+        "%Y%m%d"
+    )
+    verzeichnis = tmp_path / "trips"
+    verzeichnis.mkdir()
+    datei = verzeichnis / f"trip_{datum}.csv"
+    datei.write_text(
+        "1788092000000,51.0,7.0,20,4,90,D\n"
+        "1788092100000,51.1,7.1,0,0,90,P\n"
+        "1788092800000,51.2,7.2,5,2,90,R\n"
+        "1788092900000,51.3,7.3,25,8,90,D\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app, "trip_dir", lambda _vid: str(verzeichnis))
+    monkeypatch.setattr(app, "trip_path", [])
+    monkeypatch.setattr(app, "current_trip_file", None)
+    monkeypatch.setattr(app, "current_trip_date", None)
+    monkeypatch.setattr(app, "drive_pause_ms", None)
+    daten = {
+        "id_s": "veh-1",
+        "drive_state": {
+            "shift_state": "D",
+            "timestamp": timestamp,
+            "latitude": 51.4,
+            "longitude": 7.4,
+            "speed": 30,
+        },
+    }
+
+    app.track_drive_path(daten)
+
+    assert app.trip_path == [[51.2, 7.2], [51.3, 7.3], [51.4, 7.4]]
+    assert app.current_trip_file == str(datei)
+    assert app.current_trip_date == datum
+
+
 def test_stream_setzt_fahrtpfad_ohne_neue_telemetrie_zurück(monkeypatch):
     parkbeginn = 1_700_000_000_000
     jetzt = [parkbeginn + app.FAHRTPFAD_NACH_PARKEN_MS - 1000]

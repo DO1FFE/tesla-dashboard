@@ -3951,6 +3951,36 @@ def _fahrtpfad_nach_parkzeit_bereinigen(vehicle_data=None, jetzt_ms=None):
     return _fahrtpfad_zurücksetzen(vehicle_data)
 
 
+def _laufenden_fahrtpfad_laden(dateiname):
+    """Lade den Fahrtabschnitt nach dem letzten Parkpunkt einer Tagesdatei."""
+
+    punkte = []
+    try:
+        with open(dateiname, "r", encoding="utf-8", newline="") as datei:
+            for zeile in csv.reader(datei):
+                if len(zeile) < 3:
+                    continue
+                shift = _normalize_shift_state(
+                    zeile[6] if len(zeile) > 6 else None
+                )
+                if shift == "P":
+                    punkte = []
+                    continue
+                try:
+                    lat = float(zeile[1])
+                    lon = float(zeile[2])
+                except (TypeError, ValueError):
+                    continue
+                if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                    continue
+                punkt = [lat, lon]
+                if not punkte or punkte[-1] != punkt:
+                    punkte.append(punkt)
+    except (OSError, csv.Error):
+        return []
+    return punkte
+
+
 def track_drive_path(vehicle_data):
     """Maintain the current trip path and log points when driving."""
     global current_trip_file, current_trip_date, drive_pause_ms
@@ -3994,7 +4024,13 @@ def track_drive_path(vehicle_data):
         vid = vehicle_data.get("id_s") or vehicle_data.get("vehicle_id")
         date_str = datetime.fromtimestamp(ts / 1000, LOCAL_TZ).strftime("%Y%m%d")
         if current_trip_file is None or current_trip_date != date_str:
-            current_trip_file = os.path.join(trip_dir(vid), f"trip_{date_str}.csv")
+            aktuelle_datei = os.path.join(
+                trip_dir(vid),
+                f"trip_{date_str}.csv",
+            )
+            if not trip_path:
+                trip_path.extend(_laufenden_fahrtpfad_laden(aktuelle_datei))
+            current_trip_file = aktuelle_datei
             current_trip_date = date_str
         point = [lat, lon]
         if not trip_path or trip_path[-1] != point:
