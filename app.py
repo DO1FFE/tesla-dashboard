@@ -3828,6 +3828,19 @@ def _parkdaten_anreichern(data):
     global park_start_ms
     if not isinstance(data, dict):
         return data
+    drive = data.get("drive_state")
+    if not isinstance(drive, dict):
+        drive = {}
+    shift = _normalize_shift_state(drive.get("shift_state"))
+    geschwindigkeit = _as_float(drive.get("speed"))
+    if shift not in (None, "P") or (
+        geschwindigkeit is not None and abs(geschwindigkeit) > 0.5
+    ):
+        park_start_ms = None
+        _delete_parktime()
+        data["park_start"] = None
+        data["park_duration"] = None
+        return data
     parkbeginn = _normalisiere_parkzeitstempel(park_start_ms)
     if parkbeginn is None:
         parkbeginn = _normalisiere_parkzeitstempel(data.get("park_start"))
@@ -3911,6 +3924,15 @@ def _fahrtpfad_zurücksetzen(vehicle_data=None):
 def _fahrtpfad_nach_parkzeit_bereinigen(vehicle_data=None, jetzt_ms=None):
     """Entferne den letzten Fahrtpfad zehn Minuten nach Fahrtende."""
 
+    if isinstance(vehicle_data, dict):
+        drive = vehicle_data.get("drive_state")
+        if isinstance(drive, dict):
+            shift = _normalize_shift_state(drive.get("shift_state"))
+            geschwindigkeit = _as_float(drive.get("speed"))
+            if shift not in (None, "P") or (
+                geschwindigkeit is not None and abs(geschwindigkeit) > 0.5
+            ):
+                return False
     parkbeginn_ms = drive_pause_ms
     if parkbeginn_ms is None and isinstance(vehicle_data, dict):
         parkbeginn_ms = vehicle_data.get("park_start")

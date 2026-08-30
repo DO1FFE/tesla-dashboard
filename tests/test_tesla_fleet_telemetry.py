@@ -1901,6 +1901,48 @@ def test_dashboard_gibt_keine_unplausible_parkzeit_aus(monkeypatch):
     assert daten["park_duration"] is None
 
 
+def test_dashboard_stellt_parkzeit_waehrend_fahrt_nicht_wieder_her(
+    monkeypatch,
+):
+    alter_parkbeginn = 1_788_038_801_311
+    monkeypatch.setattr(app, "park_start_ms", None)
+    daten = {
+        "park_start": alter_parkbeginn,
+        "drive_state": {"shift_state": "D", "speed": 25},
+    }
+
+    app._parkdaten_anreichern(daten)
+
+    assert app.park_start_ms is None
+    assert daten["park_start"] is None
+    assert daten["park_duration"] is None
+    assert not pathlib.Path(app.PARKTIME_FILE).exists()
+
+
+def test_fahrtpfad_wird_waehrend_fahrt_nicht_nach_parkzeit_geloescht(
+    monkeypatch,
+):
+    jetzt_ms = 1_788_100_000_000
+    alter_parkbeginn = jetzt_ms - app.FAHRTPFAD_NACH_PARKEN_MS - 60_000
+    pfad = [[51.0, 7.0], [51.1, 7.1]]
+    daten = {
+        "drive_state": {"shift_state": "D", "speed": 30},
+        "park_start": alter_parkbeginn,
+        "path": pfad,
+    }
+    monkeypatch.setattr(app, "trip_path", pfad)
+    monkeypatch.setattr(app, "drive_pause_ms", None)
+    monkeypatch.setattr(app, "park_start_ms", alter_parkbeginn)
+    monkeypatch.setattr(app, "trip_path_generation", 12)
+
+    geändert = app._fahrtpfad_nach_parkzeit_bereinigen(daten, jetzt_ms)
+
+    assert geändert is False
+    assert app.trip_path == pfad
+    assert daten["path"] == pfad
+    assert app.trip_path_generation == 12
+
+
 def test_stream_setzt_fahrtpfad_ohne_neue_telemetrie_zurück(monkeypatch):
     parkbeginn = 1_700_000_000_000
     jetzt = [parkbeginn + app.FAHRTPFAD_NACH_PARKEN_MS - 1000]
