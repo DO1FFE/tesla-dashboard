@@ -5116,10 +5116,20 @@ def _v2l_signatur_aktiv(data):
     if ladeleistung is None or not 3.5 <= abs(ladeleistung) <= 4.5:
         return False
     packleistung = werte["packleistung_kw"]
-    if packleistung is not None and packleistung < -0.2:
-        return True
+    if packleistung is not None:
+        return packleistung < -0.2
     farbe = werte["ladeport_farbe"].lower()
     return werte["ladekabel"].upper() == "IEC" and farbe == "flashinggreen"
+
+
+def _v2l_für_profil_aktiv(data):
+    """Erkenne V2L auch bevor das Sitzungsflag alle Cache-Aliase erreicht."""
+
+    if not isinstance(data, dict):
+        return False
+    return _fleet_telemetrie_wahr(data.get("v2l_active")) or (
+        _v2l_signatur_aktiv(data)
+    )
 
 
 def _v2l_fahrzeug_bewegt(werte):
@@ -5457,6 +5467,19 @@ def _v2l_telemetrie_sicher_aktualisieren(
         return data
 
 
+def _v2l_status_in_daten_setzen(data, aktiv, sitzungs_id=None):
+    """Setze einen einheitlichen V2L-Status in einem Dashboard-Cache."""
+
+    if not isinstance(data, dict):
+        return data
+    data["v2l_active"] = bool(aktiv)
+    if aktiv and sitzungs_id is not None:
+        data["v2l_session_id"] = int(sitzungs_id)
+    else:
+        data.pop("v2l_session_id", None)
+    return data
+
+
 def _v2l_cache_status_setzen(vehicle_id, aktiv, sitzungs_id=None):
     """Spiegele den V2L-Status in alle passenden Live-Caches."""
 
@@ -5475,11 +5498,7 @@ def _v2l_cache_status_setzen(vehicle_id, aktiv, sitzungs_id=None):
                 cache_id == "default" and vehicle_id == str(_default_vehicle_id)
             ):
                 continue
-            daten["v2l_active"] = bool(aktiv)
-            if aktiv and sitzungs_id is not None:
-                daten["v2l_session_id"] = int(sitzungs_id)
-            else:
-                daten.pop("v2l_session_id", None)
+            _v2l_status_in_daten_setzen(daten, aktiv, sitzungs_id)
             if erstes_ergebnis is None:
                 erstes_ergebnis = daten
     return erstes_ergebnis
@@ -6771,6 +6790,8 @@ def _fleet_telemetrie_profile_status_an_daten(data):
 def _fleet_telemetrie_profile_ladezustand(data):
     """Erkenne Beginn und Ende eines gemeldeten Ladevorgangs."""
 
+    if _v2l_für_profil_aktiv(data):
+        return False
     charge = data.get("charge_state") if isinstance(data, dict) else None
     if not isinstance(charge, dict):
         return None
@@ -6897,7 +6918,7 @@ def _fleet_telemetrie_profile_ziel(data):
         return "parked"
     if _fleet_telemetrie_profile_fahrzeug_fährt(data):
         return "live"
-    if _fleet_telemetrie_wahr(data.get("v2l_active")):
+    if _v2l_für_profil_aktiv(data):
         return "live"
     if _fleet_telemetrie_profile_ladend(data):
         return "charging"
@@ -8412,7 +8433,7 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
 
 def _fleet_telemetrie_cache_ids(vin):
     """Ermittle alle Dashboard-Cache-IDs für eine Telemetry-VIN."""
-    cache_ids = ["default"]
+    cache_ids = []
     for vehicle in _fleet_telemetrie_fahrzeuge():
         if str(vehicle.get("vin") or "") == str(vin):
             for key in ("id_s", "id", "vehicle_id"):
@@ -8422,6 +8443,7 @@ def _fleet_telemetrie_cache_ids(vin):
             break
     if _default_vehicle_id is not None:
         cache_ids.append(str(_default_vehicle_id))
+    cache_ids.append("default")
     result = []
     for cache_id in cache_ids:
         if cache_id and cache_id not in result:
@@ -10487,6 +10509,7 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
     v2l_relevantes_update = any(
         feld in v2l_relevante_felder for feld, _wert, _zeit in feldwerte
     )
+    v2l_status = None
     aktualisierte_daten = []
     with _fleet_telemetry_lock:
         for cache_id in _fleet_telemetrie_cache_ids(vin):
@@ -10589,6 +10612,13 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
                     and _fleet_telemetrie_primärer_cache(cache_id, data)
                 ):
                     _v2l_telemetrie_sicher_aktualisieren(cache_id, data)
+                    v2l_status = (
+                        data.get("v2l_active") is True,
+                        data.get("v2l_session_id"),
+                    )
+                    v2l_aktualisiert = True
+                elif v2l_relevantes_update and v2l_status is not None:
+                    _v2l_status_in_daten_setzen(data, *v2l_status)
                     v2l_aktualisiert = True
                 data = _fleet_telemetrie_profile_aktualisieren(cache_id, data)
                 stale_bereinigt = _fleet_telemetrie_veraltete_oeffnungen_bereinigen(
@@ -10614,6 +10644,12 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
                 and _fleet_telemetrie_primärer_cache(cache_id, data)
             ):
                 _v2l_telemetrie_sicher_aktualisieren(cache_id, data)
+                v2l_status = (
+                    data.get("v2l_active") is True,
+                    data.get("v2l_session_id"),
+                )
+            elif v2l_relevantes_update and v2l_status is not None:
+                _v2l_status_in_daten_setzen(data, *v2l_status)
             data = _fleet_telemetrie_profile_aktualisieren(cache_id, data)
             _fleet_telemetrie_parkstatus_aufzeichnen(cache_id, data)
             data["_live"] = True

@@ -1,3 +1,4 @@
+import copy
 import time
 
 import pytest
@@ -58,6 +59,91 @@ def test_v2l_signatur_und_liveprofil_werden_erkannt():
 
     daten["charge_state"]["charging_state"] = "Charging"
     assert app._v2l_signatur_aktiv(daten) is False
+
+
+def test_v2l_signatur_verhindert_ladeprofil_auch_ohne_cacheflag():
+    daten = _v2l_daten(
+        1_700_000_100_000,
+        packleistung_kw=-0.23,
+    )
+    daten["charge_state"]["charger_power"] = 3.7865848894280574
+    daten["charge_state"]["charge_port_color"] = None
+
+    assert "v2l_active" not in daten
+    assert app._v2l_signatur_aktiv(daten) is True
+    assert app._fleet_telemetrie_profile_ladezustand(daten) is False
+    assert app._fleet_telemetrie_profile_ziel(daten) == "live"
+
+    daten["charge_state"]["pack_power"] = 4.0
+    daten["charge_state"]["pack_current"] = 10.0
+    daten["charge_state"]["charge_port_color"] = "FlashingGreen"
+    assert app._v2l_signatur_aktiv(daten) is False
+    assert app._fleet_telemetrie_profile_ladezustand(daten) is True
+    assert app._fleet_telemetrie_profile_ziel(daten) == "charging"
+
+
+def test_v2l_status_wird_auf_alle_cache_aliasse_gespiegelt(monkeypatch):
+    zeit_ms = 1_700_000_200_000
+    basis = _v2l_daten(zeit_ms)
+    cache_ids = ["fahrzeug-1", "alias-1", "default"]
+    profilauswertungen = []
+    profil_ziel = app._fleet_telemetrie_profile_ziel
+
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_fahrzeuge",
+        lambda: [{
+            "vin": "TESTVIN",
+            "id_s": "fahrzeug-1",
+            "id": "alias-1",
+        }],
+    )
+    monkeypatch.setattr(app, "_default_vehicle_id", "fahrzeug-1")
+    monkeypatch.setattr(
+        app,
+        "latest_data",
+        {cache_id: copy.deepcopy(basis) for cache_id in cache_ids},
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_profile_aktualisieren",
+        lambda cache_id, daten: (
+            profilauswertungen.append(
+                (cache_id, daten.get("v2l_active"), profil_ziel(daten))
+            )
+            or daten
+        ),
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_parkstatus_aufzeichnen",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(app, "_subscriber_daten_senden", lambda *_args: None)
+    monkeypatch.setattr(app, "_aprs_spaeter_senden", lambda *_args: None)
+
+    assert app._fleet_telemetrie_cache_ids("TESTVIN") == cache_ids
+    assert app._fleet_telemetrie_v_felder_aktualisieren(
+        "TESTVIN",
+        [
+            ("PackCurrent", -5.0, zeit_ms + 1_000),
+            ("PackVoltage", 400.0, zeit_ms + 1_000),
+        ],
+    ) is True
+
+    assert profilauswertungen == [
+        ("fahrzeug-1", True, "live"),
+        ("alias-1", True, "live"),
+        ("default", True, "live"),
+    ]
+    for daten in app.latest_data.values():
+        assert daten["v2l_active"] is True
+        assert isinstance(daten["v2l_session_id"], int)
 
 
 def test_v2l_integriert_packleistung_lueckenlos():
