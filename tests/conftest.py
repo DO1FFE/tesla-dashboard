@@ -9,10 +9,13 @@ import app
 
 
 @pytest.fixture(autouse=True)
-def isolierte_v2l_datenbank(monkeypatch, tmp_path):
-    """Verhindere Zugriffe auf produktive V2L-Sitzungen in Tests."""
+def isolierte_laufzeitdaten(monkeypatch, tmp_path):
+    """Verhindere Zugriffe auf produktive Laufzeitdaten in Tests."""
 
     datenbankpfad = tmp_path / "v2l-test.db"
     monkeypatch.setattr(app, "_v2l_datenbankpfad", lambda: str(datenbankpfad))
     monkeypatch.setattr(app, "_v2l_aktive_fahrzeuge", set())
     monkeypatch.setattr(app, "_v2l_status_datenbankpfad", None)
+    monkeypatch.setattr(app, "PARKTIME_FILE", str(tmp_path / "parktime.json"))
+    monkeypatch.setattr(app, "park_start_ms", None)
+    monkeypatch.setattr(app, "last_shift_state", None)

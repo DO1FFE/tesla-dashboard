@@ -11,6 +11,8 @@ var lastApiIntervalIdle = null;
 var statusAbfrageTimer = null;
 var parkStartTime = null;
 var currentGear = null;
+var PARKZEIT_MINDESTWERT_MS = Date.UTC(2000, 0, 1);
+var PARKZEIT_ZUKUNFTSTOLERANZ_MS = 5 * 60 * 1000;
 var THERMOMETER_IDS = ['thermometer-inside', 'thermometer-outside', 'thermometer-battery'];
 var PARK_GRACE_MS = 5 * 60 * 1000;
 var PARKED_MAP_JITTER_METERS = 25;
@@ -3678,10 +3680,14 @@ function updateTelemetryProfile(
 
 function updateParkTime(ts) {
     if (typeof ts !== 'undefined') {
-        if (ts && ts < 1e12) {
-            ts *= 1000;
+        var millis = leseZeitstempelMillis(ts);
+        if (millis == null ||
+                millis < PARKZEIT_MINDESTWERT_MS ||
+                millis > Date.now() + PARKZEIT_ZUKUNFTSTOLERANZ_MS) {
+            parkStartTime = null;
+        } else {
+            parkStartTime = millis;
         }
-        parkStartTime = ts || null;
     }
     displayParkTime();
 }

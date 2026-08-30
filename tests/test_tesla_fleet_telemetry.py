@@ -1876,6 +1876,31 @@ def test_fahrtpfad_nutzt_serverzeit_für_zehn_minuten(monkeypatch):
     assert cache["path_generation"] == 8
 
 
+def test_parkzeit_ersetzt_unplausiblen_epoch_wert(monkeypatch):
+    parkbeginn = 1_788_038_801_311
+    monkeypatch.setattr(app, "park_start_ms", 2_000_000)
+    monkeypatch.setattr(app, "last_shift_state", None)
+    monkeypatch.setattr(app.time, "time", lambda: (parkbeginn + 60_000) / 1000)
+
+    app.track_park_time(
+        {"drive_state": {"shift_state": "P", "timestamp": parkbeginn}}
+    )
+
+    assert app.park_start_ms == parkbeginn
+    assert app._load_parktime() == parkbeginn
+
+
+def test_dashboard_gibt_keine_unplausible_parkzeit_aus(monkeypatch):
+    monkeypatch.setattr(app, "park_start_ms", 2_000_000)
+    daten = {"park_start": 2_000_000}
+
+    app._parkdaten_anreichern(daten)
+
+    assert app.park_start_ms is None
+    assert daten["park_start"] is None
+    assert daten["park_duration"] is None
+
+
 def test_stream_setzt_fahrtpfad_ohne_neue_telemetrie_zurück(monkeypatch):
     parkbeginn = 1_700_000_000_000
     jetzt = [parkbeginn + app.FAHRTPFAD_NACH_PARKEN_MS - 1000]

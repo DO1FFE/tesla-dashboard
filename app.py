@@ -1423,6 +1423,8 @@ def log_api_data(endpoint, data, vehicle_id=None):
 
 STAT_FILE = os.path.join(DATA_DIR, "statistics.json")
 PARKTIME_FILE = os.path.join(DATA_DIR, "parktime.json")
+PARKZEIT_MINDESTWERT_MS = 946684800000
+PARKZEIT_ZUKUNFTSTOLERANZ_MS = 5 * 60 * 1000
 TAXI_DB = os.path.join(DATA_DIR, "taximeter.db")
 STATISTICS_DB = os.getenv("STATISTICS_DB_PATH") or os.path.join(DATA_DIR, "statistics.db")
 AGGREGATION_INTERVAL = float(os.getenv("AGGREGATION_INTERVAL_SECONDS", "300"))
@@ -1864,22 +1866,45 @@ def requires_auth(f):
     return decorated
 
 
+def _normalisiere_parkzeitstempel(wert, jetzt_ms=None):
+    """Gib einen plausiblen Parkzeitstempel in Millisekunden zurück."""
+
+    try:
+        zeitstempel = float(wert)
+        if zeitstempel < 1e12:
+            zeitstempel *= 1000
+        zeitstempel = int(zeitstempel)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if jetzt_ms is None:
+        jetzt_ms = int(time.time() * 1000)
+    if zeitstempel < PARKZEIT_MINDESTWERT_MS:
+        return None
+    if zeitstempel > int(jetzt_ms) + PARKZEIT_ZUKUNFTSTOLERANZ_MS:
+        return None
+    return zeitstempel
+
+
 def _load_parktime():
     """Load the last park timestamp from ``parktime.json``."""
     try:
         with open(PARKTIME_FILE, "r", encoding="utf-8") as f:
-            return int(json.load(f))
+            return _normalisiere_parkzeitstempel(json.load(f))
     except Exception:
         return None
 
 
 def _save_parktime(ts):
     """Persist the park timestamp to ``parktime.json``."""
+    zeitstempel = _normalisiere_parkzeitstempel(ts)
+    if zeitstempel is None:
+        return False
     try:
         with open(PARKTIME_FILE, "w", encoding="utf-8") as f:
-            json.dump(int(ts), f)
+            json.dump(zeitstempel, f)
+        return True
     except Exception:
-        pass
+        return False
 
 
 def _delete_parktime():
@@ -3782,12 +3807,13 @@ def track_park_time(vehicle_data):
         vehicle_data.get("drive_state", {}) if isinstance(vehicle_data, dict) else {}
     )
     shift = _normalize_shift_state(drive.get("shift_state"))
-    ts = drive.get("timestamp") or drive.get("gps_as_of")
-    if ts and ts < 1e12:
-        ts = int(ts * 1000)
+    ts = _normalisiere_parkzeitstempel(
+        drive.get("timestamp") or drive.get("gps_as_of")
+    )
+    park_start_ms = _normalisiere_parkzeitstempel(park_start_ms)
     if shift in (None, "P"):
         if park_start_ms is None or last_shift_state not in (None, "P"):
-            park_start_ms = int(ts) if ts is not None else None
+            park_start_ms = ts
             if park_start_ms is not None:
                 _save_parktime(park_start_ms)
     else:
@@ -3796,11 +3822,29 @@ def track_park_time(vehicle_data):
     last_shift_state = shift
 
 
+def _parkdaten_anreichern(data):
+    """Setze ausschließlich plausible Parkdaten im Dashboard-Payload."""
+
+    global park_start_ms
+    if not isinstance(data, dict):
+        return data
+    parkbeginn = _normalisiere_parkzeitstempel(park_start_ms)
+    if parkbeginn is None:
+        parkbeginn = _normalisiere_parkzeitstempel(data.get("park_start"))
+        if parkbeginn is not None:
+            _save_parktime(parkbeginn)
+    park_start_ms = parkbeginn
+    data["park_start"] = parkbeginn
+    data["park_duration"] = park_duration_string(parkbeginn)
+    return data
+
+
 def park_duration_string(start_ms):
     """Return human readable parking duration for ``start_ms``."""
+    start_ms = _normalisiere_parkzeitstempel(start_ms)
     if start_ms is None:
         return None
-    diff = int(time.time() * 1000) - start_ms
+    diff = max(0, int(time.time() * 1000) - start_ms)
     hours = diff // 3600000
     minutes = (diff % 3600000) // 60000
     parts = []
@@ -9387,8 +9431,7 @@ def _fleet_telemetrie_dashboard_daten_anreichern(cache_id, data):
 
     try:
         track_park_time(data)
-        data["park_start"] = park_start_ms
-        data["park_duration"] = park_duration_string(park_start_ms)
+        _parkdaten_anreichern(data)
     except Exception:
         pass
 
@@ -11112,6 +11155,7 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
                 _fleet_telemetrie_cache_spaeter_speichern(cache_id, data)
             _fleet_telemetrie_veraltete_oeffnungen_bereinigen(data)
             data = _fleet_telemetrie_profile_status_an_daten(data)
+            _parkdaten_anreichern(data)
             data["_live"] = True
             return data
     if data:
@@ -11138,6 +11182,7 @@ def _fleet_telemetrie_cache_fuer_dashboard(cache_id, cached=None):
             latest_data[cache_id] = data
             _fleet_telemetrie_cache_spaeter_speichern(cache_id, data)
         data = _fleet_telemetrie_profile_status_an_daten(data)
+        _parkdaten_anreichern(data)
         data["_live"] = False
         data.setdefault("api_error", "Noch keine aktuellen Fleet-Telemetry-Daten empfangen")
         return data
@@ -14035,8 +14080,7 @@ def get_vehicle_data(vehicle_id=None, state=None):
         _log_api_error(exc)
         sanitized["nearby_superchargers"] = []
     log_api_data("get_vehicle_data", sanitized, vehicle_id=vid)
-    sanitized["park_start"] = park_start_ms
-    sanitized["park_duration"] = park_duration_string(park_start_ms)
+    _parkdaten_anreichern(sanitized)
     sanitized["path"] = trip_path
     sanitized["path_generation"] = trip_path_generation
     sanitized["_live"] = True
