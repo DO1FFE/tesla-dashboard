@@ -945,6 +945,94 @@ def test_fleet_telemetrie_positionsabfrage_aktualisiert_alle_caches(monkeypatch)
         )
 
 
+def test_fleet_telemetrie_streamwiederherstellung_uebernimmt_position_zuerst(
+    monkeypatch,
+):
+    aufrufe = []
+    position = {
+        "latitude": 51.45,
+        "longitude": 7.09,
+    }
+
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_fahrzeugzustand_abrufen",
+        lambda vin: aufrufe.append(("state", vin)) or "online",
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_position_abrufen",
+        lambda vin: aufrufe.append(("position", vin)) or position,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_position_uebernehmen",
+        lambda vin, daten: aufrufe.append(("position übernehmen", vin, daten))
+        or True,
+    )
+
+    def vollständige_daten(_vin):
+        aufrufe.append(("vehicle_data", _vin))
+        raise RuntimeError("Zeitüberschreitung")
+
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_parkdaten_abrufen",
+        vollständige_daten,
+    )
+
+    assert app._fleet_telemetrie_stream_wiederherstellen("TESTVIN")
+    assert aufrufe == [
+        ("state", "TESTVIN"),
+        ("position", "TESTVIN"),
+        ("position übernehmen", "TESTVIN", position),
+        ("vehicle_data", "TESTVIN"),
+    ]
+
+
+def test_fleet_telemetrie_streamwiederherstellung_gleicht_trotz_positionsfehler_ab(
+    monkeypatch,
+):
+    aufrufe = []
+    fahrzeugdaten = {
+        "state": "online",
+        "drive_state": {"shift_state": "P"},
+    }
+
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_fahrzeugzustand_abrufen",
+        lambda _vin: "online",
+    )
+
+    def position_abrufen(_vin):
+        aufrufe.append("position")
+        raise RuntimeError("nicht verfügbar")
+
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_position_abrufen",
+        position_abrufen,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_parkdaten_abrufen",
+        lambda _vin: aufrufe.append("vehicle_data") or fahrzeugdaten,
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_fallbackdaten_uebernehmen",
+        lambda vin, daten: aufrufe.append((vin, daten)) or True,
+    )
+
+    assert app._fleet_telemetrie_stream_wiederherstellen("TESTVIN")
+    assert aufrufe == [
+        "position",
+        "vehicle_data",
+        ("TESTVIN", fahrzeugdaten),
+    ]
+
+
 def test_fleet_telemetrie_mqtt_zeichnet_parkstatus_auf(monkeypatch):
     parking_aufrufe = []
 

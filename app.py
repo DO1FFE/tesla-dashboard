@@ -10375,6 +10375,49 @@ def _fleet_telemetrie_position_uebernehmen(vin, drive_data, abgerufen_at_ms=None
     return bool(aktualisierte_daten)
 
 
+def _fleet_telemetrie_stream_wiederherstellen(vin):
+    """Hole bei einem stummen Stream zuerst die kleine Positionsantwort."""
+
+    state = _fleet_telemetrie_fahrzeugzustand_abrufen(vin)
+    if state != "online":
+        return False
+
+    übernommen = False
+    try:
+        position = _fleet_telemetrie_position_abrufen(vin)
+        if _fleet_telemetrie_position_uebernehmen(vin, position):
+            übernommen = True
+            logging.warning(
+                "Stumme Fleet-Position zuerst über location_data "
+                "wiederhergestellt: %s",
+                vin,
+            )
+    except Exception as exc:
+        logging.warning(
+            "Position bei Stream-Wiederherstellung nicht verfügbar (%s): %s",
+            vin,
+            exc,
+        )
+
+    try:
+        fahrzeugdaten = _fleet_telemetrie_parkdaten_abrufen(vin)
+        if _fleet_telemetrie_fallbackdaten_uebernehmen(vin, fahrzeugdaten):
+            übernommen = True
+            logging.warning(
+                "Stummen Fleet-Telemetry-Stream über vehicle_data "
+                "wiederhergestellt: %s",
+                vin,
+            )
+    except Exception as exc:
+        logging.warning(
+            "Vollständige vehicle_data bei Stream-Wiederherstellung "
+            "nicht verfügbar (%s): %s",
+            vin,
+            exc,
+        )
+    return übernommen
+
+
 def _fleet_telemetrie_position_snapshot(vin):
     """Lese den frischesten Cache-Stand eines Fahrzeugs für den Positionswächter."""
 
@@ -10411,36 +10454,11 @@ def _fleet_telemetrie_position_worker_loop():
             ):
                 if _fleet_telemetrie_stream_wiederherstellung_reservieren(vin):
                     try:
-                        state = _fleet_telemetrie_fahrzeugzustand_abrufen(vin)
-                        if state == "online":
-                            fahrzeugdaten = _fleet_telemetrie_parkdaten_abrufen(vin)
-                            try:
-                                position = _fleet_telemetrie_position_abrufen(vin)
-                                drive = fahrzeugdaten.setdefault("drive_state", {})
-                                drive.update(position)
-                            except Exception as exc:
-                                logging.warning(
-                                    "Position bei Stream-Wiederherstellung "
-                                    "nicht verfügbar (%s): %s",
-                                    vin,
-                                    exc,
-                                )
-                            übernommen = (
-                                _fleet_telemetrie_fallbackdaten_uebernehmen(
-                                    vin,
-                                    fahrzeugdaten,
-                                )
-                            )
-                            if übernommen:
-                                logging.warning(
-                                    "Stummen Fleet-Telemetry-Stream über "
-                                    "vehicle_data wiederhergestellt: %s",
-                                    vin,
-                                )
+                        _fleet_telemetrie_stream_wiederherstellen(vin)
                     except Exception as exc:
                         logging.warning(
-                            "Fleet-Telemetry-Stream konnte nicht über "
-                            "vehicle_data wiederhergestellt werden (%s): %s",
+                            "Fleet-Telemetry-Stream konnte nicht "
+                            "wiederhergestellt werden (%s): %s",
                             vin,
                             exc,
                         )
