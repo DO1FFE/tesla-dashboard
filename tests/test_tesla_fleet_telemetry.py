@@ -2649,6 +2649,159 @@ def test_fleet_telemetrie_entpackt_base64_protobuf_routeline():
     assert drive["active_route_active"] is True
 
 
+def test_fleet_telemetrie_entpackt_offizielle_base64_polyline():
+    polyline = "_}hfaB_{fjL~oR_pR~oR_pR"
+    routeline = base64.b64encode(polyline.encode("ascii")).decode("ascii")
+
+    assert app._fleet_telemetrie_routeline_normalisieren(routeline) == polyline
+    assert app._fleet_telemetrie_polyline_dekodieren(polyline) == [
+        (51.5, 7.0),
+        (51.49, 7.01),
+        (51.48, 7.02),
+    ]
+
+
+def test_fleet_telemetrie_routeline_teilnachricht_behaelt_vollstaendige_route():
+    polyline = "_}hfaB_{fjL~oR_pR~oR_pR"
+    teilnachricht = "EgUNwp6MQRIHDeFzjEEQARIFDQo3fEESBw3B1HhBEAE="
+    daten = {
+        "fleet_telemetry_raw": {"RouteLine": polyline},
+        "drive_state": {
+            "active_route_active": True,
+            "active_route_destination": "Ziel",
+            "active_route_line": polyline,
+        },
+    }
+
+    assert app._fleet_telemetrie_routeline_ist_teilnachricht(teilnachricht)
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "RouteLine",
+        teilnachricht,
+        2000,
+    )
+
+    assert daten["drive_state"]["active_route_line"] == polyline
+    assert daten["fleet_telemetry_raw"]["RouteLine"] == polyline
+
+
+def test_fleet_telemetrie_passende_route_wird_nach_kurzer_pause_wiederverwendet():
+    polyline = "_}hfaB_{fjL~oR_pR~oR_pR"
+    teilnachricht = "EgUNwp6MQRIHDeFzjEEQARIFDQo3fEESBw3B1HhBEAE="
+    daten = {
+        "drive_state": {
+            "latitude": 51.49,
+            "longitude": 7.01,
+            "active_route_active": True,
+            "active_route_destination": "Ziel",
+            "active_route_latitude": 51.48,
+            "active_route_longitude": 7.02,
+        },
+    }
+
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "RouteLine",
+        _routeline_protobuf(polyline),
+        1000,
+    )
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "DestinationName",
+        None,
+        1100,
+    )
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "DestinationLocation",
+        {"latitude": 51.48, "longitude": 7.02},
+        1200,
+    )
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "DestinationName",
+        "Ziel",
+        1200,
+    )
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "RouteLine",
+        teilnachricht,
+        1300,
+    )
+
+    drive = daten["drive_state"]
+    assert drive["active_route_active"] is True
+    assert drive["active_route_line"] == polyline
+    assert daten["fleet_telemetry_raw"]["RouteLine"] == polyline
+
+
+def test_fleet_telemetrie_fremde_route_wird_nicht_wiederverwendet():
+    polyline = "_}hfaB_{fjL~oR_pR~oR_pR"
+    teilnachricht = "EgUNwp6MQRIHDeFzjEEQARIFDQo3fEESBw3B1HhBEAE="
+    daten = {
+        "fleet_telemetry_raw": {
+            app.FLEET_TELEMETRIE_NAVIGATION_ROUTE_CACHE_ROHFELD: {
+                "polyline": polyline,
+                "destination": "Altes Ziel",
+                "latitude": 51.48,
+                "longitude": 7.02,
+                "received_at": 1000,
+            },
+        },
+        "drive_state": {
+            "latitude": 51.49,
+            "longitude": 7.01,
+            "active_route_active": True,
+            "active_route_destination": "Neues Ziel",
+            "active_route_latitude": 51.58,
+            "active_route_longitude": 7.12,
+        },
+    }
+
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "RouteLine",
+        teilnachricht,
+        1300,
+    )
+
+    assert "active_route_line" not in daten["drive_state"]
+
+
+def test_fleet_telemetrie_raeumlich_fremde_route_wird_nicht_wiederverwendet():
+    polyline = "_}hfaB_{fjL~oR_pR~oR_pR"
+    teilnachricht = "EgUNwp6MQRIHDeFzjEEQARIFDQo3fEESBw3B1HhBEAE="
+    daten = {
+        "fleet_telemetry_raw": {
+            app.FLEET_TELEMETRIE_NAVIGATION_ROUTE_CACHE_ROHFELD: {
+                "polyline": polyline,
+                "destination": "Ziel",
+                "latitude": 51.48,
+                "longitude": 7.02,
+                "received_at": 1000,
+            },
+        },
+        "drive_state": {
+            "latitude": 52.5,
+            "longitude": 8.0,
+            "active_route_active": True,
+            "active_route_destination": "Ziel",
+            "active_route_latitude": 51.48,
+            "active_route_longitude": 7.02,
+        },
+    }
+
+    assert app._fleet_telemetrie_setze_feld(
+        daten,
+        "RouteLine",
+        teilnachricht,
+        1300,
+    )
+
+    assert "active_route_line" not in daten["drive_state"]
+
+
 def test_fleet_telemetrie_bereinigt_alte_navigation_aus_cache():
     daten = {
         "timestamp": 1200,

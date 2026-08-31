@@ -8594,6 +8594,10 @@ FLEET_TELEMETRIE_NAVIGATIONS_ROHFELDER = (
     "RouteTrafficMinutesDelay",
 )
 FLEET_TELEMETRIE_NAVIGATION_ROUTE_LINE_MAX_ALTER_MS = 60_000
+FLEET_TELEMETRIE_NAVIGATION_ROUTE_CACHE_MAX_ALTER_MS = 30 * 60_000
+FLEET_TELEMETRIE_NAVIGATION_ROUTE_CACHE_POSITION_MAX_ABSTAND_KM = 2.0
+FLEET_TELEMETRIE_NAVIGATION_ROUTE_CACHE_ZIEL_MAX_ABSTAND_KM = 0.5
+FLEET_TELEMETRIE_NAVIGATION_ROUTE_CACHE_ROHFELD = "_RouteLineCache"
 
 
 def _fleet_telemetrie_navigation_rohcache_leeren(data):
@@ -8680,6 +8684,46 @@ def _fleet_telemetrie_navigation_hat_zielkern(drive):
     return False
 
 
+def _fleet_telemetrie_polyline_dekodieren(polyline, präzision=6):
+    """Dekodiere eine Google-Polyline und verwerfe unplausible Koordinaten."""
+
+    if not _fleet_telemetrie_routeline_ist_polyline(polyline):
+        return []
+    index = 0
+    latitude = 0
+    longitude = 0
+    punkte = []
+    faktor = 10 ** int(präzision)
+    try:
+        while index < len(polyline):
+            deltas = []
+            for _ in range(2):
+                ergebnis = 0
+                verschiebung = 0
+                while True:
+                    if index >= len(polyline) or verschiebung > 60:
+                        return []
+                    byte = ord(polyline[index]) - 63
+                    index += 1
+                    ergebnis |= (byte & 0x1F) << verschiebung
+                    verschiebung += 5
+                    if byte < 0x20:
+                        break
+                deltas.append(
+                    ~(ergebnis >> 1) if ergebnis & 1 else ergebnis >> 1
+                )
+            latitude += deltas[0]
+            longitude += deltas[1]
+            lat = latitude / faktor
+            lon = longitude / faktor
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                return []
+            punkte.append((lat, lon))
+    except (TypeError, ValueError):
+        return []
+    return punkte if len(punkte) >= 2 else []
+
+
 def _fleet_telemetrie_varint_lesen(payload, index=0):
     """Lese einen Protobuf-Varint aus Bytes."""
 
@@ -8742,6 +8786,36 @@ def _fleet_telemetrie_routeline_aus_protobuf(payload):
     return None
 
 
+def _fleet_telemetrie_routeline_ist_teilnachricht(value):
+    """Erkenne Teslas RouteLine-Metadaten ohne enthaltene Polyline."""
+
+    if not isinstance(value, str) or not value.strip():
+        return False
+    try:
+        payload = base64.b64decode(value.strip(), validate=True)
+    except Exception:
+        return False
+    if not payload or _fleet_telemetrie_routeline_aus_protobuf(payload):
+        return False
+    index = 0
+    anzahl = 0
+    while index < len(payload):
+        tag, index = _fleet_telemetrie_varint_lesen(payload, index)
+        if tag is None or tag >> 3 != 2 or tag & 0x07 != 2:
+            return False
+        länge, index = _fleet_telemetrie_varint_lesen(payload, index)
+        if länge is None or länge <= 0 or index + länge > len(payload):
+            return False
+        teil = payload[index:index + länge]
+        if len(teil) not in {5, 7} or teil[0] != 0x0D:
+            return False
+        if len(teil) == 7 and teil[5:] not in {b"\x10\x00", b"\x10\x01"}:
+            return False
+        index += länge
+        anzahl += 1
+    return anzahl > 0
+
+
 def _fleet_telemetrie_routeline_normalisieren(value):
     """Wandle Base64-Protobuf-RouteLine in die echte Polyline um."""
 
@@ -8754,8 +8828,107 @@ def _fleet_telemetrie_routeline_normalisieren(value):
         payload = base64.b64decode(route_line, validate=True)
     except Exception:
         return value
+    try:
+        direkt = payload.decode("ascii")
+    except UnicodeDecodeError:
+        direkt = None
+    if _fleet_telemetrie_routeline_ist_polyline(direkt):
+        return direkt
     polyline = _fleet_telemetrie_routeline_aus_protobuf(payload)
     return polyline or value
+
+
+def _fleet_telemetrie_routeline_cache_speichern(data, drive, polyline, timestamp_ms):
+    """Merke eine vollständige Route mit ihrem Ziel im internen Rohcache."""
+
+    punkte = _fleet_telemetrie_polyline_dekodieren(polyline)
+    if not punkte or not isinstance(data, dict) or not isinstance(drive, dict):
+        return False
+    zielname = str(drive.get("active_route_destination") or "").strip()
+    ziel = _fleet_telemetrie_gueltige_zielkoordinaten(
+        drive.get("active_route_latitude"),
+        drive.get("active_route_longitude"),
+    )
+    if not zielname and ziel is None:
+        return False
+    raw = data.setdefault("fleet_telemetry_raw", {})
+    if not isinstance(raw, dict):
+        return False
+    cache = {
+        "polyline": polyline,
+        "destination": zielname or None,
+        "latitude": ziel[0] if ziel is not None else None,
+        "longitude": ziel[1] if ziel is not None else None,
+        "received_at": int(timestamp_ms),
+    }
+    if raw.get(FLEET_TELEMETRIE_NAVIGATION_ROUTE_CACHE_ROHFELD) == cache:
+        return False
+    raw[FLEET_TELEMETRIE_NAVIGATION_ROUTE_CACHE_ROHFELD] = cache
+    return True
+
+
+def _fleet_telemetrie_routeline_cache_für_aktive_navigation(
+    data,
+    drive,
+    timestamp_ms,
+):
+    """Liefere eine frische, räumlich passende Route zum erneut gemeldeten Ziel."""
+
+    if not isinstance(data, dict) or not isinstance(drive, dict):
+        return None
+    raw = data.get("fleet_telemetry_raw")
+    if not isinstance(raw, dict):
+        return None
+    cache = raw.get(FLEET_TELEMETRIE_NAVIGATION_ROUTE_CACHE_ROHFELD)
+    if not isinstance(cache, dict):
+        return None
+    empfangen = _as_float(cache.get("received_at"))
+    if empfangen is None:
+        raw.pop(FLEET_TELEMETRIE_NAVIGATION_ROUTE_CACHE_ROHFELD, None)
+        return None
+    alter = int(timestamp_ms) - int(empfangen)
+    if alter < 0 or alter > FLEET_TELEMETRIE_NAVIGATION_ROUTE_CACHE_MAX_ALTER_MS:
+        raw.pop(FLEET_TELEMETRIE_NAVIGATION_ROUTE_CACHE_ROHFELD, None)
+        return None
+
+    zielvergleiche = []
+    zielname = str(drive.get("active_route_destination") or "").strip()
+    cache_zielname = str(cache.get("destination") or "").strip()
+    if zielname and cache_zielname:
+        zielvergleiche.append(zielname == cache_zielname)
+    ziel = _fleet_telemetrie_gueltige_zielkoordinaten(
+        drive.get("active_route_latitude"),
+        drive.get("active_route_longitude"),
+    )
+    cache_ziel = _fleet_telemetrie_gueltige_zielkoordinaten(
+        cache.get("latitude"),
+        cache.get("longitude"),
+    )
+    if ziel is not None and cache_ziel is not None:
+        zielvergleiche.append(
+            _haversine(*ziel, *cache_ziel)
+            <= FLEET_TELEMETRIE_NAVIGATION_ROUTE_CACHE_ZIEL_MAX_ABSTAND_KM
+        )
+    if not zielvergleiche or not all(zielvergleiche):
+        return None
+
+    polyline = cache.get("polyline")
+    punkte = _fleet_telemetrie_polyline_dekodieren(polyline)
+    position = _fleet_telemetrie_gueltige_fahrzeugkoordinaten(
+        drive.get("latitude"),
+        drive.get("longitude"),
+    )
+    if not punkte or position is None or ziel is None:
+        return None
+    if min(_haversine(*position, *punkt) for punkt in punkte) > (
+        FLEET_TELEMETRIE_NAVIGATION_ROUTE_CACHE_POSITION_MAX_ABSTAND_KM
+    ):
+        return None
+    if min(_haversine(*ziel, *punkt) for punkt in punkte) > (
+        FLEET_TELEMETRIE_NAVIGATION_ROUTE_CACHE_ZIEL_MAX_ABSTAND_KM
+    ):
+        return None
+    return polyline
 
 
 def _fleet_telemetrie_routeline_in_daten_normalisieren(data):
@@ -8780,7 +8953,14 @@ def _fleet_telemetrie_navigation_routeline_nachziehen(data, drive, timestamp_ms)
     raw = data.get("fleet_telemetry_raw")
     if not isinstance(raw, dict):
         return
-    route_line = _fleet_telemetrie_routeline_normalisieren(raw.get("RouteLine"))
+    rohdaten = raw.get("RouteLine")
+    route_line = _fleet_telemetrie_routeline_normalisieren(rohdaten)
+    if _fleet_telemetrie_routeline_ist_teilnachricht(rohdaten):
+        route_line = _fleet_telemetrie_routeline_cache_für_aktive_navigation(
+            data,
+            drive,
+            timestamp_ms,
+        )
     if not isinstance(route_line, str) or not route_line.strip():
         return
     feld_empfang = data.get("fleet_telemetry_field_received_at")
@@ -8977,12 +9157,36 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         drive["timestamp"] = timestamp_ms
         return True
     if field == "RouteLine":
-        value = _fleet_telemetrie_routeline_normalisieren(value)
+        rohdaten = value
+        teilnachricht = _fleet_telemetrie_routeline_ist_teilnachricht(rohdaten)
+        value = _fleet_telemetrie_routeline_normalisieren(rohdaten)
         if value is None or (isinstance(value, str) and not value.strip()):
             _fleet_telemetrie_navigation_beenden(drive, timestamp_ms, data)
         else:
             if _fleet_telemetrie_navigation_hat_zielkern(drive):
-                drive["active_route_line"] = value
+                if teilnachricht:
+                    vorhandene_route = drive.get("active_route_line")
+                    if not _fleet_telemetrie_polyline_dekodieren(
+                        vorhandene_route
+                    ):
+                        vorhandene_route = None
+                    value = vorhandene_route or (
+                        _fleet_telemetrie_routeline_cache_für_aktive_navigation(
+                            data,
+                            drive,
+                            timestamp_ms,
+                        )
+                    )
+                if isinstance(value, str) and value.strip():
+                    drive["active_route_line"] = value
+                    rohwerte["RouteLine"] = value
+                    if not teilnachricht:
+                        _fleet_telemetrie_routeline_cache_speichern(
+                            data,
+                            drive,
+                            value,
+                            timestamp_ms,
+                        )
                 _fleet_telemetrie_navigation_aktivieren(drive, timestamp_ms)
         drive["timestamp"] = timestamp_ms
         return True
