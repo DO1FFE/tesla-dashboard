@@ -1646,6 +1646,34 @@ def test_fleet_telemetrie_basisdaten_ueberschreibt_alias_id(monkeypatch):
     assert daten["id_s"] == "primaer"
 
 
+def test_fleet_telemetrie_priorisiert_batterieseitige_ladeenergie():
+    daten = {}
+
+    app._fleet_telemetrie_setze_feld(
+        daten,
+        "ACChargingEnergyIn",
+        11.2022222222,
+        1_000,
+    )
+    assert daten["charge_state"]["charge_energy_added"] == 11.2022222222
+
+    app._fleet_telemetrie_setze_feld(
+        daten,
+        "DCChargingEnergyIn",
+        10.9188363036,
+        2_000,
+    )
+    assert daten["charge_state"]["charge_energy_added"] == 10.9188363036
+
+    app._fleet_telemetrie_setze_feld(
+        daten,
+        "ACChargingEnergyIn",
+        11.3,
+        3_000,
+    )
+    assert daten["charge_state"]["charge_energy_added"] == 10.9188363036
+
+
 def test_fleet_telemetrie_mqtt_mappt_dashboard_zusatzfelder(monkeypatch):
     monkeypatch.setattr(app, "_fleet_telemetrie_fahrzeuge", lambda: [{
         "vin": "TESTVIN",

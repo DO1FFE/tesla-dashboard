@@ -9269,10 +9269,21 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
     if field in {"ACChargingEnergyIn", "DCChargingEnergyIn"}:
         if field == "ACChargingEnergyIn":
             charge["ac_charge_energy_added"] = value
+            if (
+                value is not None
+                and _as_float(charge.get("dc_charge_energy_added")) is None
+            ):
+                charge["charge_energy_added"] = value
         else:
             charge["dc_charge_energy_added"] = value
-        if value is not None:
-            charge["charge_energy_added"] = value
+            if value is not None:
+                # Tesla misst diesen Wert an der Batterie und kennzeichnet ihn
+                # ausdrücklich für AC- und DC-Ladevorgänge als verlässlich.
+                charge["charge_energy_added"] = value
+            elif charge.get("ac_charge_energy_added") is not None:
+                charge["charge_energy_added"] = charge[
+                    "ac_charge_energy_added"
+                ]
         charge["timestamp"] = timestamp_ms
         return True
     if field in {"ModuleTempMin", "ModuleTempMax"}:
@@ -12081,7 +12092,11 @@ def _fleet_telemetrie_ladeinformationen_aktualisieren(cache_id, data, cached=Non
 
     charging_state = charge.get("charging_state")
     current_soc = _extract_current_charge_soc(charge)
-    current_energy = _as_float(charge.get("charge_energy_added"))
+    current_energy = _as_float(charge.get("dc_charge_energy_added"))
+    if current_energy is None:
+        current_energy = _as_float(charge.get("charge_energy_added"))
+    if current_energy is None:
+        current_energy = _as_float(charge.get("ac_charge_energy_added"))
 
     cached_last_val = None
     if isinstance(cached, dict):

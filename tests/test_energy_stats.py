@@ -576,6 +576,8 @@ def test_fleet_telemetrie_beendet_ladung_bereits_bei_standby(
         "charge_state": {
             "charging_state": "Standby",
             "charge_energy_added": 11.2022222222,
+            "ac_charge_energy_added": 11.2022222222,
+            "dc_charge_energy_added": 10.9188363036,
             "usable_battery_level": 46,
         },
         "drive_state": {"shift_state": "P", "speed": 0},
@@ -588,7 +590,7 @@ def test_fleet_telemetrie_beendet_ladung_bereits_bei_standby(
 
     assert len(protokolliert) == 1
     assert protokolliert[0][0] == vehicle_id
-    assert protokolliert[0][1] == 11.2022222222
+    assert protokolliert[0][1] == 10.9188363036
     assert isinstance(protokolliert[0][2], datetime)
     assert app._load_session_start(vehicle_id) is None
     assert app._load_last_charge_start_soc(vehicle_id) == 31
