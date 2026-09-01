@@ -507,6 +507,132 @@ def test_fleet_telemetrie_schreibt_ladung_nicht_fuer_alias_cache(tmp_path, monke
     assert "last_charge_energy_added" not in daten
 
 
+def test_fleet_telemetrie_v2l_oeffnet_keine_ladesitzung(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    vehicle_id = "fleet_v2l"
+    alter_start = datetime(2026, 8, 30, 16, 32, tzinfo=app.LOCAL_TZ)
+    app._save_session_start(vehicle_id, alter_start)
+    app._save_session_start_soc(vehicle_id, 71)
+
+    daten = {
+        "id_s": vehicle_id,
+        "v2l_active": True,
+        "charge_state": {
+            "charging_state": "Starting",
+            "charger_power": 4.0,
+            "charge_energy_added": 0.0,
+            "usable_battery_level": 71,
+            "pack_power": -4.5,
+            "pack_voltage": 380.0,
+            "pack_current": -11.84,
+            "charge_session_start": alter_start.isoformat(),
+            "charge_session_start_soc": 71,
+        },
+        "drive_state": {"shift_state": "P", "speed": 0},
+    }
+
+    app._fleet_telemetrie_ladeinformationen_aktualisieren(vehicle_id, daten)
+
+    assert app._load_session_start(vehicle_id) is None
+    assert app._load_session_start_soc(vehicle_id) is None
+    assert "charge_session_start" not in daten["charge_state"]
+    assert "charge_session_start_soc" not in daten["charge_state"]
+    assert not (pathlib.Path(app.vehicle_dir(vehicle_id)) / "energy.log").exists()
+
+
+def test_fleet_telemetrie_beendet_ladung_bereits_bei_standby(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    vehicle_id = "fleet_standby"
+    protokolliert = []
+    monkeypatch.setattr(
+        app,
+        "_log_energy",
+        lambda fahrzeug, energie, timestamp=None: (
+            protokolliert.append((fahrzeug, energie, timestamp)) or True
+        ),
+    )
+    app._charging_session_start.clear()
+    app._charging_session_start_soc.clear()
+    app._charging_session_last_soc.clear()
+    app._recently_logged_sessions.clear()
+    app._last_energy_markers.clear()
+
+    start = {
+        "id_s": vehicle_id,
+        "charge_state": {
+            "charging_state": "Starting",
+            "charge_energy_added": 0.0,
+            "usable_battery_level": 31,
+        },
+        "drive_state": {"shift_state": "P", "speed": 0},
+    }
+    app._fleet_telemetrie_ladeinformationen_aktualisieren(vehicle_id, start)
+
+    ende = {
+        "id_s": vehicle_id,
+        "charge_state": {
+            "charging_state": "Standby",
+            "charge_energy_added": 11.2022222222,
+            "usable_battery_level": 46,
+        },
+        "drive_state": {"shift_state": "P", "speed": 0},
+    }
+    app._fleet_telemetrie_ladeinformationen_aktualisieren(
+        vehicle_id,
+        ende,
+        start,
+    )
+
+    assert len(protokolliert) == 1
+    assert protokolliert[0][0] == vehicle_id
+    assert protokolliert[0][1] == 11.2022222222
+    assert isinstance(protokolliert[0][2], datetime)
+    assert app._load_session_start(vehicle_id) is None
+    assert app._load_last_charge_start_soc(vehicle_id) == 31
+    assert app._load_last_charge_end_soc(vehicle_id) == 46
+    assert app._load_last_charge_added_percent(vehicle_id) == 15
+
+
+def test_fleet_telemetrie_verwirft_beendete_sitzung_auch_ohne_energie(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
+    vehicle_id = "fleet_ohne_energie"
+    app._save_session_start(
+        vehicle_id,
+        datetime.now(app.LOCAL_TZ) - timedelta(minutes=5),
+    )
+    app._save_session_start_soc(vehicle_id, 40)
+
+    daten = {
+        "id_s": vehicle_id,
+        "charge_state": {
+            "charging_state": "Disconnected",
+            "usable_battery_level": 42,
+            "charge_session_start": "2026-09-01T08:00:00+02:00",
+            "charge_session_duration_s": 300,
+            "charge_session_start_soc": 40,
+            "charge_added_percent": 2,
+        },
+        "drive_state": {"shift_state": "P", "speed": 0},
+    }
+    app._fleet_telemetrie_ladeinformationen_aktualisieren(vehicle_id, daten)
+
+    assert app._load_session_start(vehicle_id) is None
+    assert app._load_last_charge_start_soc(vehicle_id) == 40
+    assert app._load_last_charge_end_soc(vehicle_id) == 42
+    assert app._load_last_charge_added_percent(vehicle_id) == 2
+    assert "charge_session_start" not in daten["charge_state"]
+    assert "charge_session_duration_s" not in daten["charge_state"]
+    assert "charge_session_start_soc" not in daten["charge_state"]
+    assert "charge_added_percent" not in daten["charge_state"]
+    assert not (pathlib.Path(app.vehicle_dir(vehicle_id)) / "energy.log").exists()
+
+
 def test_compute_energy_stats_respects_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
 

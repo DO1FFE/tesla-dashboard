@@ -12101,6 +12101,19 @@ def _fleet_telemetrie_ladeinformationen_aktualisieren(cache_id, data, cached=Non
     session_last_soc = _load_session_last_soc(cache_id)
     now = datetime.now(LOCAL_TZ)
 
+    if _v2l_für_profil_aktiv(data):
+        # Der V2L-Adapter meldet bei diesem Fahrzeug ebenfalls "Starting".
+        # Das ist eine Entladung und darf keine AC-Ladesitzung offenhalten.
+        _clear_session_start(cache_id)
+        for feld in (
+            "charge_session_start",
+            "charge_session_duration_s",
+            "charge_session_start_soc",
+            "charge_added_percent",
+        ):
+            charge.pop(feld, None)
+        return data
+
     if charging_state in ("Charging", "Starting"):
         if session_start is None:
             session_start = now
@@ -12117,15 +12130,23 @@ def _fleet_telemetrie_ladeinformationen_aktualisieren(cache_id, data, cached=Non
             charge["last_charge_energy_added"] = last_val
         return data
 
-    end_states = ("Complete", "Disconnected", "Stopped", "NoPower")
-    if charging_state in end_states and current_energy is not None and current_energy > 0.001:
+    end_states = (
+        "Complete",
+        "Disconnected",
+        "Stopped",
+        "NoPower",
+        "Standby",
+    )
+    if charging_state in end_states:
         vorherige_energie = _as_float(last_val)
         nachtrag_durch_soc = _ladeenergie_nachtrag_durch_soc_bestaetigt(
             cached,
             data,
         )
         neue_session = session_start is not None or (
-            nachtrag_durch_soc
+            current_energy is not None
+            and current_energy > 0.001
+            and nachtrag_durch_soc
             and (
                 vorherige_energie is None
                 or abs(current_energy - vorherige_energie) > 0.001
@@ -12145,10 +12166,11 @@ def _fleet_telemetrie_ladeinformationen_aktualisieren(cache_id, data, cached=Non
             if start_soc is not None and end_soc is not None:
                 added_percent = max(0, end_soc - start_soc)
 
-            logged = _log_energy(cache_id, current_energy, timestamp=start_time)
-            if logged:
-                _save_last_energy(cache_id, current_energy)
-                last_val = current_energy
+            if current_energy is not None and current_energy > 0.001:
+                logged = _log_energy(cache_id, current_energy, timestamp=start_time)
+                if logged:
+                    _save_last_energy(cache_id, current_energy)
+                    last_val = current_energy
             if duration_s is not None:
                 _save_last_charge_duration(cache_id, duration_s)
                 last_duration = duration_s
@@ -12161,7 +12183,14 @@ def _fleet_telemetrie_ladeinformationen_aktualisieren(cache_id, data, cached=Non
             if end_soc is not None:
                 _save_last_charge_end_soc(cache_id, end_soc)
                 last_end_soc = end_soc
-            _clear_session_start(cache_id)
+        _clear_session_start(cache_id)
+        for feld in (
+            "charge_session_start",
+            "charge_session_duration_s",
+            "charge_session_start_soc",
+            "charge_added_percent",
+        ):
+            charge.pop(feld, None)
 
     if last_val is None and cached_last_val is not None:
         last_val = cached_last_val
@@ -14984,7 +15013,13 @@ def _fetch_data_once(vehicle_id="default"):
             _save_session_last_soc(cache_id, current_soc)
             session_last_soc = current_soc
         session_ended = False
-        end_states = ("Complete", "Disconnected", "Stopped", "NoPower")
+        end_states = (
+            "Complete",
+            "Disconnected",
+            "Stopped",
+            "NoPower",
+            "Standby",
+        )
         session_aktiv = session_start is not None
         if charging_state in end_states and (
             last_charging_state == "Charging" or session_aktiv
