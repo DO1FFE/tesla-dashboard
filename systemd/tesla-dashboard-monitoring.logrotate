@@ -1,0 +1,14 @@
+/home/do1ffe/tesla-dashboard/data/monitoring/fleet-mqtt.tsv /home/do1ffe/tesla-dashboard/data/monitoring/fahrtstatus.ndjson {
+    su do1ffe do1ffe
+    daily
+    maxsize 100M
+    rotate 14
+    missingok
+    notifempty
+    dateext
+    compress
+    delaycompress
+    copytruncate
+}
+
+# © 2026 Erik Schauer, do1ffe@darc.de

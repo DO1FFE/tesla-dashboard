@@ -85,6 +85,7 @@ def keine_echten_parking_logs(monkeypatch):
         "_record_dashboard_parking_state",
         lambda *args, **kwargs: None,
     )
+    monkeypatch.setattr(app, "log_vehicle_state", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         app,
         "_fleet_telemetrie_ladeinformationen_aktualisieren",
@@ -1374,6 +1375,48 @@ def test_fleet_telemetrie_neuverbindung_beobachtet_live_ohne_sofort_post(
     assert app._fleet_telemetry_profile_status["config_sync_state"] == "synced"
     assert app._fleet_telemetry_profile_status["live_reconnect_seen_at"] == 2100.0
     assert app.latest_data["veh-1"]["telemetry_config_sync_state"] == "synced"
+
+
+def test_fleet_connectivity_protokolliert_zustand_einmal_kanonisch(monkeypatch):
+    protokoll = []
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_fahrzeuge",
+        lambda: [{"vin": "TESTVIN", "id_s": "veh-1"}],
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_ids",
+        lambda vin: ["veh-1", "alias-1", "default"],
+    )
+    monkeypatch.setattr(
+        app,
+        "latest_data",
+        {
+            "veh-1": {"state": "offline"},
+            "alias-1": {"state": "offline"},
+            "default": {"state": "offline"},
+        },
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(app, "_subscriber_daten_senden", lambda *args: None)
+    monkeypatch.setattr(
+        app,
+        "log_vehicle_state",
+        lambda vehicle_id, state: protokoll.append((vehicle_id, state)),
+    )
+
+    assert app._fleet_telemetrie_verbindung_aktualisieren(
+        "TESTVIN",
+        {"Status": "CONNECTED", "ConnectionID": "neu"},
+        2_100_000,
+    )
+
+    assert protokoll == [("veh-1", "online")]
 
 
 def test_fleet_telemetrie_doppelte_verbindung_sendet_live_nicht(monkeypatch):

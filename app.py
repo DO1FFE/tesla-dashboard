@@ -11081,6 +11081,7 @@ def _fleet_telemetrie_verbindung_aktualisieren(vin, payload, timestamp_ms=None):
     if state is None:
         return False
     aktualisierte_daten = []
+    protokoll_fahrzeug_id = None
     with _fleet_telemetry_lock:
         cache_daten = []
         for cache_id in _fleet_telemetrie_cache_ids(vin):
@@ -11137,6 +11138,20 @@ def _fleet_telemetrie_verbindung_aktualisieren(vin, payload, timestamp_ms=None):
             latest_data[cache_id] = data
             _fleet_telemetrie_cache_spaeter_speichern(cache_id, data)
             aktualisierte_daten.append((cache_id, data))
+            if (
+                protokoll_fahrzeug_id is None
+                and _fleet_telemetrie_primärer_cache(cache_id, data)
+            ):
+                protokoll_fahrzeug_id = (
+                    data.get("id_s") or data.get("vehicle_id") or cache_id
+                )
+    if protokoll_fahrzeug_id is None and aktualisierte_daten:
+        cache_id, data = aktualisierte_daten[0]
+        protokoll_fahrzeug_id = (
+            data.get("id_s") or data.get("vehicle_id") or cache_id
+        )
+    if protokoll_fahrzeug_id is not None:
+        log_vehicle_state(str(protokoll_fahrzeug_id), state)
     for cache_id, data in aktualisierte_daten:
         _subscriber_daten_senden(cache_id, data)
     return bool(aktualisierte_daten)

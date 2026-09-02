@@ -1,0 +1,23 @@
+[Unit]
+Description=Tesla Dashboard Fahrt- und Profilmonitor
+Wants=network-online.target
+After=network-online.target tesla-dashboard.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=do1ffe
+Group=do1ffe
+WorkingDirectory=/home/do1ffe/tesla-dashboard
+UMask=0077
+ExecStartPre=/usr/bin/mkdir -p /home/do1ffe/tesla-dashboard/data/monitoring
+ExecStart=/home/do1ffe/tesla-dashboard/.venv/bin/python /home/do1ffe/tesla-dashboard/tools/fahrtstatus_monitor.py --cache /home/do1ffe/tesla-dashboard/data/default/cache.json --profil /home/do1ffe/tesla-dashboard/data/tesla_fleet/telemetry_profile_status.json --ausgabe /home/do1ffe/tesla-dashboard/data/monitoring/fahrtstatus.ndjson --intervall 0.5 --dauer 0
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+
+# © 2026 Erik Schauer, do1ffe@darc.de

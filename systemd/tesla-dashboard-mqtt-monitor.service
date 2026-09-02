@@ -1,0 +1,23 @@
+[Unit]
+Description=Tesla Dashboard MQTT-Telemetriemonitor
+Wants=network-online.target
+After=network-online.target docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=do1ffe
+Group=do1ffe
+WorkingDirectory=/home/do1ffe/tesla-dashboard
+UMask=0077
+ExecStartPre=/usr/bin/mkdir -p /home/do1ffe/tesla-dashboard/data/monitoring
+ExecStart=/usr/bin/mosquitto_sub -R -h 127.0.0.1 -p 1884 -t "tesla/#" -F "%%U\t%%t\t%%p"
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/do1ffe/tesla-dashboard/data/monitoring/fleet-mqtt.tsv
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+
+# © 2026 Erik Schauer, do1ffe@darc.de
