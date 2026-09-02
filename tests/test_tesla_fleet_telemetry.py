@@ -1419,6 +1419,60 @@ def test_fleet_connectivity_protokolliert_zustand_einmal_kanonisch(monkeypatch):
     assert protokoll == [("veh-1", "online")]
 
 
+def test_fleet_connectivity_protokolliert_keinen_veralteten_alias(monkeypatch):
+    protokoll = []
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_fahrzeuge",
+        lambda: [{"vin": "TESTVIN", "id_s": "veh-1"}],
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_ids",
+        lambda vin: ["veh-1", "default"],
+    )
+    monkeypatch.setattr(
+        app,
+        "latest_data",
+        {
+            "veh-1": {
+                "state": "online",
+                "fleet_telemetry_connectivity": {
+                    "Status": "CONNECTED",
+                    "ConnectionID": "neu",
+                },
+            },
+            "default": {
+                "state": "online",
+                "fleet_telemetry_connectivity": {
+                    "Status": "CONNECTED",
+                    "ConnectionID": "alt",
+                },
+            },
+        },
+    )
+    monkeypatch.setattr(
+        app,
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(app, "_subscriber_daten_senden", lambda *args: None)
+    monkeypatch.setattr(
+        app,
+        "log_vehicle_state",
+        lambda vehicle_id, state: protokoll.append((vehicle_id, state)),
+    )
+
+    assert app._fleet_telemetrie_verbindung_aktualisieren(
+        "TESTVIN",
+        {"Status": "DISCONNECTED", "ConnectionID": "alt"},
+        2_100_000,
+    )
+
+    assert app.latest_data["veh-1"]["state"] == "online"
+    assert protokoll == []
+
+
 def test_fleet_telemetrie_doppelte_verbindung_sendet_live_nicht(monkeypatch):
     angefordert = []
     monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: True)

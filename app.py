@@ -11145,13 +11145,8 @@ def _fleet_telemetrie_verbindung_aktualisieren(vin, payload, timestamp_ms=None):
                 protokoll_fahrzeug_id = (
                     data.get("id_s") or data.get("vehicle_id") or cache_id
                 )
-    if protokoll_fahrzeug_id is None and aktualisierte_daten:
-        cache_id, data = aktualisierte_daten[0]
-        protokoll_fahrzeug_id = (
-            data.get("id_s") or data.get("vehicle_id") or cache_id
-        )
-    if protokoll_fahrzeug_id is not None:
-        log_vehicle_state(str(protokoll_fahrzeug_id), state)
+        if protokoll_fahrzeug_id is not None:
+            log_vehicle_state(str(protokoll_fahrzeug_id), state)
     for cache_id, data in aktualisierte_daten:
         _subscriber_daten_senden(cache_id, data)
     return bool(aktualisierte_daten)
