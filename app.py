@@ -10454,14 +10454,20 @@ def _fleet_telemetrie_parkdaten_uebernehmen(
                 or _normalize_shift_state(drive.get("shift_state")) != "P"
             ):
                 continue
+            übernommene_daten = {}
             for abschnitt in ("vehicle_state", "climate_state", "charge_state"):
                 quelle = parkdaten.get(abschnitt)
                 if not isinstance(quelle, dict):
                     continue
                 ziel = data.setdefault(abschnitt, {})
+                übernommene_daten[abschnitt] = {}
                 for key, value in quelle.items():
                     if value is not None:
                         ziel[key] = copy.deepcopy(value)
+                        übernommene_daten[abschnitt][key] = value
+            _fleet_telemetrie_fallback_rohwerte_bereinigen(
+                data, übernommene_daten,
+            )
             vehicle = data.setdefault("vehicle_state", {})
             climate = data.setdefault("climate_state", {})
             if (

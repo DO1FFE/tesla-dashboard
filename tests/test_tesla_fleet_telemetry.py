@@ -415,8 +415,18 @@ def test_fleet_telemetrie_ladeabgleich_hat_sperrfrist(monkeypatch):
     assert app._fleet_telemetrie_ladeabgleich_reservieren("TESTVIN", 160.0)
 
 
+@pytest.mark.parametrize("fensterfeld, anzeigefeld", [
+    ("FdWindow", "fd_window"),
+    ("FpWindow", "fp_window"),
+    ("RdWindow", "rd_window"),
+    ("RpWindow", "rp_window"),
+])
+@pytest.mark.parametrize("fenster_offen", [0, 1])
 def test_fleet_telemetrie_parkabgleich_korrigiert_veraltete_abschaltwerte(
     monkeypatch,
+    fensterfeld,
+    anzeigefeld,
+    fenster_offen,
 ):
     gesendet = []
     monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
@@ -455,6 +465,7 @@ def test_fleet_telemetrie_parkabgleich_korrigiert_veraltete_abschaltwerte(
                 "longitude": 7.03,
             },
             "vehicle_state": {
+                anzeigefeld: 1 - fenster_offen,
                 "is_user_present": True,
                 "locked": False,
                 "center_display_state": "On",
@@ -466,6 +477,16 @@ def test_fleet_telemetrie_parkabgleich_korrigiert_veraltete_abschaltwerte(
                 "charging_state": "Disconnected",
                 "charger_power": 9,
             },
+            "fleet_telemetry_raw": {
+                fensterfeld: (
+                    "WindowStateClosed" if fenster_offen
+                    else "WindowStatePartiallyOpen"
+                ),
+                "RearDefrostEnabled": True,
+                "HvacFanSpeed": 4,
+                "DCDCEnable": True,
+                "BatteryHeaterOn": True,
+            },
         },
     })
     parkdaten = {
@@ -476,11 +497,21 @@ def test_fleet_telemetrie_parkabgleich_korrigiert_veraltete_abschaltwerte(
             "latitude": None,
             "longitude": None,
         },
-        "vehicle_state": {"is_user_present": False, "locked": True},
-        "climate_state": {"is_climate_on": False, "fan_status": 0},
+        "vehicle_state": {
+            "is_user_present": False,
+            "locked": True,
+            anzeigefeld: fenster_offen,
+        },
+        "climate_state": {
+            "is_climate_on": False,
+            "fan_status": 0,
+            "is_rear_defroster_on": False,
+            "battery_heater": None,
+        },
         "charge_state": {
             "charging_state": "Disconnected",
             "charger_power": 0,
+            "battery_heater_on": None,
         },
     }
 
@@ -503,6 +534,25 @@ def test_fleet_telemetrie_parkabgleich_korrigiert_veraltete_abschaltwerte(
     assert daten["charge_state"]["charger_power"] == 0
     assert daten["fleet_telemetry_park_reconciled_at"] == 2_000_000_000_000
     assert gesendet[-1][0] == "veh-1"
+
+    # Spätere Dashboard-Lesezugriffe dürfen keine alten Rohwerte zurückspielen.
+    app._fleet_telemetrie_rohdaten_anreichern(daten)
+    app._fleet_telemetrie_veraltete_oeffnungen_bereinigen(daten)
+    assert daten["vehicle_state"][anzeigefeld] == fenster_offen
+    assert daten["climate_state"]["is_rear_defroster_on"] is False
+    assert fensterfeld not in daten["fleet_telemetry_raw"]
+    assert "HvacFanSpeed" not in daten["fleet_telemetry_raw"]
+    assert daten["fleet_telemetry_raw"]["DCDCEnable"] is True
+    assert daten["fleet_telemetry_raw"]["BatteryHeaterOn"] is True
+
+    app._fleet_telemetrie_setze_feld(
+        daten,
+        fensterfeld,
+        "WindowStateClosed" if fenster_offen else "WindowStatePartiallyOpen",
+        2_000_000_002_000,
+    )
+    app._fleet_telemetrie_veraltete_oeffnungen_bereinigen(daten)
+    assert daten["vehicle_state"][anzeigefeld] == 1 - fenster_offen
 
 
 def test_fleet_telemetrie_parkabgleich_ruft_vollstaendige_daten_ab(monkeypatch):
