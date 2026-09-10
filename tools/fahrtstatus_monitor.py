@@ -68,6 +68,16 @@ def cache_snapshot(daten, beobachtet_am=None):
         "state": daten.get("state"),
         "timestamp": daten.get("timestamp"),
         "telemetrie_empfangen_am": daten.get("fleet_telemetry_received_at"),
+        "rest_abgleich": _auswahl(
+            daten,
+            (
+                "fleet_vehicle_data_received_at",
+                "fleet_vehicle_data_source",
+                "fleet_telemetry_park_reconciled_at",
+                "fleet_telemetry_position_fallback_at",
+                "fleet_telemetry_position_source",
+            ),
+        ),
         "drive": {
             **_auswahl(
                 drive,
@@ -105,15 +115,22 @@ def cache_snapshot(daten, beobachtet_am=None):
         "öffnungen": _auswahl(
             vehicle,
             (
+                "timestamp",
                 "df",
                 "dr",
                 "pf",
                 "pr",
+                "ft",
+                "rt",
                 "fd_window",
                 "fp_window",
                 "rd_window",
                 "rp_window",
             ),
+        ),
+        "öffnungen_roh": _auswahl(
+            daten.get("fleet_telemetry_raw"),
+            ("DoorState", "FdWindow", "FpWindow", "RdWindow", "RpWindow"),
         ),
         "feld_empfangen_am": _auswahl(
             feld_empfang,
@@ -164,6 +181,11 @@ def profil_snapshot(daten, beobachtet_am=None):
                 "config_revision",
                 "live_retry_active",
                 "live_retry_attempts",
+                "live_retry_started_at",
+                "live_retry_confirmed_at",
+                "live_recovery_bootstrap_active",
+                "live_recovery_full_pending",
+                "live_recovery_bootstrap_confirmed_at",
                 "live_stable_since",
                 "charging_observed",
                 "post_charge_live_since",

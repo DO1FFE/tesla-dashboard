@@ -66,6 +66,11 @@ def test_profil_snapshot_enthält_synchronisierung_und_wiederholungen():
         "config_sync_state": "pending",
         "live_retry_active": True,
         "live_retry_attempts": 3,
+        "live_retry_started_at": 2000.0,
+        "live_retry_confirmed_at": 2005.0,
+        "live_recovery_bootstrap_active": False,
+        "live_recovery_full_pending": False,
+        "live_recovery_bootstrap_confirmed_at": 2002.0,
         "config_revision": 4,
     })
 
@@ -75,6 +80,53 @@ def test_profil_snapshot_enthält_synchronisierung_und_wiederholungen():
     assert snapshot["config_sync_state"] == "pending"
     assert snapshot["live_retry_attempts"] == 3
     assert snapshot["config_revision"] == 4
+    assert snapshot["live_retry_started_at"] == 2000.0
+    assert snapshot["live_retry_confirmed_at"] == 2005.0
+    assert snapshot["live_recovery_bootstrap_active"] is False
+    assert snapshot["live_recovery_full_pending"] is False
+    assert snapshot["live_recovery_bootstrap_confirmed_at"] == 2002.0
+
+
+def test_cache_snapshot_unterscheidet_rohwerte_und_rest_abgleich():
+    snapshot = fahrtstatus_monitor.cache_snapshot({
+        "fleet_vehicle_data_received_at": 2000,
+        "fleet_vehicle_data_source": "stream_recovery",
+        "fleet_telemetry_park_reconciled_at": 2100,
+        "fleet_telemetry_position_fallback_at": 2200,
+        "fleet_telemetry_position_source": "vehicle_data",
+        "vehicle_state": {"timestamp": 2090, "fd_window": 0, "ft": 1},
+        "fleet_telemetry_raw": {
+            "DoorState": {"DriverFront": False, "TrunkFront": True},
+            "FdWindow": "WindowStatePartiallyOpen",
+            "FpWindow": None,
+            "RouteLine": "Nicht nochmals aufzeichnen",
+            "VehicleName": "Nicht aufzeichnen",
+        },
+        "fleet_telemetry_field_received_at": {"FdWindow": 1900},
+    })
+
+    assert snapshot["rest_abgleich"] == {
+        "fleet_vehicle_data_received_at": 2000,
+        "fleet_vehicle_data_source": "stream_recovery",
+        "fleet_telemetry_park_reconciled_at": 2100,
+        "fleet_telemetry_position_fallback_at": 2200,
+        "fleet_telemetry_position_source": "vehicle_data",
+    }
+    assert snapshot["öffnungen"]["timestamp"] == 2090
+    assert snapshot["öffnungen"]["fd_window"] == 0
+    assert snapshot["öffnungen"]["ft"] == 1
+    assert snapshot["öffnungen_roh"] == {
+        "DoorState": {"DriverFront": False, "TrunkFront": True},
+        "FdWindow": "WindowStatePartiallyOpen",
+        "FpWindow": None,
+        "RdWindow": None,
+        "RpWindow": None,
+    }
+    assert snapshot["feld_empfangen_am"]["FdWindow"] == 1900
+
+    leer = fahrtstatus_monitor.cache_snapshot({})
+    assert leer["öffnungen_roh"] == {}
+    assert not any(leer["rest_abgleich"].values())
 
 
 def test_geänderte_snapshots_schreibt_nur_neue_dateistände(tmp_path):
