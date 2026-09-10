@@ -5293,12 +5293,40 @@ def test_fleet_telemetrie_profile_erweitert_bestaetigtes_basisprofil(
     assert status["live_retry_active"] is False
     assert status["live_retry_confirmed_at"] == 2005.0
     assert status["live_recovery_full_pending"] is False
+    assert status["live_stable_since"] == 2005.0
 
 
-def test_fleet_telemetrie_profile_beendet_neuversand_bei_1s_takt(monkeypatch):
+def test_fleet_telemetrie_reparatur_verwirft_alte_stabilitätszeit():
+    status = _bestaetigter_profilstatus(
+        "live",
+        1900.0,
+        live_stable_since=1900.0,
+        live_unstable_since=1990.0,
+    )
+
+    assert app._fleet_telemetrie_profile_live_neuversand_starten(status, 2000.0)
+    assert status["live_stable_since"] == 0.0
+    assert status["live_unstable_since"] == 0.0
+    assert status["live_retry_started_at"] == 2000.0
+
+    assert not app._fleet_telemetrie_profile_live_neuversand_starten(
+        status, 2001.0,
+    )
+    assert status["live_retry_started_at"] == 2000.0
+
+
+@pytest.mark.parametrize("bereits_bestätigt", [False, True])
+def test_fleet_telemetrie_profile_beendet_neuversand_bei_1s_takt(
+    monkeypatch,
+    bereits_bestätigt,
+):
     angefordert = []
+    jetzt = [2002.0]
 
-    monkeypatch.setattr(app.time, "time", lambda: 2002.0)
+    monkeypatch.setattr(app.time, "time", lambda: jetzt[0])
+    monkeypatch.setattr(
+        app, "FLEET_TELEMETRIE_PROFILE_LIVE_EXTENDED_DELAY_SECONDS", 90.0,
+    )
     monkeypatch.setattr(
         app,
         "_fleet_telemetrie_profile_spaeter_anwenden",
@@ -5310,9 +5338,12 @@ def test_fleet_telemetrie_profile_beendet_neuversand_bei_1s_takt(monkeypatch):
         _bestaetigter_profilstatus(
             "live",
             2000.0,
-            config_synced=False,
-            config_sync_state="pending",
-            config_sync_details=[],
+            config_synced=bereits_bestätigt,
+            config_sync_state="synced" if bereits_bestätigt else "pending",
+            config_sync_details=(
+                _telemetrie_stream_details() if bereits_bestätigt else []
+            ),
+            live_stable_since=1800.0,
             live_retry_active=True,
             live_retry_started_at=1995.0,
             live_retry_last_moving_at=2001.0,
@@ -5351,6 +5382,19 @@ def test_fleet_telemetrie_profile_beendet_neuversand_bei_1s_takt(monkeypatch):
     assert daten["telemetry_live_retry_active"] is False
     assert daten["telemetry_live_retry_confirmed_at"] == 2002.0
     assert daten["telemetry_live_retry_attempts"] == 3
+    assert app._fleet_telemetry_profile_status["live_stable_since"] == 2002.0
+
+    # Live+ darf erst nach der Stabilisierung des reparierten Vollprofils folgen.
+    for sekunde in range(2003, 2093):
+        jetzt[0] = float(sekunde)
+        daten["fleet_telemetry_received_at"] = sekunde * 1000
+        for feld in ("VehicleSpeed", "PackCurrent", "Location"):
+            daten["fleet_telemetry_field_previous_received_at"][feld] = (
+                (sekunde - 1) * 1000
+            )
+            daten["fleet_telemetry_field_received_at"][feld] = sekunde * 1000
+        app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+        assert angefordert == (["live_extended"] if sekunde == 2092 else [])
 
 
 def test_fleet_telemetrie_profile_sendet_live_an_ampel_nicht_erneut(monkeypatch):

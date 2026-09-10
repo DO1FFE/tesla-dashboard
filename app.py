@@ -6628,6 +6628,8 @@ def _fleet_telemetrie_profile_live_neuversand_starten(status, jetzt):
     status["live_retry_started_at"] = jetzt
     status["live_retry_confirmed_at"] = 0.0
     status["live_retry_attempts"] = 0
+    status["live_stable_since"] = 0.0
+    status["live_unstable_since"] = 0.0
     status["live_recovery_bootstrap_active"] = False
     status["live_recovery_full_pending"] = False
     status["live_recovery_bootstrap_confirmed_at"] = 0.0
@@ -8208,6 +8210,11 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                 elif status.get("live_recovery_full_pending") is not True:
                     status["live_retry_active"] = False
                     status["live_retry_confirmed_at"] = jetzt
+                    # Live+ wartet auf den reparierten Vollprofil-Datenstrom,
+                    # nicht auf eine Stabilitätszeit vor der Unterbrechung.
+                    live_stable_since = jetzt
+                    status["live_stable_since"] = live_stable_since
+                    status["live_unstable_since"] = 0.0
                     status["live_reconnect_seen_at"] = 0.0
                     status["live_recovery_bootstrap_active"] = False
                     status["live_recovery_full_pending"] = False
