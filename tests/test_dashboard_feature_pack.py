@@ -1,7 +1,11 @@
 import base64
 import json
 import pathlib
+import shutil
+import subprocess
 import sys
+
+import pytest
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 import app as app_module
@@ -290,6 +294,46 @@ def test_livekarte_verwirft_unplausible_routeline_spruenge():
     assert "aktuellePositionPlausibel ? mapLat : null" in js
     assert "zielKoordinatePlausibel ? dLat : null" in js
     assert "istPlausibleNavigationsZielKoordinate(dLat, dLng)" in js
+
+
+def test_routendecoder_behaelt_vollständige_polyline():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Für den JavaScript-Routentest wird Node.js benötigt")
+    ergebnis = subprocess.run(
+        [node, "-e", r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const quelle = fs.readFileSync('static/js/main.js', 'utf8');
+const anfang = quelle.indexOf('function istGueltigeKartenKoordinate');
+const ende = quelle.indexOf("map.on('zoomend'", anfang);
+assert(anfang >= 0 && ende > anfang);
+vm.runInThisContext(quelle.slice(anfang, ende));
+
+// Synthetische Route mit 80 Punkten, die wie ein Protobuf beginnen kann.
+const polyline = '}kxg`B}{fjL' + 'AgE'.repeat(79);
+const protobuf = Buffer.concat([
+    Buffer.from([10, 248, 1]), Buffer.from(polyline, 'ascii'),
+]);
+assert(routelineAusProtobuf(polyline) !== null);
+for (const eingabe of [
+    polyline,
+    Buffer.from(polyline).toString('base64'),
+    protobuf.toString('latin1'),
+    protobuf.toString('base64'),
+]) {
+    const punkte = routeLineZuKartenPunkte(eingabe);
+    assert.equal(punkte.length, 80);
+    assert.deepEqual(punkte[0], [51.000015, 7.000015]);
+    assert.deepEqual(punkte[79], [51.000094, 7.007915]);
+}
+"""],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert ergebnis.returncode == 0, ergebnis.stdout + ergebnis.stderr
 
 
 def test_livekarte_loescht_navigation_bei_inaktivem_status():

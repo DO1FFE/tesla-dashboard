@@ -450,6 +450,9 @@ function routelineKandidaten(routeLine) {
     if (typeof atob === 'function') {
         try {
             var payload = atob(roh);
+            if (routelineTextIstPolyline(payload)) {
+                kandidaten.push(payload);
+            }
             var protobufPolyline = routelineAusProtobuf(payload);
             if (protobufPolyline) {
                 kandidaten.push(protobufPolyline);
@@ -457,7 +460,11 @@ function routelineKandidaten(routeLine) {
             kandidaten.push(payload);
         } catch (err) {}
     }
-    var roheProtobufPolyline = routelineAusProtobuf(roh);
+    // Polyline-Zeichen können zufällig wie Protobuf-Felder aussehen.
+    if (routelineTextIstPolyline(roh)) {
+        kandidaten.push(roh);
+    }
+    var roheProtobufPolyline = routelineAusProtobuf(routeLine);
     if (roheProtobufPolyline) {
         kandidaten.push(roheProtobufPolyline);
     }
