@@ -38,3 +38,16 @@ def test_monitoring_logs_werden_begrenzt_aufbewahrt():
     assert "rotate 14" in inhalt
     assert "compress" in inhalt
     assert "copytruncate" in inhalt
+
+
+def test_zertifikatswartung_ist_persistent_und_verwendet_root_kopie():
+    timer = (SYSTEMD / "tesla-dashboard-zertifikat.timer").read_text()
+    service = (SYSTEMD / "tesla-dashboard-zertifikat.service").read_text()
+    installer = (SYSTEMD / "install-zertifikatswartung.sh").read_text()
+
+    assert "OnCalendar=*-*-* 03,15:00:00 UTC" in timer
+    assert "Persistent=true" in timer
+    assert "WantedBy=timers.target" in timer
+    assert "/usr/local/libexec/tesla-dashboard/telemetrie_zertifikat_warten.py" in service
+    assert "install -o root -g root -m 0755" in installer
+    assert "enable --now tesla-dashboard-zertifikat.timer" in installer

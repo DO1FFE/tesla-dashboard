@@ -1,0 +1,13 @@
+[Unit]
+Description=Tesla-Telemetrie-Zertifikat zweimal täglich prüfen
+
+[Timer]
+OnCalendar=*-*-* 03,15:00:00 UTC
+RandomizedDelaySec=15min
+Persistent=true
+Unit=tesla-dashboard-zertifikat.service
+
+[Install]
+WantedBy=timers.target
+
+# © 2026 Erik Schauer, do1ffe@darc.de

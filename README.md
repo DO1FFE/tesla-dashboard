@@ -152,6 +152,26 @@ The same information is also stored as hierarchical JSON in `data/api-liste.json
 * `/api/announcement` – return the current announcement text as JSON
 * `/stream/<vehicle_id>` – Server-Sent Events endpoint used by the frontend
 
+## Telemetry Certificate Maintenance
+
+For the deployed `telemetry.do1ffe.de` endpoint, install the certificate timer:
+
+```bash
+bash systemd/install-zertifikatswartung.sh
+sudo systemctl start tesla-dashboard-zertifikat.service
+```
+
+This requires Docker, OpenSSL, Python 3, and the existing Certbot webroot setup in
+`nginx-proxy-app-1`. The timer checks at 03:00 and 15:00 UTC with up to 15 minutes
+of jitter. It renews only the telemetry certificate and compares the certificate
+on disk with the one served on local port 8443. Only a certificate mismatch or a
+certificate verification failure triggers a restart of
+`tesla_fleet-fleet-telemetry-1`; ordinary connection failures are reported instead.
+The script then verifies the new TLS certificate. It does not query or wake the
+vehicle. Check failures with `journalctl -u tesla-dashboard-zertifikat.service`.
+The installer places a root-owned script copy under `/usr/local/libexec`; rerun
+the installer after updating the maintenance script or units.
+
 ## Version
 
 The dashboard reports its own version in the footer. The version string is derived
