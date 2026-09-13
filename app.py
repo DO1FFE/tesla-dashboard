@@ -1963,6 +1963,8 @@ _fleet_telemetry_position_letzte_abfrage = {}
 _fleet_telemetry_parkabgleich_letzte_abfrage = {}
 _fleet_telemetry_ladeabgleich_letzte_abfrage = {}
 _fleet_telemetry_stream_wiederherstellung_letzte_abfrage = {}
+_fleet_telemetry_fahrtverbindung_letzte_prüfung = {}
+FLEET_TELEMETRIE_FAHRTVERBINDUNG_COOLDOWN_SECONDS = 300
 _fleet_telemetry_vehicle_cache = {"mtime": None, "vehicles": []}
 FLEET_TELEMETRY_MQTT_QUEUE_MAX = max(
     1000, int(os.getenv("TESLA_FLEET_TELEMETRY_MQTT_QUEUE_MAX", "20000"))
@@ -10666,6 +10668,82 @@ def _fleet_telemetrie_position_snapshot(vin):
     return max(kandidaten, key=lambda eintrag: eintrag[0])[1]
 
 
+def _fleet_telemetrie_fahrtverbindung_nach_timeout(vin, fehler):
+    """Repariere einen schlafenden Tesla-Steuerkanal nur bei frischer Fahrt."""
+
+    if (
+        not vin
+        or not isinstance(fehler, requests.exceptions.HTTPError)
+        or fehler.response is None
+        or fehler.response.status_code != 408
+    ):
+        return False
+
+    def fahrt_aktuell():
+        data = _fleet_telemetrie_position_snapshot(vin)
+        status = _fleet_telemetrie_profile_status_kopie()
+        if (
+            not isinstance(data, dict)
+            or status.get("target") != "live"
+            or status.get("live_retry_active") is not True
+            or status.get("config_synced") is True
+        ):
+            return False
+        drive = data.get("drive_state") or {}
+        empfangen = data.get("fleet_telemetry_field_received_at") or {}
+        jetzt = time.time()
+        speed_zeit = _fleet_telemetrie_timestamp_sekunden(
+            empfangen.get("VehicleSpeed"), jetzt,
+        )
+        return (
+            _normalize_shift_state(drive.get("shift_state")) in {"D", "R"}
+            and speed_zeit is not None
+            and 0 <= jetzt - speed_zeit <= 15
+            and _fleet_telemetrie_profile_fahrzeug_bewegt_sich(data, jetzt)
+        )
+
+    if not fahrt_aktuell():
+        return False
+    jetzt = time.monotonic()
+    with _fleet_telemetry_position_lock:
+        letzte_prüfung = _fleet_telemetry_fahrtverbindung_letzte_prüfung.get(vin)
+        if (
+            letzte_prüfung is not None
+            and jetzt - letzte_prüfung
+            < FLEET_TELEMETRIE_FAHRTVERBINDUNG_COOLDOWN_SECONDS
+        ):
+            return False
+        _fleet_telemetry_fahrtverbindung_letzte_prüfung[vin] = jetzt
+    try:
+        if _fleet_telemetrie_fahrzeugzustand_abrufen(vin) != "asleep":
+            return False
+        token = _fleet_telemetrie_oauth_token()
+        # Während der Statusabfrage kann die Fahrt bereits beendet worden sein.
+        if not token or not fahrt_aktuell():
+            return False
+        response = requests.post(
+            TESLA_FLEET_VEHICLE_COMMAND_URL.rstrip("/")
+            + f"/api/1/vehicles/{vin}/wake_up",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT,
+            verify=False,
+        )
+        response.raise_for_status()
+        logging.warning(
+            "Fleet-Steuerverbindung meldet asleep trotz frischer Fahrt; "
+            "wake_up einmalig angefordert (%s). "
+            "Live-Bestätigung erfolgt weiter über den Datenstrom.",
+            vin,
+        )
+        return True
+    except Exception as exc:
+        logging.warning(
+            "Fleet-Steuerverbindung konnte während der Fahrt nicht "
+            "wiederhergestellt werden (%s): %s", vin, exc,
+        )
+        return False
+
+
 def _fleet_telemetrie_position_worker_loop():
     """Stoße eine festhängende Fleet-Position während aktiver Fahrt wieder an."""
 
@@ -10755,6 +10833,7 @@ def _fleet_telemetrie_position_worker_loop():
                     vin,
                     exc,
                 )
+                _fleet_telemetrie_fahrtverbindung_nach_timeout(vin, exc)
         vergangen = time.monotonic() - gestartet
         pause = max(
             0.1,

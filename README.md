@@ -83,7 +83,13 @@ state. When a parked vehicle is only passively reported as `online`, the
 backend keeps using cached dashboard data after one transition check and only
 continues full vehicle polling while cached activity such as charging,
 movement, an unlocked car, or open doors/windows is present. The dashboard
-never wakes the vehicle automatically.
+does not wake a parked or stationary vehicle automatically. A narrowly scoped
+Fleet Telemetry recovery can call `wake_up` when a location request returns
+HTTP 408, Live recovery is pending, fresh speed telemetry confirms movement in
+D or R, and the separate Tesla vehicle endpoint incorrectly reports `asleep`.
+Movement is checked again after the status request. This recovery is limited to
+one attempt per vehicle every five minutes; it does not mark Live as confirmed.
+Only the subsequent telemetry stream can confirm the requested update cadence.
 
 ## Tesla browser compatibility (dropdowns)
 
