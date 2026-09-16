@@ -3919,10 +3919,10 @@ function updateSoftwareUpdateSymbol(info) {
     var statusText = softwareStatusText(info && info.status);
     var version = info && typeof info.version === 'string' ? parseVersion(info.version) : '';
     var titel = aktiv ? (statusText || 'Software-Update verfügbar') : 'Kein Software-Update';
-    if (version) {
+    if (aktiv && version) {
         titel += ': Version ' + version;
     }
-    if (prozent != null) {
+    if (aktiv && prozent != null) {
         titel += ' (' + prozent + '%)';
     }
     $symbol

@@ -6241,7 +6241,7 @@ def _fleet_telemetrie_setze_software_update(vehicle_state):
 
 
 def _fleet_telemetrie_software_status_aus_cache(data):
-    """Gleiche alte Downloadtexte mit zusammengehörigen Fortschrittswerten ab."""
+    """Leite Update-Phase und Rücksetzung aus zusammengehörigen Werten ab."""
 
     vehicle = data.get("vehicle_state")
     raw = data.get("fleet_telemetry_raw")
@@ -6251,14 +6251,27 @@ def _fleet_telemetrie_software_status_aus_cache(data):
     software = vehicle.get("software_update")
     if not isinstance(software, dict):
         return
-    if software.get("status") not in {"downloading", "downloaded"}:
+    status = software.get("status")
+    if status not in {
+        None, "", "none", "downloading", "downloaded", "installing", "install",
+    }:
         return
-    version = software.get("version")
-    if not version or raw.get("SoftwareUpdateVersion") != version:
+    if "SoftwareUpdateVersion" not in raw:
+        return
+    version = _fleet_telemetrie_wert(software.get("version"))
+    if _fleet_telemetrie_wert(raw.get("SoftwareUpdateVersion")) != version:
         return
     download = _as_float(software.get("download_perc"))
     installation = _as_float(software.get("install_perc"))
-    if download != 100 or installation is None or not 0 <= installation <= 100:
+    if installation is None or not 0 <= installation <= 100:
+        return
+    # Nach dem Update bleiben trotz leerer Zielversion die Rücksetzwerte 0 und 1.
+    zurückgesetzt = version is None and download == 0 and installation <= 1
+    download_abgeschlossen = (
+        bool(version) and download == 100
+        and status in {"downloading", "downloaded"}
+    )
+    if not zurückgesetzt and not download_abgeschlossen:
         return
     if (
         _as_float(raw.get("SoftwareUpdateDownloadPercentComplete")) != download
@@ -6284,12 +6297,15 @@ def _fleet_telemetrie_software_status_aus_cache(data):
             "fleet_telemetry_park_reconciled_at",
         )
     )
-    if min(zeitpunkte[1:]) < letzter_rest:
+    if min(zeitpunkte) < letzter_rest:
         return
     # Zusammen gesendete Felder werden innerhalb eines MQTT-Batches versetzt gelesen.
     if min(zeitpunkte[1:]) < zeitpunkte[0] - 1000:
         return
-    software["status"] = "installing" if installation > 0 else "downloaded"
+    if zurückgesetzt:
+        software["status"] = "none"
+    else:
+        software["status"] = "installing" if installation > 0 else "downloaded"
 
 
 def _fleet_telemetrie_rohdaten_anreichern(data):
@@ -9606,14 +9622,20 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         if field == "SoftwareUpdateDownloadPercentComplete":
             software["download_perc"] = value
             fortschritt = _as_float(value)
-            if fortschritt is not None and 0 <= fortschritt < 100:
+            if fortschritt is not None and 0 < fortschritt < 100:
                 software["status"] = "downloading"
             elif fortschritt == 100 and software.get("status") == "downloading":
                 software["status"] = "downloaded"
         elif field == "SoftwareUpdateInstallationPercentComplete":
             software["install_perc"] = value
             fortschritt = _as_float(value)
-            if fortschritt is not None and 0 < fortschritt <= 100:
+            if (
+                fortschritt is not None and 0 < fortschritt <= 100
+                and (
+                    fortschritt > 1
+                    or _as_float(software.get("download_perc")) == 100
+                )
+            ):
                 software["status"] = "installing"
         elif field == "SoftwareUpdateExpectedDurationMinutes":
             try:

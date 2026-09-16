@@ -1,4 +1,5 @@
 import base64
+import itertools
 import json
 import pathlib
 import sys
@@ -4288,12 +4289,24 @@ def test_software_cache_vermischt_keine_veralteten_update_daten(
     assert info["status"] == "downloading"
 
 
+@pytest.mark.parametrize("zurückgesetzt", [False, True])
 def test_software_cache_phase_erreicht_api_und_sse_ohne_fahrzeugabfrage(
-    monkeypatch, software_update_cache,
+    monkeypatch, software_update_cache, zurückgesetzt,
 ):
     daten = software_update_cache
+    erwartet = "none" if zurückgesetzt else "installing"
+    installation = 1 if zurückgesetzt else 10
+    if zurückgesetzt:
+        daten["vehicle_state"]["software_update"].update({
+            "version": "", "download_perc": 0, "install_perc": 1,
+        })
+        daten["fleet_telemetry_raw"].update({
+            "SoftwareUpdateVersion": None,
+            "SoftwareUpdateDownloadPercentComplete": 0,
+            "SoftwareUpdateInstallationPercentComplete": 1,
+        })
     payload = app._subscriber_stream_payload(daten)
-    assert payload["vehicle_state"]["software_update"]["status"] == "installing"
+    assert payload["vehicle_state"]["software_update"]["status"] == erwartet
     assert "fleet_telemetry_raw" not in payload
     assert daten["vehicle_state"]["software_update"]["status"] == "downloading"
 
@@ -4312,8 +4325,83 @@ def test_software_cache_phase_erreicht_api_und_sse_ohne_fahrzeugabfrage(
     antwort = app.app.test_client().get("/api/data")
     assert antwort.status_code == 200
     info = antwort.get_json()["vehicle_state"]["software_update"]
+    assert info["status"] == erwartet
+    assert info["install_perc"] == installation
+
+
+@pytest.mark.parametrize("version", [None, "", " ", {"invalid": True}])
+@pytest.mark.parametrize("installation", [0, 1])
+def test_software_rücksetzwerte_sind_keine_neue_installation(
+    software_update_cache, version, installation,
+):
+    daten = software_update_cache
+    info = daten["vehicle_state"]["software_update"]
+    info.update({"version": "", "download_perc": 0, "install_perc": installation})
+    daten["fleet_telemetry_raw"].update({
+        "SoftwareUpdateVersion": version,
+        "SoftwareUpdateDownloadPercentComplete": 0,
+        "SoftwareUpdateInstallationPercentComplete": installation,
+    })
+    app._fleet_telemetrie_rohdaten_anreichern(daten)
+    assert info["status"] == "none"
+    assert info["download_perc"] == 0
+    assert info["install_perc"] == installation
+
+
+@pytest.mark.parametrize("reihenfolge", list(itertools.permutations([
+    "SoftwareUpdateVersion", "SoftwareUpdateDownloadPercentComplete",
+    "SoftwareUpdateInstallationPercentComplete",
+])))
+def test_software_installation_neustart_rücksetzung_und_nächstes_update(
+    monkeypatch, software_update_cache, reihenfolge,
+):
+    gesendet = []
+    monkeypatch.setattr(app, "latest_data", {"veh-1": software_update_cache})
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda _vin: ["veh-1"])
+    monkeypatch.setattr(app, "_load_cached", lambda _id: {})
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: False)
+    monkeypatch.setattr(
+        app, "_fleet_telemetrie_cache_spaeter_speichern", lambda *_args: None,
+    )
+    monkeypatch.setattr(app, "_aprs_spaeter_senden", lambda *_args: None)
+    monkeypatch.setattr(
+        app, "_subscriber_daten_senden",
+        lambda _id, data: gesendet.append(app._subscriber_stream_payload(data)),
+    )
+    zeit = 2_000_000_001_000
+
+    def empfangen(feld, wert):
+        nonlocal zeit
+        zeit += 100
+        assert app._fleet_telemetrie_cache_aktualisieren("TESTVIN", feld, wert, zeit)
+        return gesendet[-1]["vehicle_state"]["software_update"]
+
+    for fortschritt in (60, 80, 100):
+        info = empfangen("SoftwareUpdateInstallationPercentComplete", fortschritt)
+        assert info["status"] == "installing"
+    empfangen("Version", "2026.32.3")
+    rücksetzwerte = {
+        "SoftwareUpdateVersion": " ",
+        "SoftwareUpdateDownloadPercentComplete": 0,
+        "SoftwareUpdateInstallationPercentComplete": 1,
+    }
+    for feld in reihenfolge:
+        info = empfangen(feld, rücksetzwerte[feld])
+    assert info["status"] == "none"
+    assert info["version"] == ""
+    for feld in reihenfolge:
+        assert empfangen(feld, rücksetzwerte[feld])["status"] == "none"
+    assert app.latest_data["veh-1"]["vehicle_state"]["car_version"] == "2026.32.3"
+
+    zeit += 10_000
+    info = empfangen("SoftwareUpdateVersion", "2026.36.1")
+    assert info["version"] == "2026.36.1"
+    info = empfangen("SoftwareUpdateDownloadPercentComplete", 20)
+    assert info["status"] == "downloading"
+    empfangen("SoftwareUpdateDownloadPercentComplete", 100)
+    info = empfangen("SoftwareUpdateInstallationPercentComplete", 5)
     assert info["status"] == "installing"
-    assert info["install_perc"] == 10
+    assert info["install_perc"] == 5
 
 
 def test_fleet_telemetrie_profile_config_filtert_parkwerte():

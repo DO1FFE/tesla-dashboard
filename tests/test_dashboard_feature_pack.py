@@ -154,10 +154,11 @@ global.softwareProzent = wert => wert == null ? null : Math.round(wert);
 global.softwareStatusText = () => '';
 global.parseVersion = wert => wert;
 let text;
+const attribute = {};
 const element = {
     length: 1,
     toggleClass() { return this; },
-    attr() { return this; },
+    attr(name, wert) { attribute[name] = wert; return this; },
     text(wert) { text = wert; return this; },
 };
 global.$ = () => element;
@@ -192,6 +193,15 @@ let ausgeblendet = false;
 global.softwareUpdateAusblenden = () => { ausgeblendet = true; };
 updateSoftwareUpdate(update);
 assert.equal(ausgeblendet, true);
+const zurückgesetzt = {version: '', status: 'none', download_perc: 0, install_perc: 1};
+assert.equal(softwareUpdateAktiv(zurückgesetzt), false);
+ausgeblendet = false;
+updateSoftwareUpdate(zurückgesetzt);
+assert.equal(ausgeblendet, true);
+updateSoftwareUpdateSymbol(zurückgesetzt);
+assert.equal(text, '');
+assert.equal(attribute.title, 'Kein Software-Update');
+assert.equal(softwareUpdateAktiv({...zurückgesetzt, version: '2026.36.1'}), true);
 """],
         capture_output=True, text=True, timeout=10,
     )
