@@ -4117,6 +4117,69 @@ def test_fleet_telemetrie_profile_ignoriert_verbundenen_browser(monkeypatch):
     }) == "parked"
 
 
+@pytest.mark.parametrize("profil,wiederherstellung", [
+    ("parked", False), ("charging", False), ("live", False),
+    ("live_extended", False), ("live", True),
+])
+@pytest.mark.parametrize("mit_bestandswerten", [False, True])
+def test_software_update_bleibt_in_allen_profilen_im_sekundentakt(
+    profil, wiederherstellung, mit_bestandswerten,
+):
+    felder = {
+        "SoftwareUpdateDownloadPercentComplete",
+        "SoftwareUpdateInstallationPercentComplete",
+        "SoftwareUpdateExpectedDurationMinutes",
+        "SoftwareUpdateScheduledStartTime",
+        "SoftwareUpdateVersion",
+        "Version",
+    }
+    basis = {"vins": ["TESTVIN"], "config": {"fields": {
+        feld: {"interval_seconds": 300, "minimum_delta": 10}
+        for feld in felder if mit_bestandswerten
+    }}}
+    vorher = json.dumps(basis, sort_keys=True)
+    config = app._fleet_telemetrie_profile_config_erstellen(
+        basis, profil, wiederherstellung=wiederherstellung,
+    )
+    for feld in felder:
+        assert config["config"]["fields"][feld] == {"interval_seconds": 1}
+    assert json.dumps(basis, sort_keys=True) == vorher
+
+
+@pytest.mark.parametrize("feld,ziel", [
+    ("SoftwareUpdateDownloadPercentComplete", "download_perc"),
+    ("SoftwareUpdateInstallationPercentComplete", "install_perc"),
+])
+def test_software_fortschritt_erreicht_cache_und_stream_sofort(
+    monkeypatch, feld, ziel,
+):
+    gesendet = []
+    monkeypatch.setattr(app, "latest_data", {})
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda _vin: ["veh-1"])
+    monkeypatch.setattr(app, "_load_cached", lambda _id: {})
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: False)
+    monkeypatch.setattr(
+        app, "_fleet_telemetrie_cache_spaeter_speichern", lambda *_args: None,
+    )
+    monkeypatch.setattr(app, "_aprs_spaeter_senden", lambda *_args: None)
+    monkeypatch.setattr(
+        app, "_subscriber_daten_senden",
+        lambda _id, data: gesendet.append(
+            data["vehicle_state"]["software_update"][ziel]
+        ),
+    )
+    for index, fortschritt in enumerate([0, 35.1, 35.2, 100]):
+        zeitpunkt = 2_000_000_000_000 + index * 1000
+        assert app._fleet_telemetrie_cache_aktualisieren(
+            "TESTVIN", feld, fortschritt, zeitpunkt,
+        )
+        daten = app.latest_data["veh-1"]
+        assert daten["vehicle_state"]["software_update"][ziel] == fortschritt
+        assert daten["vehicle_state"]["timestamp"] == zeitpunkt
+        assert gesendet[-1] == fortschritt
+    assert gesendet == [0, 35.1, 35.2, 100]
+
+
 def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     basis = {
         "vins": ["TESTVIN"],
@@ -4441,14 +4504,15 @@ def test_fleet_telemetrie_live_reparatur_sendet_basis_dann_vollprofil(
     app._fleet_telemetrie_profile_anwenden("live")
 
     assert gesendete_felder == [
-        {"DCDCEnable", "Location", "Odometer", "VehicleSpeed"},
+        {"DCDCEnable", "Location", "Odometer", "VehicleSpeed"}
+        | app.FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER,
         {
             "DCDCEnable",
             "InsideTemp",
             "Location",
             "Odometer",
             "VehicleSpeed",
-        },
+        } | app.FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER,
     ]
     status = app._fleet_telemetry_profile_status
     assert status["live_retry_attempts"] == 2

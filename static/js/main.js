@@ -3904,7 +3904,15 @@ function updateSoftwareUpdateSymbol(info) {
     var aktiv = softwareUpdateAktiv(info);
     var downloadProzent = softwareProzent(info && info.download_perc);
     var installationProzent = softwareProzent(info && info.install_perc);
-    var prozent = installationProzent != null ? installationProzent : downloadProzent;
+    var status = String((info && info.status) || '').trim().toLowerCase();
+    var installationAktiv = status === 'installing' || status === 'install';
+    var prozent = downloadProzent;
+    if (installationAktiv || (
+        (downloadProzent == null || downloadProzent >= 100) &&
+        installationProzent != null && installationProzent > 0
+    )) {
+        prozent = installationProzent;
+    }
     var statusText = softwareStatusText(info && info.status);
     var version = info && typeof info.version === 'string' ? parseVersion(info.version) : '';
     var titel = aktiv ? (statusText || 'Software-Update verfügbar') : 'Kein Software-Update';

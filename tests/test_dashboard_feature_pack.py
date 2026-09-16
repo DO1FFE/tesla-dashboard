@@ -136,6 +136,50 @@ def test_fahrzeugsymbole_sind_in_ui_eingebunden():
     assert "updateVehicleSymbols(vehicle, data.gui_settings || {})" in js
 
 
+def test_software_symbol_zeigt_den_aktuellen_fortschritt():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Für den JavaScript-Anzeigetest wird Node.js benötigt")
+    ergebnis = subprocess.run(
+        [node, "-e", r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const quelle = fs.readFileSync('static/js/main.js', 'utf8');
+const anfang = quelle.indexOf('function updateSoftwareUpdateSymbol(');
+const ende = quelle.indexOf('function updateVehicleSymbols(', anfang);
+vm.runInThisContext(quelle.slice(anfang, ende));
+global.softwareUpdateAktiv = () => true;
+global.softwareProzent = wert => wert == null ? null : Math.round(wert);
+global.softwareStatusText = () => '';
+global.parseVersion = wert => wert;
+let text;
+const element = {
+    length: 1,
+    toggleClass() { return this; },
+    attr() { return this; },
+    text(wert) { text = wert; return this; },
+};
+global.$ = () => element;
+for (const [status, download, installation, erwartet] of [
+    ['downloading', 0, 0, '0%'],
+    ['downloading', 35, 0, '35%'],
+    ['downloading', 36, 1, '36%'],
+    ['available', 100, 0, '100%'],
+    ['installing', 100, 42, '42%'],
+    ['installing', 99, 43, '43%'],
+    ['', 100, 44, '44%'],
+    ['', null, null, ''],
+]) {
+    updateSoftwareUpdateSymbol({status, download_perc: download, install_perc: installation});
+    assert.equal(text, erwartet);
+}
+"""],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert ergebnis.returncode == 0, ergebnis.stdout + ergebnis.stderr
+
+
 def test_footer_zeigt_telemetrie_profile():
     html = pathlib.Path("templates/index.html").read_text(encoding="utf-8")
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
