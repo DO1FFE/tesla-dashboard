@@ -174,6 +174,24 @@ for (const [status, download, installation, erwartet] of [
     updateSoftwareUpdateSymbol({status, download_perc: download, install_perc: installation});
     assert.equal(text, erwartet);
 }
+for (const name of ['parseVersion', 'isNewerVersion', 'softwareStatusAktiv', 'softwareUpdateAktiv']) {
+    const start = quelle.indexOf('function ' + name + '(');
+    const stop = quelle.indexOf('\nfunction ', start + 1);
+    vm.runInThisContext(quelle.slice(start, stop));
+}
+global.installedVersion = '2026.26.6.1';
+const update = {version: '2026.32.3', status: 'installing', install_perc: 42};
+assert.equal(softwareUpdateAktiv(update), true);
+global.installedVersion = '2026.32.3';
+assert.equal(softwareUpdateAktiv(update), false);
+const beginn = quelle.indexOf('function updateSoftwareUpdate(info)');
+const endeAnzeige = quelle.indexOf('function updateOfflineInfo(', beginn);
+vm.runInThisContext(quelle.slice(beginn, endeAnzeige));
+global.configEnabled = () => true;
+let ausgeblendet = false;
+global.softwareUpdateAusblenden = () => { ausgeblendet = true; };
+updateSoftwareUpdate(update);
+assert.equal(ausgeblendet, true);
 """],
         capture_output=True, text=True, timeout=10,
     )

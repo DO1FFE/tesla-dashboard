@@ -3880,6 +3880,9 @@ function softwareUpdateAktiv(info) {
     }
     var version = info && typeof info.version === 'string' ? info.version.trim() : '';
     var available = version ? parseVersion(version) : '';
+    if (available && installedVersion && !isNewerVersion(installedVersion, available)) {
+        return false;
+    }
     var status = info && info.status ? String(info.status).trim() : '';
     var downloadProzent = softwareProzent(info && info.download_perc);
     var installationProzent = softwareProzent(info && info.install_perc);
@@ -3939,7 +3942,7 @@ function updateVehicleSymbols(vehicle, gui) {
 
 function updateSoftwareUpdate(info) {
     var $msg = $('#software-update');
-    if (!configEnabled('software-update')) {
+    if (!configEnabled('software-update') || !softwareUpdateAktiv(info)) {
         softwareUpdateAusblenden($msg);
         return;
     }

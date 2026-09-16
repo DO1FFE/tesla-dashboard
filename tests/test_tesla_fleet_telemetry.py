@@ -4178,6 +4178,23 @@ def test_software_fortschritt_erreicht_cache_und_stream_sofort(
         assert daten["vehicle_state"]["timestamp"] == zeitpunkt
         assert gesendet[-1] == fortschritt
     assert gesendet == [0, 35.1, 35.2, 100]
+    assert daten["vehicle_state"]["software_update"]["status"] == (
+        "downloaded" if ziel == "download_perc" else "installing"
+    )
+
+
+def test_software_installation_ersetzt_alten_downloadstatus():
+    daten = {"vehicle_state": {"software_update": {
+        "version": "2026.32.3", "status": "downloading", "download_perc": 100,
+    }}}
+    app._fleet_telemetrie_setze_feld(
+        daten, "SoftwareUpdateInstallationPercentComplete", 10, 2000,
+    )
+    assert daten["vehicle_state"]["software_update"]["status"] == "installing"
+    app._fleet_telemetrie_setze_feld(
+        daten, "SoftwareUpdateDownloadPercentComplete", 100, 2100,
+    )
+    assert daten["vehicle_state"]["software_update"]["status"] == "installing"
 
 
 def test_fleet_telemetrie_profile_config_filtert_parkwerte():

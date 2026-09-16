@@ -9552,8 +9552,16 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         software = _fleet_telemetrie_setze_software_update(vehicle_state)
         if field == "SoftwareUpdateDownloadPercentComplete":
             software["download_perc"] = value
+            fortschritt = _as_float(value)
+            if fortschritt is not None and 0 <= fortschritt < 100:
+                software["status"] = "downloading"
+            elif fortschritt == 100 and software.get("status") == "downloading":
+                software["status"] = "downloaded"
         elif field == "SoftwareUpdateInstallationPercentComplete":
             software["install_perc"] = value
+            fortschritt = _as_float(value)
+            if fortschritt is not None and 0 < fortschritt <= 100:
+                software["status"] = "installing"
         elif field == "SoftwareUpdateExpectedDurationMinutes":
             try:
                 software["expected_duration_sec"] = int(float(value) * 60)
