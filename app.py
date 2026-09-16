@@ -6240,6 +6240,58 @@ def _fleet_telemetrie_setze_software_update(vehicle_state):
     return info
 
 
+def _fleet_telemetrie_software_status_aus_cache(data):
+    """Gleiche alte Downloadtexte mit zusammengehörigen Fortschrittswerten ab."""
+
+    vehicle = data.get("vehicle_state")
+    raw = data.get("fleet_telemetry_raw")
+    empfangen = data.get("fleet_telemetry_field_received_at")
+    if not all(isinstance(wert, dict) for wert in (vehicle, raw, empfangen)):
+        return
+    software = vehicle.get("software_update")
+    if not isinstance(software, dict):
+        return
+    if software.get("status") not in {"downloading", "downloaded"}:
+        return
+    version = software.get("version")
+    if not version or raw.get("SoftwareUpdateVersion") != version:
+        return
+    download = _as_float(software.get("download_perc"))
+    installation = _as_float(software.get("install_perc"))
+    if download != 100 or installation is None or not 0 <= installation <= 100:
+        return
+    if (
+        _as_float(raw.get("SoftwareUpdateDownloadPercentComplete")) != download
+        or _as_float(raw.get("SoftwareUpdateInstallationPercentComplete"))
+        != installation
+    ):
+        return
+    zeitpunkte = [
+        _fleet_telemetrie_zeitstempel_ms(empfangen.get(feld))
+        for feld in (
+            "SoftwareUpdateVersion",
+            "SoftwareUpdateDownloadPercentComplete",
+            "SoftwareUpdateInstallationPercentComplete",
+        )
+    ]
+    if any(zeit is None or zeit <= 0 for zeit in zeitpunkte):
+        return
+    # Ein neuerer REST-Stand darf nicht aus älterer Telemetrie umgedeutet werden.
+    letzter_rest = max(
+        _fleet_telemetrie_zeitstempel_ms(data.get(feld)) or 0
+        for feld in (
+            "fleet_vehicle_data_received_at",
+            "fleet_telemetry_park_reconciled_at",
+        )
+    )
+    if min(zeitpunkte[1:]) < letzter_rest:
+        return
+    # Zusammen gesendete Felder werden innerhalb eines MQTT-Batches versetzt gelesen.
+    if min(zeitpunkte[1:]) < zeitpunkte[0] - 1000:
+        return
+    software["status"] = "installing" if installation > 0 else "downloaded"
+
+
 def _fleet_telemetrie_rohdaten_anreichern(data):
     """Ergänze Dashboard-Felder aus bereits empfangenen Fleet-Rohdaten."""
 
@@ -6248,6 +6300,7 @@ def _fleet_telemetrie_rohdaten_anreichern(data):
     raw = data.get("fleet_telemetry_raw")
     if not isinstance(raw, dict):
         return
+    _fleet_telemetrie_software_status_aus_cache(data)
     vehicle_state = data.setdefault("vehicle_state", {})
     charge = data.setdefault("charge_state", {})
     climate = data.setdefault("climate_state", {})

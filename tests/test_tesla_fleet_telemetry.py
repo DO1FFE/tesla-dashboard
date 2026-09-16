@@ -4197,6 +4197,125 @@ def test_software_installation_ersetzt_alten_downloadstatus():
     assert daten["vehicle_state"]["software_update"]["status"] == "installing"
 
 
+@pytest.fixture
+def software_update_cache():
+    return {
+        "state": "online",
+        "timestamp": 2_000_000_000_100,
+        "fleet_vehicle_data_received_at": 1_999_999_999_000,
+        "fleet_telemetry_field_received_at": {
+            "SoftwareUpdateVersion": 2_000_000_000_002,
+            "SoftwareUpdateDownloadPercentComplete": 2_000_000_000_000,
+            "SoftwareUpdateInstallationPercentComplete": 2_000_000_000_000,
+        },
+        "fleet_telemetry_raw": {
+            "SoftwareUpdateVersion": "2026.32.3",
+            "SoftwareUpdateDownloadPercentComplete": 100,
+            "SoftwareUpdateInstallationPercentComplete": 10,
+        },
+        "vehicle_state": {"software_update": {
+            "status": "downloading", "version": "2026.32.3",
+            "download_perc": 100, "install_perc": 10,
+        }},
+    }
+
+
+@pytest.mark.parametrize("fortschritt,status", [
+    (0, "downloaded"), (1, "installing"), (10, "installing"), (100, "installing"),
+])
+def test_software_cache_korrigiert_phase_ohne_neue_messwerte(
+    software_update_cache, fortschritt, status,
+):
+    daten = software_update_cache
+    info = daten["vehicle_state"]["software_update"]
+    info["install_perc"] = fortschritt
+    feld = "SoftwareUpdateInstallationPercentComplete"
+    daten["fleet_telemetry_raw"][feld] = fortschritt
+    zeitpunkte = dict(daten["fleet_telemetry_field_received_at"])
+    assert app._fleet_telemetrie_wert_unveraendert(daten, feld, fortschritt)
+    for _ in range(2):
+        app._fleet_telemetrie_rohdaten_anreichern(daten)
+        assert info["status"] == status
+        assert info["install_perc"] == fortschritt
+        assert daten["timestamp"] == 2_000_000_000_100
+        assert daten["fleet_telemetry_field_received_at"] == zeitpunkte
+
+
+@pytest.mark.parametrize("status", [
+    "failed", "error", "scheduled", "pending", "available", "ready",
+])
+def test_software_cache_erhält_explizite_statusmeldungen(
+    software_update_cache, status,
+):
+    info = software_update_cache["vehicle_state"]["software_update"]
+    info["status"] = status
+    app._fleet_telemetrie_rohdaten_anreichern(software_update_cache)
+    assert info["status"] == status
+
+
+@pytest.mark.parametrize("grund", [
+    "neuer_rest", "neuer_parkabgleich", "andere_version", "alte_fortschritte",
+    "anderer_rohwert", "fehlende_zeit", "fehlende_version", "ungültig",
+    "unvollständiger_download",
+])
+def test_software_cache_vermischt_keine_veralteten_update_daten(
+    software_update_cache, grund,
+):
+    daten = software_update_cache
+    info = daten["vehicle_state"]["software_update"]
+    raw = daten["fleet_telemetry_raw"]
+    zeiten = daten["fleet_telemetry_field_received_at"]
+    if grund == "neuer_rest":
+        daten["fleet_vehicle_data_received_at"] = 2_000_000_000_001
+    elif grund == "neuer_parkabgleich":
+        daten["fleet_telemetry_park_reconciled_at"] = 2_000_000_000_001
+    elif grund == "andere_version":
+        info["version"] = "2026.36.1"
+    elif grund == "alte_fortschritte":
+        zeiten["SoftwareUpdateVersion"] += 10_000
+    elif grund == "anderer_rohwert":
+        raw["SoftwareUpdateInstallationPercentComplete"] = 0
+    elif grund == "fehlende_zeit":
+        zeiten.pop("SoftwareUpdateInstallationPercentComplete")
+    elif grund == "fehlende_version":
+        info.pop("version")
+    elif grund == "ungültig":
+        info["install_perc"] = None
+    else:
+        info["download_perc"] = 99
+        raw["SoftwareUpdateDownloadPercentComplete"] = 99
+    app._fleet_telemetrie_rohdaten_anreichern(daten)
+    assert info["status"] == "downloading"
+
+
+def test_software_cache_phase_erreicht_api_und_sse_ohne_fahrzeugabfrage(
+    monkeypatch, software_update_cache,
+):
+    daten = software_update_cache
+    payload = app._subscriber_stream_payload(daten)
+    assert payload["vehicle_state"]["software_update"]["status"] == "installing"
+    assert "fleet_telemetry_raw" not in payload
+    assert daten["vehicle_state"]["software_update"]["status"] == "downloading"
+
+    monkeypatch.setattr(app, "latest_data", {"default": daten})
+    monkeypatch.setattr(app, "_start_thread", lambda _id: None)
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_fuer_dashboard", lambda *_: None)
+    monkeypatch.setattr(
+        app, "_fleet_telemetrie_fahrtpfad_bereinigungs_tick", lambda **_: None,
+    )
+
+    def keine_abfrage(*_args, **_kwargs):
+        raise AssertionError("Die Cache-Korrektur darf das Fahrzeug nicht abfragen")
+
+    monkeypatch.setattr(app.requests, "get", keine_abfrage)
+    monkeypatch.setattr(app.requests, "post", keine_abfrage)
+    antwort = app.app.test_client().get("/api/data")
+    assert antwort.status_code == 200
+    info = antwort.get_json()["vehicle_state"]["software_update"]
+    assert info["status"] == "installing"
+    assert info["install_perc"] == 10
+
+
 def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     basis = {
         "vins": ["TESTVIN"],
