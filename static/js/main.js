@@ -1208,7 +1208,8 @@ function handleData(data) {
         data.telemetry_config_sync_profile
     );
     var vehicle = data.vehicle_state || {};
-    updateOfflineInfo(data.state, vehicle.service_mode, vehicle.service_mode_plus);
+    updateOfflineInfo(data.state, vehicle.service_mode, vehicle.service_mode_plus,
+        data.fleet_api_blocked_reason);
     updateSoftwareUpdate(vehicle.software_update);
     var drive = data.drive_state || {};
     var charge = data.charge_state || {};
@@ -4001,11 +4002,17 @@ function updateSoftwareUpdate(info) {
     ).prop('hidden', false).show();
 }
 
-function updateOfflineInfo(state, serviceMode, serviceModePlus) {
+function updateOfflineInfo(state, serviceMode, serviceModePlus, apiSperrgrund) {
     var $msg = $('#offline-msg');
     if (!configEnabled('offline-msg')) {
         hideLoading();
         $msg.hide().text('');
+        return;
+    }
+    if (apiSperrgrund === 'EXCEEDED_LIMIT') {
+        hideLoading();
+        $msg.text('Tesla-Datenverbindung gesperrt: Abrechnungslimit erreicht. ' +
+            'Keine aktuellen Fahrzeugdaten verfügbar.').show();
         return;
     }
     if (serviceModePlus) {
@@ -4173,7 +4180,8 @@ function startStream() {
         $.getJSON('/api/state/' + currentVehicle, function(resp) {
             var st = resp.state;
             updateVehicleState(st, resp.state_checked_at, resp);
-            updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
+            updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus,
+                resp.fleet_api_blocked_reason);
             updateSoftwareUpdate(resp.software_update);
             if (istOfflineOderSchlaeft(st)) {
                 planeNaechsteStatusabfrage();
@@ -4217,7 +4225,8 @@ function startStreamIfOnline() {
     $.getJSON('/api/state/' + currentVehicle, function(resp) {
         var st = resp.state;
         updateVehicleState(st, resp.state_checked_at, resp);
-        updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus);
+        updateOfflineInfo(st, resp.service_mode, resp.service_mode_plus,
+            resp.fleet_api_blocked_reason);
         updateSoftwareUpdate(resp.software_update);
         if (istOfflineOderSchlaeft(st)) {
             hideLoading();

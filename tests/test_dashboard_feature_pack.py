@@ -208,6 +208,45 @@ assert.equal(softwareUpdateAktiv({...zurückgesetzt, version: '2026.36.1'}), tru
     assert ergebnis.returncode == 0, ergebnis.stdout + ergebnis.stderr
 
 
+def test_offline_meldung_unterscheidet_abrechnungssperre_und_schlafzustand():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Für den JavaScript-Anzeigetest wird Node.js benötigt")
+    ergebnis = subprocess.run(
+        [node, "-e", r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const quelle = fs.readFileSync('static/js/main.js', 'utf8');
+const anfang = quelle.indexOf('function updateOfflineInfo(');
+const ende = quelle.indexOf('\nfunction ', anfang + 1);
+vm.runInThisContext(quelle.slice(anfang, ende));
+let text, sichtbar;
+global.$ = () => ({
+    text(wert) { text = wert; return this; },
+    show() { sichtbar = true; return this; },
+    hide() { sichtbar = false; return this; },
+});
+global.hideLoading = () => {};
+global.configEnabled = () => true;
+global.normalisiereDashboardState = wert => wert;
+global.OFFLINE_TEXT = 'Fahrzeug schläft';
+for (const zustand of ['offline', 'asleep', 'online']) {
+    updateOfflineInfo(zustand, false, false, 'EXCEEDED_LIMIT');
+    assert.match(text, /Abrechnungslimit erreicht/);
+    assert.equal(text.includes('schläft'), false);
+    assert.equal(sichtbar, true);
+}
+updateOfflineInfo('offline', false, false, null);
+assert.equal(text, OFFLINE_TEXT);
+updateOfflineInfo('online', false, false, null);
+assert.equal(sichtbar, false);
+assert.equal(text, '');
+"""], capture_output=True, text=True, timeout=10,
+    )
+    assert ergebnis.returncode == 0, ergebnis.stdout + ergebnis.stderr
+
+
 def test_footer_zeigt_telemetrie_profile():
     html = pathlib.Path("templates/index.html").read_text(encoding="utf-8")
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")

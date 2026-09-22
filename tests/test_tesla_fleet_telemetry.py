@@ -142,6 +142,161 @@ def keine_echten_parking_logs(monkeypatch):
     monkeypatch.setattr(app, "_fleet_telemetry_parkabgleich_letzte_abfrage", {})
 
 
+def _fleet_api_antwort(statuscode, payload):
+    antwort = app.requests.Response()
+    antwort.status_code = statuscode
+    antwort._content = json.dumps(payload).encode("utf-8")
+    return antwort
+
+
+def test_fleet_api_abrechnungssperre_pausiert_alle_abfragen(monkeypatch):
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+    aufrufe = []
+
+    def senden(*args, **kwargs):
+        aufrufe.append(args)
+        return _fleet_api_antwort(403, {"error": "account disabled: EXCEEDED_LIMIT"})
+
+    with pytest.raises(app.requests.exceptions.HTTPError, match="Abrechnungslimit"):
+        app._fleet_telemetrie_api_anfrage(senden, "https://example.test/config")
+    status = app._fleet_telemetry_profile_status
+    assert status["fleet_api_blocked_reason"] == "EXCEEDED_LIMIT"
+    assert status["fleet_api_retry_at"] == 2300.0
+    assert status["config_synced"] is False
+    assert app._fleet_telemetrie_api_pause_aktiv()
+    for zeit in (2000.0, 2100.0, 2299.999):
+        monkeypatch.setattr(app.time, "time", lambda: zeit)
+        with pytest.raises(RuntimeError, match="Abrechnungslimit"):
+            app._fleet_telemetrie_api_anfrage(senden, "https://example.test/vehicle")
+    assert len(aufrufe) == 1
+    monkeypatch.setattr(app.time, "time", lambda: 2300.0)
+    with pytest.raises(app.requests.exceptions.HTTPError):
+        app._fleet_telemetrie_api_anfrage(senden, "https://example.test/vehicle")
+    assert len(aufrufe) == 2
+    assert status["fleet_api_retry_at"] == 2600.0
+
+
+@pytest.mark.parametrize("statuscode,payload", [
+    (403, {"error": "access denied"}),
+    (403, []),
+    (401, {"error": "account disabled: EXCEEDED_LIMIT"}),
+    (429, {"error": "Too many requests"}),
+    (500, {"error": "server error"}),
+])
+def test_fleet_api_andere_fehler_sind_keine_abrechnungssperre(statuscode, payload):
+    with pytest.raises(app.requests.exceptions.HTTPError):
+        app._fleet_telemetrie_api_anfrage(
+            lambda *_: _fleet_api_antwort(statuscode, payload), "https://example.test",
+        )
+    assert not app._fleet_telemetry_profile_status.get("fleet_api_blocked_reason")
+
+
+@pytest.mark.parametrize("funktion,argumente", [
+    ("_fleet_telemetrie_parkdaten_abrufen", ("TESTVIN",)),
+    ("_fleet_telemetrie_fahrzeugzustand_abrufen", ("TESTVIN",)),
+    ("_fleet_telemetrie_position_abrufen", ("TESTVIN",)),
+    ("_fleet_telemetrie_profile_sync_pruefen", ()),
+    ("_fleet_telemetrie_profile_anwenden", ("charging",)),
+])
+def test_fleet_api_alle_daten_und_profilpfade_beachten_sperre(
+    monkeypatch, funktion, argumente,
+):
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+    app._fleet_telemetry_profile_status.update({
+        "fleet_api_blocked_reason": "EXCEEDED_LIMIT", "fleet_api_retry_at": 2300.0,
+    })
+    monkeypatch.setattr(app, "_fleet_telemetrie_oauth_token", lambda: "test-token")
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_config_vins", lambda *_: ["TESTVIN"])
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_request_laden", lambda: {
+        "vins": ["TESTVIN"], "config": {"fields": {}},
+    })
+
+    def keine_abfrage(*args, **kwargs):
+        pytest.fail("Während der Sperrfrist darf kein HTTP-Aufruf erfolgen")
+
+    monkeypatch.setattr(app.requests, "get", keine_abfrage)
+    monkeypatch.setattr(app.requests, "post", keine_abfrage)
+    with pytest.raises(RuntimeError, match="Abrechnungslimit"):
+        getattr(app, funktion)(*argumente)
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+
+
+def test_fleet_api_sperre_uebersteht_neustart(monkeypatch, tmp_path):
+    datei = tmp_path / "profil.json"
+    datei.write_text(json.dumps({
+        "fleet_api_blocked_reason": "EXCEEDED_LIMIT", "fleet_api_retry_at": 2300.0,
+    }), encoding="utf-8")
+    monkeypatch.setattr(app, "TESLA_FLEET_TELEMETRY_PROFILE_STATUS_FILE", str(datei))
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+    geladen = app._fleet_telemetrie_profile_status_laden()
+    monkeypatch.setattr(app, "_fleet_telemetry_profile_status", geladen)
+    assert app._fleet_telemetrie_api_pause_aktiv()
+    assert geladen["fleet_api_retry_at"] == 2300.0
+
+
+@pytest.mark.parametrize("netzfehler", [False, True])
+def test_fleet_api_freigabe_prueft_nur_ein_worker_und_erneuert_profil(
+    monkeypatch, netzfehler,
+):
+    monkeypatch.setattr(app.time, "time", lambda: 2300.0)
+    status = app._fleet_telemetry_profile_status
+    status.update(_bestaetigter_profilstatus("charging", 1900.0))
+    status.update({
+        "fleet_api_blocked_reason": "EXCEEDED_LIMIT", "fleet_api_retry_at": 2300.0,
+    })
+
+    def probe(*args, **kwargs):
+        assert app._fleet_telemetrie_api_pause_aktiv()
+        with pytest.raises(RuntimeError, match="Abrechnungslimit"):
+            app._fleet_telemetrie_api_anfrage(
+                lambda *_: pytest.fail("Zweiter Worker darf nicht anfragen"),
+                "https://example.test/parallel",
+            )
+        if netzfehler:
+            raise app.requests.exceptions.Timeout("Test-Zeitüberschreitung")
+        return _fleet_api_antwort(200, {"response": {"state": "online"}})
+
+    if netzfehler:
+        with pytest.raises(app.requests.exceptions.Timeout):
+            app._fleet_telemetrie_api_anfrage(probe, "https://example.test")
+        assert status["fleet_api_blocked_reason"] == "EXCEEDED_LIMIT"
+        assert status["fleet_api_retry_at"] == 2600.0
+        return
+    app._fleet_telemetrie_api_anfrage(probe, "https://example.test")
+    assert status["fleet_api_blocked_reason"] is None
+    assert status["config_synced"] is False
+    assert status["last_sent_profile"] is None
+    angefordert = []
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: True)
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_spaeter_anwenden", angefordert.append)
+    app._fleet_telemetrie_profile_aktualisieren("veh-1", {
+        "state": "online", "charge_state": {"charging_state": "Charging"},
+        "drive_state": {"shift_state": "P"},
+    })
+    assert angefordert == ["charging"]
+
+
+def test_fleet_api_sperre_erreicht_dashboard_ohne_fahrzeugzustand_zu_erfinden(
+    monkeypatch,
+):
+    app._fleet_telemetry_profile_status.update({
+        "fleet_api_blocked_reason": "EXCEEDED_LIMIT", "fleet_api_retry_at": 2300.0,
+    })
+    daten = {"state": "offline", "timestamp": 1900000}
+    payload = app._subscriber_stream_payload(daten)
+    assert payload["fleet_api_blocked_reason"] == "EXCEEDED_LIMIT"
+    assert payload["timestamp"] == daten["timestamp"]
+    assert payload["state"] == "offline"
+    monkeypatch.setattr(app, "latest_data", {"default": daten})
+    monkeypatch.setattr(app, "_start_thread", lambda _id: None)
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_fuer_dashboard", lambda *_: None)
+    monkeypatch.setattr(app, "_fleet_telemetrie_fahrtpfad_bereinigungs_tick", lambda **_: None)
+    antwort = app.app.test_client().get("/api/data").get_json()
+    assert antwort["fleet_api_blocked_reason"] == "EXCEEDED_LIMIT"
+    app._fleet_telemetry_profile_status["fleet_api_blocked_reason"] = None
+    assert app._subscriber_stream_payload(payload)["fleet_api_blocked_reason"] is None
+
+
 def test_fleet_telemetrie_mqtt_aktualisiert_dashboard_cache(monkeypatch):
     gespeicherte_daten = {}
 

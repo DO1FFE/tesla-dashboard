@@ -2557,6 +2557,8 @@ def _fleet_telemetrie_profile_status_standard():
         "last_posted_at": 0.0,
         "last_posted_profile": None,
         "last_error": None,
+        "fleet_api_blocked_reason": None,
+        "fleet_api_retry_at": 0.0,
         "config_synced": None,
         "config_key_paired": None,
         "config_sync_state": "unknown",
@@ -2641,6 +2643,7 @@ def _fleet_telemetrie_profile_status_laden():
         "live_recovery_bootstrap_confirmed_at",
         "post_charge_live_since",
         "post_charge_live_until",
+        "fleet_api_retry_at",
     ):
         try:
             value = float(geladen.get(key))
@@ -2673,6 +2676,8 @@ def _fleet_telemetrie_profile_status_laden():
     if isinstance(geladen.get("charging_observed"), bool):
         status["charging_observed"] = geladen.get("charging_observed")
     status["last_error"] = geladen.get("last_error")
+    if geladen.get("fleet_api_blocked_reason") == "EXCEEDED_LIMIT":
+        status["fleet_api_blocked_reason"] = "EXCEEDED_LIMIT"
     if isinstance(geladen.get("config_synced"), bool):
         status["config_synced"] = geladen.get("config_synced")
     status["config_key_paired"] = _fleet_telemetrie_key_paired_normalisieren(
@@ -6313,6 +6318,9 @@ def _fleet_telemetrie_rohdaten_anreichern(data):
 
     if not isinstance(data, dict):
         return
+    status = _fleet_telemetrie_profile_status_kopie()
+    data["fleet_api_blocked_reason"] = status.get("fleet_api_blocked_reason")
+    data["fleet_api_retry_at"] = status.get("fleet_api_retry_at", 0.0)
     raw = data.get("fleet_telemetry_raw")
     if not isinstance(raw, dict):
         return
@@ -7395,6 +7403,78 @@ def _fleet_telemetrie_profile_config_vins(request_data=None):
     return vins
 
 
+FLEET_API_LIMIT_PAUSE_SEKUNDEN = 300
+FLEET_API_LIMIT_FEHLER = (
+    "Tesla-Fleet-API gesperrt: Abrechnungslimit erreicht (EXCEEDED_LIMIT). "
+    "Keine aktuellen Fahrzeugdaten verfügbar; Abrechnungslimit im "
+    "Tesla-Entwicklerportal prüfen."
+)
+
+
+def _fleet_telemetrie_api_pause_aktiv():
+    """Pausiere Wiederherstellungen bei einem gesperrten Tesla-Konto."""
+
+    status = _fleet_telemetrie_profile_status_kopie()
+    return (
+        status.get("fleet_api_blocked_reason") == "EXCEEDED_LIMIT"
+        and time.time() < (status.get("fleet_api_retry_at") or 0)
+    )
+
+
+def _fleet_telemetrie_api_anfrage(methode, url, **kwargs):
+    """Bremse alle Fleet-API-Pfade gemeinsam bei Teslas Abrechnungssperre."""
+
+    with _fleet_telemetry_profile_lock:
+        status = _fleet_telemetry_profile_status
+        gesperrt = status.get("fleet_api_blocked_reason") == "EXCEEDED_LIMIT"
+        if gesperrt:
+            jetzt = time.time()
+            if jetzt < (status.get("fleet_api_retry_at") or 0):
+                raise RuntimeError(FLEET_API_LIMIT_FEHLER)
+            # Reserviere vor dem HTTP-Aufruf, damit parallele Worker warten.
+            status["fleet_api_retry_at"] = jetzt + FLEET_API_LIMIT_PAUSE_SEKUNDEN
+            _fleet_telemetrie_profile_status_speichern()
+    response = methode(url, **kwargs)
+    if getattr(response, "status_code", None) == 403:
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        fehler = payload.get("error") if isinstance(payload, dict) else None
+        if fehler == "account disabled: EXCEEDED_LIMIT":
+            with _fleet_telemetry_profile_lock:
+                status = _fleet_telemetry_profile_status
+                status["fleet_api_blocked_reason"] = "EXCEEDED_LIMIT"
+                status["fleet_api_retry_at"] = (
+                    time.time() + FLEET_API_LIMIT_PAUSE_SEKUNDEN
+                )
+                status["config_synced"] = False
+                status["config_sync_state"] = "error"
+                status["config_sync_error"] = FLEET_API_LIMIT_FEHLER
+                status["last_error"] = FLEET_API_LIMIT_FEHLER
+                _fleet_telemetrie_profile_status_speichern()
+            raise requests.exceptions.HTTPError(
+                FLEET_API_LIMIT_FEHLER, response=response,
+            )
+    response.raise_for_status()
+    if gesperrt:
+        with _fleet_telemetry_profile_lock:
+            status = _fleet_telemetry_profile_status
+            status["fleet_api_blocked_reason"] = None
+            status["fleet_api_retry_at"] = 0.0
+            status["last_error"] = None
+            # Tesla entfernt die Konfiguration beim Erreichen des Limits.
+            # Ein erfolgreicher Statusabruf bestätigt daher noch kein Profil.
+            status["config_synced"] = False
+            status["config_sync_state"] = "unknown"
+            status["config_sync_error"] = None
+            status["last_sent"] = 0.0
+            status["last_sent_profile"] = None
+            _fleet_telemetrie_profile_status_speichern()
+        logging.info("Tesla-Fleet-API wieder freigegeben; Profil wird neu gesendet")
+    return response
+
+
 def _fleet_telemetrie_profile_sync_pruefen(token=None, request_data=None):
     """Prüfe bei Tesla, ob die Fleet-Konfiguration am Fahrzeug angekommen ist."""
 
@@ -7412,13 +7492,13 @@ def _fleet_telemetrie_profile_sync_pruefen(token=None, request_data=None):
             TESLA_FLEET_VEHICLE_COMMAND_URL.rstrip("/")
             + f"/api/1/vehicles/{vin}/fleet_telemetry_config"
         )
-        response = requests.get(
+        response = _fleet_telemetrie_api_anfrage(
+            requests.get,
             url,
             headers={"Authorization": f"Bearer {token}"},
             timeout=FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT,
             verify=False,
         )
-        response.raise_for_status()
         payload = response.json()
         antwort = payload.get("response") if isinstance(payload, dict) else None
         if not isinstance(antwort, dict):
@@ -7691,14 +7771,14 @@ def _fleet_telemetrie_profile_anwenden(profil):
         TESLA_FLEET_VEHICLE_COMMAND_URL.rstrip("/")
         + "/api/1/vehicles/fleet_telemetry_config"
     )
-    response = requests.post(
+    response = _fleet_telemetrie_api_anfrage(
+        requests.post,
         url,
         headers={"Authorization": f"Bearer {token}"},
         json=config_request,
         timeout=FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT,
         verify=False,
     )
-    response.raise_for_status()
     _fleet_telemetrie_profile_config_speichern(config_request)
     _fleet_telemetrie_profile_versand_vermerken(
         profil,
@@ -7796,6 +7876,8 @@ def _fleet_telemetrie_profile_sync_erneut_pruefen():
     """Prüfe ausstehende Fleet-Konfigurationen in ruhigen Abständen erneut."""
 
     if not _fleet_telemetrie_profile_aktiviert():
+        return
+    if _fleet_telemetrie_api_pause_aktiv():
         return
     jetzt = time.time()
     datenstand = _fleet_telemetrie_profile_aktueller_datenstand()
@@ -7945,6 +8027,8 @@ def _fleet_telemetrie_profile_worker_loop():
             profil = _fleet_telemetry_profile_queue.get(timeout=1)
         except queue.Empty:
             _fleet_telemetrie_profile_sync_erneut_pruefen()
+            continue
+        if _fleet_telemetrie_api_pause_aktiv():
             continue
         try:
             sync_ergebnis = _fleet_telemetrie_profile_anwenden(profil)
@@ -8143,7 +8227,10 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
     """Aktualisiere das gewünschte Telemetry-Profil aus Live-Daten."""
 
     del cache_id
-    if not _fleet_telemetrie_profile_aktiviert():
+    if (
+        not _fleet_telemetrie_profile_aktiviert()
+        or _fleet_telemetrie_api_pause_aktiv()
+    ):
         return _fleet_telemetrie_profile_status_an_daten(data)
     ziel = _fleet_telemetrie_profile_ziel(data)
     ladezustand = _fleet_telemetrie_profile_ladezustand(data)
@@ -10353,13 +10440,13 @@ def _fleet_telemetrie_parkdaten_abrufen(vin):
         TESLA_FLEET_VEHICLE_COMMAND_URL.rstrip("/")
         + f"/api/1/vehicles/{vin}/vehicle_data"
     )
-    response = requests.get(
+    response = _fleet_telemetrie_api_anfrage(
+        requests.get,
         url,
         headers={"Authorization": f"Bearer {token}"},
         timeout=FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT,
         verify=False,
     )
-    response.raise_for_status()
     payload = response.json()
     antwort = payload.get("response") if isinstance(payload, dict) else None
     if not isinstance(antwort, dict):
@@ -10377,13 +10464,13 @@ def _fleet_telemetrie_fahrzeugzustand_abrufen(vin):
         TESLA_FLEET_VEHICLE_COMMAND_URL.rstrip("/")
         + f"/api/1/vehicles/{vin}"
     )
-    response = requests.get(
+    response = _fleet_telemetrie_api_anfrage(
+        requests.get,
         url,
         headers={"Authorization": f"Bearer {token}"},
         timeout=FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT,
         verify=False,
     )
-    response.raise_for_status()
     payload = response.json()
     antwort = payload.get("response") if isinstance(payload, dict) else None
     if not isinstance(antwort, dict):
@@ -10607,14 +10694,14 @@ def _fleet_telemetrie_position_abrufen(vin):
         TESLA_FLEET_VEHICLE_COMMAND_URL.rstrip("/")
         + f"/api/1/vehicles/{vin}/vehicle_data"
     )
-    response = requests.get(
+    response = _fleet_telemetrie_api_anfrage(
+        requests.get,
         url,
         headers={"Authorization": f"Bearer {token}"},
         params={"endpoints": "location_data"},
         timeout=FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT,
         verify=False,
     )
-    response.raise_for_status()
     payload = response.json()
     antwort = payload.get("response") if isinstance(payload, dict) else None
     drive = antwort.get("drive_state") if isinstance(antwort, dict) else None
@@ -10819,14 +10906,14 @@ def _fleet_telemetrie_fahrtverbindung_nach_timeout(vin, fehler):
         # Während der Statusabfrage kann die Fahrt bereits beendet worden sein.
         if not token or not fahrt_aktuell():
             return False
-        response = requests.post(
+        response = _fleet_telemetrie_api_anfrage(
+            requests.post,
             TESLA_FLEET_VEHICLE_COMMAND_URL.rstrip("/")
             + f"/api/1/vehicles/{vin}/wake_up",
             headers={"Authorization": f"Bearer {token}"},
             timeout=FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT,
             verify=False,
         )
-        response.raise_for_status()
         logging.warning(
             "Fleet-Steuerverbindung meldet asleep trotz frischer Fahrt; "
             "wake_up einmalig angefordert (%s). "
@@ -10848,6 +10935,8 @@ def _fleet_telemetrie_position_worker_loop():
     while _fleet_telemetrie_aktiv():
         gestartet = time.monotonic()
         for vehicle in _fleet_telemetrie_fahrzeuge():
+            if _fleet_telemetrie_api_pause_aktiv():
+                break
             vin = str(vehicle.get("vin") or "").strip()
             if not vin:
                 continue
@@ -14243,6 +14332,9 @@ def get_vehicle_state(vehicle_id=None):
                     "state_checked_at": checked_at,
                     "service_mode": service_mode,
                     "service_mode_plus": service_mode_plus,
+                    "fleet_api_blocked_reason": telemetry_data.get(
+                        "fleet_api_blocked_reason"
+                    ),
                 }
                 for key in ("state_since_ms", "state_since_at"):
                     if telemetry_data.get(key) is not None:
