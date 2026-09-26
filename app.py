@@ -2579,6 +2579,7 @@ def _fleet_telemetrie_profile_status_standard():
         "live_retry_started_at": 0.0,
         "live_retry_last_moving_at": 0.0,
         "live_retry_motion_active": False,
+        "live_retry_camp_active": False,
         "live_retry_confirmed_at": 0.0,
         "live_retry_attempts": 0,
         "live_reconnect_seen_at": 0.0,
@@ -6729,6 +6730,37 @@ def _fleet_telemetrie_profile_live_neuversand_fahrt_aktuell(status, jetzt):
     )
 
 
+def _fleet_telemetrie_profile_camp_aktiv(data):
+    """Erkenne Camp im Stand, ohne alte Camp-Werte auf eine Fahrt zu übertragen."""
+
+    if not isinstance(data, dict):
+        return False
+    if _normalisiere_dashboard_state(data.get("state")) != "online":
+        return False
+    climate = data.get("climate_state")
+    return (
+        isinstance(climate, dict)
+        and _fleet_telemetrie_klimawächtermodus(
+            climate.get("climate_keeper_mode")
+        ) == "camp"
+        and not _fleet_telemetrie_profile_fahrzeug_fährt(data)
+    )
+
+
+def _fleet_telemetrie_profile_live_neuversand_aktiv(status, jetzt):
+    """Erlaube die Taktreparatur bei Fahrbewegung oder eingeschaltetem Camp."""
+
+    if not isinstance(status, dict) or status.get("live_retry_active") is not True:
+        return False
+    if status.get("target") != "live":
+        return False
+    # Camp wird aus Laufzeitdaten neu geprüft, nicht aus dem Statusfile geladen.
+    return (
+        status.get("live_retry_camp_active") is True
+        or _fleet_telemetrie_profile_live_neuversand_fahrt_aktuell(status, jetzt)
+    )
+
+
 def _fleet_telemetrie_profile_live_wiederherstellungsprofil(
     status,
     jetzt=None,
@@ -6772,7 +6804,7 @@ def _fleet_telemetrie_profile_live_neuversand_starten(status, jetzt):
     status["config_sync_updated_at"] = jetzt
     status["updated_at"] = jetzt
     logging.warning(
-        "Fleet-Telemetry-Live-Takt fehlt während der Fahrt; "
+        "Fleet-Telemetry-Live-Takt fehlt bei Fahrt oder aktivem Camp-Modus; "
         "das Live-Profil wird kontrolliert neu bestätigt"
     )
     return True
@@ -7725,7 +7757,7 @@ def _fleet_telemetrie_profile_sync_check_intervall(status, jetzt, profil=None):
 
     if (
         profil in {"live", "live_extended"}
-        and _fleet_telemetrie_profile_live_neuversand_fahrt_aktuell(status, jetzt)
+        and _fleet_telemetrie_profile_live_neuversand_aktiv(status, jetzt)
     ):
         return FLEET_TELEMETRIE_PROFILE_LIVE_NEUVERSAND_INTERVAL_SECONDS
     if _fleet_telemetrie_profile_schnellprüfung_aktiv(status, jetzt, profil):
@@ -7738,7 +7770,7 @@ def _fleet_telemetrie_profile_resend_intervall(status, jetzt, profil=None):
 
     if (
         profil in {"live", "live_extended"}
-        and _fleet_telemetrie_profile_live_neuversand_fahrt_aktuell(status, jetzt)
+        and _fleet_telemetrie_profile_live_neuversand_aktiv(status, jetzt)
     ):
         return FLEET_TELEMETRIE_PROFILE_LIVE_NEUVERSAND_INTERVAL_SECONDS
     if _fleet_telemetrie_profile_schnellprüfung_aktiv(status, jetzt, profil):
@@ -7959,9 +7991,10 @@ def _fleet_telemetrie_profile_sync_erneut_pruefen():
     live_takt_prüfen = (
         isinstance(datenstand, dict)
         and status_vorprüfung.get("target") == "live"
-        and _fleet_telemetrie_profile_fahrzeug_bewegt_sich(
-            datenstand,
-            jetzt,
+        and (
+            _fleet_telemetrie_profile_fahrzeug_bewegt_sich(datenstand, jetzt)
+            or _fleet_telemetrie_profile_camp_aktiv(datenstand)
+            or status_vorprüfung.get("live_retry_camp_active") is True
         )
     )
     fahrzustand = (
@@ -7998,7 +8031,10 @@ def _fleet_telemetrie_profile_sync_erneut_pruefen():
         live_start_fällig = (
             status.get("target") == "live"
             and status.get("live_retry_active") is not True
-            and status.get("live_retry_motion_active") is True
+            and (
+                status.get("live_retry_motion_active") is True
+                or status.get("live_retry_camp_active") is True
+            )
             and letztes_live_profil in {"live", "live_extended"}
             and letzter_versand is not None
             and jetzt - letzter_versand
@@ -8012,7 +8048,7 @@ def _fleet_telemetrie_profile_sync_erneut_pruefen():
         if live_start_fällig:
             _fleet_telemetrie_profile_live_neuversand_starten(status, jetzt)
         live_neuversand_aktiv = (
-            _fleet_telemetrie_profile_live_neuversand_fahrt_aktuell(
+            _fleet_telemetrie_profile_live_neuversand_aktiv(
                 status,
                 jetzt,
             )
@@ -8330,6 +8366,8 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
         data,
         jetzt,
     )
+    camp_aktiv = _fleet_telemetrie_profile_camp_aktiv(data)
+    schneller_takt_erwartet = fahrzeug_bewegt_sich or camp_aktiv
     profil_anfordern = None
     bootstrap_ausbau_angefordert = False
     with _fleet_telemetry_profile_lock:
@@ -8392,7 +8430,7 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
                 status["live_stable_since"] = live_stable_since
                 status_geändert = True
         elif ziel == "live" and current in {"live", "live_extended"}:
-            if not fahrzeug_bewegt_sich:
+            if not schneller_takt_erwartet:
                 if live_unstable_since is not None and live_unstable_since > 0:
                     status["live_unstable_since"] = 0.0
                     status_geändert = True
@@ -8447,6 +8485,10 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
         if bewegung_aktiv and status.get("live_retry_last_moving_at") != jetzt:
             status["live_retry_last_moving_at"] = jetzt
             status_geändert = True
+        camp_reparatur_prüfbar = ziel == "live" and camp_aktiv
+        if status.get("live_retry_camp_active") is not camp_reparatur_prüfbar:
+            status["live_retry_camp_active"] = camp_reparatur_prüfbar
+            status_geändert = True
         if status.get("live_retry_active") is True:
             if ziel != "live":
                 status["live_retry_active"] = False
@@ -8491,7 +8533,7 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
         letzter_versand = float(status.get("last_sent") or 0)
         live_neuversand_pruefbar = (
             ziel == "live"
-            and fahrzeug_bewegt_sich
+            and schneller_takt_erwartet
             and not live_takt_bestaetigt
             and not neuverbindung_pendelt_sich_ein
             and jetzt - max(target_since, letzter_versand)
@@ -8583,7 +8625,7 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
             ziel == "live"
             and current == aktivierbares_ziel
             and current in {"live", "live_extended"}
-            and fahrzeug_bewegt_sich
+            and schneller_takt_erwartet
             and jetzt - max(target_since, letzter_versand)
             >= FLEET_TELEMETRIE_PROFILE_LIVE_TAKT_PRUEFVERZOEGERUNG_SECONDS
         )
@@ -8662,7 +8704,7 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
             and status.get("target") == "live"
         ):
             darf_senden = (
-                _fleet_telemetrie_profile_live_neuversand_fahrt_aktuell(
+                _fleet_telemetrie_profile_live_neuversand_aktiv(
                     status,
                     jetzt,
                 )
@@ -8686,7 +8728,7 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
         live_neuversand_pausiert = (
             status.get("live_retry_active") is True
             and status.get("target") == "live"
-            and not _fleet_telemetrie_profile_live_neuversand_fahrt_aktuell(
+            and not _fleet_telemetrie_profile_live_neuversand_aktiv(
                 status,
                 jetzt,
             )

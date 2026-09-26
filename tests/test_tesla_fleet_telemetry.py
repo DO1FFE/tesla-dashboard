@@ -6076,6 +6076,190 @@ def test_fleet_telemetrie_profile_beendet_neuversand_bei_1s_takt(
         assert angefordert == (["live_extended"] if sekunde == 2092 else [])
 
 
+@pytest.mark.parametrize("zustand, modus, gang, erwartet", [
+    ("online", "camp", "P", True),
+    ("online", "party", "P", True),
+    ("online", "ClimateKeeperModeStateParty", None, True),
+    ("online", "off", "P", False),
+    ("online", "dog", "P", False),
+    ("offline", "camp", "P", False),
+    ("asleep", "camp", "P", False),
+    (None, "camp", "P", False),
+    ("online", "camp", "D", False),
+    ("online", "camp", "R", False),
+])
+def test_fleet_telemetrie_camp_reparatur_verlangt_online_und_stand(
+    zustand, modus, gang, erwartet,
+):
+    daten = {
+        "state": zustand,
+        "climate_state": {"climate_keeper_mode": modus, "is_climate_on": False},
+        "drive_state": {"shift_state": gang, "speed": 0},
+    }
+    assert app._fleet_telemetrie_profile_camp_aktiv(daten) is erwartet
+
+
+@pytest.fixture
+def camp_profil_überwachung(monkeypatch):
+    jetzt = [2000.0]
+    gesendet = []
+    daten = {
+        "vin": "TESTVIN",
+        "state": "online",
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "climate_state": {"climate_keeper_mode": "camp", "is_climate_on": True},
+        "fleet_telemetry_received_at": 1_900_000,
+        "fleet_telemetry_field_received_at": {
+            "PackCurrent": 1_900_000, "PackVoltage": 1_900_000,
+        },
+        "fleet_telemetry_field_interval_ms": {
+            "PackCurrent": 1000, "PackVoltage": 1000,
+        },
+    }
+    monkeypatch.setattr(app.time, "time", lambda: jetzt[0])
+    monkeypatch.setattr(app, "latest_data", {"veh-1": daten})
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: True)
+    monkeypatch.setattr(
+        app, "FLEET_TELEMETRIE_PROFILE_LIVE_NEUVERSAND_INTERVAL_SECONDS", 5.0,
+    )
+    monkeypatch.setattr(
+        app, "FLEET_TELEMETRIE_PROFILE_LIVE_REPARATUR_NEUVERBINDUNG_SECONDS", 120.0,
+    )
+    monkeypatch.setattr(
+        app, "_fleet_telemetry_profile_status",
+        _bestaetigter_profilstatus(
+            "parked", 1900.0, target="live", last_sent_profile="live",
+            last_posted_profile="live", config_sync_profile="live",
+            config_sync_details=[{"vin": "TESTVIN", "synced": True}],
+        ),
+    )
+
+    def api_bestätigung():
+        return {
+            "synced": True, "state": "synced", "key_paired": None,
+            "details": [{"vin": "TESTVIN", "synced": True}],
+            "checked_at": jetzt[0], "error": None,
+        }
+
+    def profil_anwenden(profil):
+        gesendet.append((profil, jetzt[0]))
+        app._fleet_telemetrie_profile_versand_vermerken(profil, jetzt[0])
+        return api_bestätigung()
+
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_anwenden", profil_anwenden)
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_sync_pruefen", api_bestätigung)
+    monkeypatch.setattr(
+        app, "_fleet_telemetrie_profile_spaeter_anwenden",
+        lambda profil: app._fleet_telemetrie_profile_erfolg_setzen(
+            profil, profil_anwenden(profil),
+        ),
+    )
+    return daten, jetzt, gesendet
+
+
+def test_fleet_telemetrie_camp_worker_repariert_bis_echter_sekundentakt_ankommt(
+    camp_profil_überwachung,
+):
+    daten, jetzt, gesendet = camp_profil_überwachung
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+    status = app._fleet_telemetry_profile_status
+
+    assert gesendet == [("live", 2000.0)]
+    assert status["current"] == "parked"
+    assert status["live_retry_active"] is True
+    assert status["live_retry_camp_active"] is True
+    assert status["live_retry_motion_active"] is False
+    assert app._fleet_telemetrie_profile_sync_check_intervall(status, 2000, "live") == 5
+    assert app._fleet_telemetrie_profile_resend_intervall(status, 2000, "live") == 5
+
+    for sekunde in (2001.0, 2004.9, 2005.0, 2006.0):
+        jetzt[0] = sekunde
+        app._fleet_telemetrie_profile_sync_erneut_pruefen()
+        erwartet = [("live", 2000.0)]
+        if sekunde >= 2005:
+            erwartet.append(("live_extended", 2005.0))
+        assert gesendet == erwartet
+        assert status["live_retry_active"] is True
+        assert status["current"] == "parked"
+
+    # Nur neue Akku-Messwerte bestätigen Camp-Live; GPS darf im Stand schweigen.
+    jetzt[0] = 2007.0
+    daten["fleet_telemetry_received_at"] = 2_007_000
+    daten["fleet_telemetry_field_received_at"] = {
+        "PackCurrent": 2_007_000, "PackVoltage": 2_007_000,
+    }
+    daten["fleet_telemetry_field_previous_received_at"] = {
+        "PackCurrent": 2_006_000, "PackVoltage": 2_006_000,
+    }
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+
+    assert status["current"] == "live_extended"
+    assert status["live_retry_active"] is False
+    assert status["live_retry_confirmed_at"] == 2007.0
+    assert status["config_sync_details"][0]["source"] == "telemetry_stream"
+    assert gesendet == [("live", 2000.0), ("live_extended", 2005.0)]
+
+
+def test_fleet_telemetrie_camp_worker_schuetzt_neuverbindung(
+    camp_profil_überwachung,
+):
+    daten, jetzt, gesendet = camp_profil_überwachung
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+    jetzt[0] = 2005.0
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+    for sekunde in (2010.0, 2030.0, 2124.0, 2125.0):
+        jetzt[0] = sekunde
+        app._fleet_telemetrie_profile_sync_erneut_pruefen()
+        assert gesendet == [("live", 2000.0), ("live_extended", 2005.0)]
+    jetzt[0] = 2131.0
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+    assert gesendet[-1] == ("live", 2131.0)
+
+
+@pytest.mark.parametrize("klima_an, ziel", [(False, "parked"), (True, "live")])
+def test_fleet_telemetrie_camp_aus_stoppt_reparatur_ohne_fahrbewegung(
+    camp_profil_überwachung, klima_an, ziel,
+):
+    daten, jetzt, gesendet = camp_profil_überwachung
+    status = app._fleet_telemetry_profile_status
+    status.update(_bestaetigter_profilstatus(
+        "live", 1900.0, live_retry_active=True, live_retry_camp_active=True,
+    ))
+    daten["climate_state"] = {
+        "climate_keeper_mode": "off", "is_climate_on": klima_an,
+    }
+
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+
+    assert status["target"] == ziel
+    assert status["live_retry_camp_active"] is False
+    assert app._fleet_telemetrie_profile_live_neuversand_aktiv(status, jetzt[0]) is False
+    assert gesendet == []
+
+
+def test_fleet_telemetrie_camp_reparatur_respektiert_api_pause(
+    monkeypatch, camp_profil_überwachung,
+):
+    daten, jetzt, gesendet = camp_profil_überwachung
+    monkeypatch.setattr(app, "_fleet_telemetrie_api_pause_aktiv", lambda: True)
+
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+    app._fleet_telemetrie_profile_aktualisieren("veh-1", daten)
+
+    assert gesendet == []
+    assert app._fleet_telemetry_profile_status["live_retry_active"] is False
+
+
+def test_fleet_telemetrie_camp_reparatur_flag_wird_nicht_aus_datei_reaktiviert(
+    monkeypatch, tmp_path,
+):
+    datei = tmp_path / "profil.json"
+    datei.write_text(json.dumps({"live_retry_camp_active": True}), encoding="utf-8")
+    monkeypatch.setattr(app, "TESLA_FLEET_TELEMETRY_PROFILE_STATUS_FILE", str(datei))
+
+    assert app._fleet_telemetrie_profile_status_laden()["live_retry_camp_active"] is False
+
+
 def test_fleet_telemetrie_profile_sendet_live_an_ampel_nicht_erneut(monkeypatch):
     angefordert = []
 
