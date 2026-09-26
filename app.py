@@ -6330,6 +6330,28 @@ def _fleet_telemetrie_software_status_aus_cache(data):
         software["status"] = "installing" if installation > 0 else "downloaded"
 
 
+def _fleet_telemetrie_fahreranwesenheit_anreichern(data):
+    """Halte Fahrer-Telemetrie getrennt vom allgemeinen REST-Anwesenheitswert."""
+    raw = data.get("fleet_telemetry_raw")
+    if not isinstance(raw, dict):
+        return
+    wert = _fleet_telemetrie_wert(raw.get("DriverSeatOccupied"))
+    if isinstance(wert, str) and wert.strip().lower() in {"true", "false"}:
+        wert = wert.strip().lower() == "true"
+    if not isinstance(wert, bool):
+        wert = None
+    zeiten = data.get("fleet_telemetry_field_received_at") or {}
+    empfangen = _as_float(zeiten.get("DriverSeatOccupied"))
+    data["driver_presence"] = {
+        "value": wert,
+        "valid": wert is not None,
+        "received_at": empfangen if empfangen and empfangen > 0 else None,
+        "source": "DriverSeatOccupied",
+    }
+    if "DriverSeatOccupied" in raw:
+        data.setdefault("vehicle_state", {})["driver_present"] = wert
+
+
 def _fleet_telemetrie_rohdaten_anreichern(data):
     """Ergänze Dashboard-Felder aus bereits empfangenen Fleet-Rohdaten."""
 
@@ -6341,6 +6363,7 @@ def _fleet_telemetrie_rohdaten_anreichern(data):
     raw = data.get("fleet_telemetry_raw")
     if not isinstance(raw, dict):
         return
+    _fleet_telemetrie_fahreranwesenheit_anreichern(data)
     telemetrie_diagnose.anreichern(data)
     _fleet_telemetrie_software_status_aus_cache(data)
     telemetrie_diagnose.software_signale(data)
@@ -9676,8 +9699,9 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         vehicle_state["timestamp"] = timestamp_ms
         return True
     if field == "DriverSeatOccupied":
-        vehicle_state["is_user_present"] = _fleet_telemetrie_wahr(value)
-        vehicle_state["driver_present"] = vehicle_state["is_user_present"]
+        data.setdefault("fleet_telemetry_field_received_at", {})[field] = timestamp_ms
+        _fleet_telemetrie_fahreranwesenheit_anreichern(data)
+        vehicle_state["is_user_present"] = data["driver_presence"]["value"]
         vehicle_state["timestamp"] = timestamp_ms
         return True
     if field == "BrakePedal":
@@ -11149,7 +11173,10 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
             for field, value, timestamp_ms in feldwerte:
                 if timestamp_ms is None:
                     timestamp_ms = int(time.time() * 1000)
-                if field in telemetrie_diagnose.INTERVALLE:
+                if (
+                    field in telemetrie_diagnose.INTERVALLE
+                    or field == "DriverSeatOccupied"
+                ):
                     vorher = data.get("fleet_telemetry_field_received_at", {}).get(field, 0)
                     if timestamp_ms < (vorher or 0):
                         continue

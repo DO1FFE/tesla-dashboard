@@ -136,6 +136,56 @@ def test_fahrzeugsymbole_sind_in_ui_eingebunden():
     assert "updateVehicleSymbols(vehicle, data.gui_settings || {})" in js
 
 
+def test_fahreranwesenheit_ignoriert_widerspruechlichen_rest_wert():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Für den JavaScript-Anzeigetest wird Node.js benötigt")
+    ergebnis = subprocess.run([node, "-e", r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const quelle = fs.readFileSync('static/js/main.js', 'utf8');
+const start = quelle.indexOf('function updateUserPresence(');
+const ende = quelle.indexOf('\nfunction ', start + 1);
+vm.runInThisContext(quelle.slice(start, ende));
+let farbe, titel, icon;
+const element = {
+    html(wert) {icon = wert; return this;},
+    css(name, wert) {farbe = wert; return this;},
+    attr(name, wert) {if (name === 'title') titel = wert; return this;}
+};
+global.$ = () => element;
+const jetzt = Date.now();
+const daten = {state: 'online', vehicle_state: {is_user_present: true}, driver_presence: {
+    value: false, valid: true, source: 'DriverSeatOccupied', received_at: jetzt,
+}};
+updateUserPresence(daten);
+assert.equal(farbe, '#d00');
+assert.match(titel, /^Kein Fahrer erkannt/);
+assert.match(titel, /nur Fahrer/);
+daten.driver_presence.value = true;
+updateUserPresence(daten);
+assert.equal(farbe, '#4caf50');
+assert.match(titel, /^Fahrer erkannt/);
+daten.driver_presence = {...daten.driver_presence, value: null, valid: false};
+updateUserPresence(daten);
+assert.equal(farbe, '#aaa');
+assert.match(titel, /unbekannt/);
+assert.ok(icon.includes('svg'));
+daten.driver_presence = {...daten.driver_presence, value: false, valid: true, received_at: jetzt-121000};
+updateUserPresence(daten);
+assert.equal(farbe, '#aaa');
+assert.match(titel, /Letzte Meldung: Kein Fahrer erkannt/);
+assert.match(titel, /Nicht aktuell bestätigt/);
+daten.driver_presence.received_at = jetzt;
+daten.state = 'offline';
+updateUserPresence(daten);
+assert.equal(farbe, '#aaa');
+updateUserPresence({vehicle_state: {is_user_present: true, timestamp: jetzt}, state: 'online'});
+assert.equal(farbe, '#4caf50');
+assert.match(titel, /Fahrzeug-API/);
+"""], capture_output=True, text=True, timeout=10)
+    assert ergebnis.returncode == 0, ergebnis.stdout + ergebnis.stderr
+
+
 def test_software_symbol_zeigt_den_aktuellen_fortschritt():
     node = shutil.which("node")
     if node is None:

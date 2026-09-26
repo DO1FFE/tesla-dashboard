@@ -1364,6 +1364,106 @@ def test_fleet_telemetrie_batch_merkt_empfangszeit_aller_felder(monkeypatch):
     assert daten["fleet_telemetry_field_received_at"]["DriverSeatOccupied"] == 2001
 
 
+@pytest.mark.parametrize("rohwert,erwartet", [
+    (True, True), (False, False), (None, None), ("<invalid>", None),
+    ({"invalid": True}, None), ("unknown", None), ("false", False),
+])
+def test_fahreranwesenheit_ist_vom_rest_wert_getrennt(rohwert, erwartet):
+    daten = {
+        "vehicle_state": {"is_user_present": True, "driver_present": True},
+        "fleet_telemetry_raw": {"DriverSeatOccupied": rohwert},
+        "fleet_telemetry_field_received_at": {"DriverSeatOccupied": 1790420845414},
+    }
+    app._fleet_telemetrie_rohdaten_anreichern(daten)
+    assert daten["driver_presence"] == {
+        "value": erwartet, "valid": erwartet is not None,
+        "received_at": 1790420845414, "source": "DriverSeatOccupied",
+    }
+    assert daten["vehicle_state"]["driver_present"] is erwartet
+    assert daten["vehicle_state"]["is_user_present"] is True
+    payload = app._subscriber_stream_payload(daten)
+    assert payload["driver_presence"] == daten["driver_presence"]
+    assert "fleet_telemetry_field_received_at" not in payload
+
+
+def test_ungueltige_fahreranwesenheit_wird_nicht_als_abwesend_gemeldet():
+    daten = {}
+    app._fleet_telemetrie_setze_feld(daten, "DriverSeatOccupied", True, 1790420845000)
+    app._fleet_telemetrie_setze_feld(daten, "DriverSeatOccupied", None, 1790420846000)
+    assert daten["vehicle_state"]["is_user_present"] is None
+    assert daten["vehicle_state"]["driver_present"] is None
+    assert daten["driver_presence"]["valid"] is False
+
+
+def test_erneutes_false_korrigiert_fahreranzeige_trotz_rest_true(monkeypatch):
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
+    monkeypatch.setattr(app, "_fleet_telemetrie_fahrzeuge", lambda: [])
+    monkeypatch.setattr(app, "_aprs_spaeter_senden", lambda *args: None)
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_spaeter_speichern", lambda *args: None)
+    daten = {
+        "vehicle_state": {"is_user_present": True, "driver_present": True},
+        "fleet_telemetry_raw": {"DriverSeatOccupied": False},
+        "fleet_telemetry_field_received_at": {"DriverSeatOccupied": 1790420845000},
+    }
+    monkeypatch.setattr(app, "latest_data", {"veh-1": daten})
+    gesendet = []
+    monkeypatch.setattr(app, "_subscriber_daten_senden", lambda _id, data: gesendet.append(app._subscriber_stream_payload(data)))
+    app._fleet_telemetrie_v_felder_aktualisieren("TESTVIN", [("DriverSeatOccupied", False, 1790420846000)])
+    assert gesendet[-1]["driver_presence"]["value"] is False
+    assert gesendet[-1]["driver_presence"]["received_at"] == 1790420846000
+    app._fleet_telemetrie_v_felder_aktualisieren("TESTVIN", [("DriverSeatOccupied", True, 1790420844000)])
+    assert daten["fleet_telemetry_raw"]["DriverSeatOccupied"] is False
+
+
+@pytest.mark.parametrize("fahrer", [False, True, None])
+def test_camp_aus_uebernimmt_nicht_die_rest_anwesenheit(monkeypatch, fahrer):
+    zeit = 1790420845000
+    daten = {"drive_state": {"shift_state": "P"}, "state": "online"}
+    app._fleet_telemetrie_setze_feld(
+        daten, "DriverSeatOccupied", fahrer, zeit,
+    )
+    app._fleet_telemetrie_setze_feld(
+        daten, "ClimateKeeperMode", "ClimateKeeperModeStateParty", zeit,
+    )
+    monkeypatch.setattr(app, "latest_data", {"veh-1": daten})
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["veh-1"])
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktualisieren", lambda _id, data: data)
+    for name in (
+        "_fleet_telemetrie_cache_spaeter_speichern",
+        "_fleet_telemetrie_parkstatus_aufzeichnen", "_subscriber_daten_senden",
+        "_aprs_spaeter_senden", "track_drive_path", "track_park_time",
+    ):
+        monkeypatch.setattr(app, name, lambda *args: None)
+    app._fleet_telemetrie_parkdaten_uebernehmen("TESTVIN", {
+        "vehicle_state": {"is_user_present": True, "locked": True},
+        "climate_state": {"climate_keeper_mode": "camp", "is_climate_on": True},
+    }, zeit + 12000)
+    app._fleet_telemetrie_setze_feld(
+        daten, "ClimateKeeperMode", "ClimateKeeperModeStateOff", zeit + 30000,
+    )
+    app._fleet_telemetrie_setze_feld(
+        daten, "HvacPower", "HvacPowerStateOff", zeit + 30000,
+    )
+    payload = app._subscriber_stream_payload(daten)
+    assert payload["vehicle_state"]["is_user_present"] is True
+    assert payload["climate_state"]["climate_keeper_mode"] == "off"
+    assert payload["driver_presence"]["value"] is fahrer
+    assert payload["driver_presence"]["valid"] is (fahrer is not None)
+    assert payload["driver_presence"]["received_at"] == zeit
+
+
+@pytest.mark.parametrize("profil,intervall", [
+    ("live", 10), ("live_extended", 10), ("parked", 10), ("charging", 30),
+])
+def test_fahreranwesenheit_in_allen_vollprofilen(profil, intervall):
+    config = app._fleet_telemetrie_profile_config_erstellen({
+        "config": {"fields": {"DriverSeatOccupied": {"interval_seconds": 60}}},
+    }, profil)
+    assert config["config"]["fields"]["DriverSeatOccupied"] == {
+        "interval_seconds": intervall,
+    }
+
+
 def test_fleet_telemetrie_connectivity_wertet_disconnected_als_offline(monkeypatch):
     gespeicherte_daten = []
     connected_at = "2026-06-14T14:00:00Z"

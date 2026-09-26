@@ -1221,7 +1221,7 @@ function handleData(data) {
     var climate = data.climate_state || {};
     updateDataAge(neuesterDatenZeitstempel(data, vehicle, drive, charge, climate));
     updateLockStatus(vehicle.locked);
-    updateUserPresence(vehicle.is_user_present);
+    updateUserPresence(data);
     updateTurnSignalIndicator(vehicle.lights_turn_signal, vehicle.lights_hazards_active);
     updateHighBeamIndicator(vehicle.lights_high_beams);
     updateVehicleSymbols(vehicle, data.gui_settings || {});
@@ -1514,35 +1514,46 @@ function updateLockStatus(locked) {
     }
 }
 
-function updateUserPresence(present) {
+function updateUserPresence(data) {
+    data = data || {};
+    var vehicle = data.vehicle_state || {};
+    var meldung = data.driver_presence;
+    var fahrerSignal = meldung && meldung.source === 'DriverSeatOccupied';
+    var present = meldung ? (meldung.valid ? meldung.value : null) : vehicle.is_user_present;
+    if (typeof present === 'string' && /^(true|false)$/i.test(present.trim())) {
+        present = present.trim().toLowerCase() === 'true';
+    }
+    if (typeof present !== 'boolean') present = null;
+    var empfangen = Number(meldung ? meldung.received_at : vehicle.timestamp);
+    var alter = Date.now() - empfangen;
+    var veraltet = !Number.isFinite(empfangen) || empfangen <= 0 || alter < -1000 ||
+        alter > 120000 || data.state === 'offline' || data.state === 'asleep';
+    var titel;
     if (present == null) {
-        $('#user-presence').empty();
-        return;
-    }
-    var isPresent = false;
-    if (typeof present === 'string') {
-        var norm = present.toLowerCase();
-        isPresent = norm === 'true' || norm === '1';
+        titel = fahrerSignal ? 'Fahreranwesenheit unbekannt' : 'Anwesenheit unbekannt';
+    } else if (fahrerSignal) {
+        titel = present ? 'Fahrer erkannt' : 'Kein Fahrer erkannt';
     } else {
-        isPresent = !!present;
+        titel = present ? 'Anwesenheit laut Fahrzeug-API' : 'Keine Anwesenheit laut Fahrzeug-API';
     }
+    if (present != null && veraltet) titel = 'Letzte Meldung: ' + titel;
+    if (Number.isFinite(empfangen) && empfangen > 0) {
+        titel += ' · Empfangen: ' + new Date(empfangen).toLocaleString('de-DE', {timeZone: 'Europe/Berlin'});
+    } else {
+        titel += ' · Empfang unbekannt';
+    }
+    if (veraltet) titel += ' · Nicht aktuell bestätigt';
+    if (fahrerSignal) titel += ' · Quelle: DriverSeatOccupied (nur Fahrer)';
     var icon = '<svg width="30" height="30" viewBox="0 0 24 24" ' +
                'fill="currentColor" aria-hidden="true">' +
                '<circle cx="12" cy="7" r="5" />' +
                '<path d="M2 22c0-5.5 4.5-10 10-10s10 4.5 10 10" />' +
                '</svg>';
-    $('#user-presence').html(icon);
-    if (isPresent) {
-        $('#user-presence')
-            .css('color', '#4caf50')
-            .attr('title', 'Person im Fahrzeug')
-            .attr('aria-label', 'Person im Fahrzeug');
-    } else {
-        $('#user-presence')
-            .css('color', '#d00')
-            .attr('title', 'Keine Person im Fahrzeug')
-            .attr('aria-label', 'Keine Person im Fahrzeug');
-    }
+    var farbe = present == null || veraltet ? '#aaa' : (present ? '#4caf50' : '#d00');
+    $('#user-presence').html(icon)
+        .css('color', farbe)
+        .attr('title', titel)
+        .attr('aria-label', titel);
 }
 
 function updateTurnSignalIndicator(turnSignal, hazardsActive) {
@@ -4370,6 +4381,7 @@ setInterval(fetchConfig, 15000);
 setInterval(displayParkTime, 60000);
 setInterval(function() {
     if (!letzteDiagnoseDaten) return;
+    updateUserPresence(letzteDiagnoseDaten);
     updateTechnischeDetails(letzteDiagnoseDaten.charge_state, letzteDiagnoseDaten.telemetry_diagnostics);
     updateNavBar(letzteDiagnoseDaten.drive_state);
     var info = softwareUpdateMitTelemetrie(letzteSoftwareUpdateMeldung);
