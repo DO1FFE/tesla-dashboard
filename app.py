@@ -2390,6 +2390,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_FELDER = (
 FLEET_TELEMETRIE_PROFILE_LIVE_FAHR_FELDER = (
     "Location",
 )
+FLEET_TELEMETRIE_PROFILE_CAMP_TAKTFELDER = ("PackCurrent", "PackVoltage")
 FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MAX_ABSTAND_SECONDS = max(
     1.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_CONFIRM_MAX_INTERVAL_SECONDS", "2")),
@@ -6671,7 +6672,12 @@ def _fleet_telemetrie_profile_live_takt_bestaetigt(data, status, jetzt=None):
         abstände = {}
     schnelle_felder = 0
     schnelle_fahrfelder = 0
-    for feld in FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNGSFELDER:
+    camp_aktiv = _fleet_telemetrie_profile_camp_aktiv(data)
+    takt_felder = (
+        FLEET_TELEMETRIE_PROFILE_CAMP_TAKTFELDER
+        if camp_aktiv else FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNGSFELDER
+    )
+    for feld in takt_felder:
         letzter = _fleet_telemetrie_timestamp_sekunden(
             empfangen.get(feld),
             letzter_versand,
@@ -6708,6 +6714,9 @@ def _fleet_telemetrie_profile_live_takt_bestaetigt(data, status, jetzt=None):
                 schnelle_fahrfelder += 1
     if _fleet_telemetrie_profile_fahrzeug_fährt(data) and schnelle_fahrfelder < 1:
         return False
+    if camp_aktiv:
+        # Konstanter Strom wird nicht erneut gesendet; schnelle Spannung reicht.
+        return schnelle_felder >= 1
     return schnelle_felder >= FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNG_MIN_FELDER
 
 
@@ -6826,7 +6835,12 @@ def _fleet_telemetrie_profile_live_takt_stabil(data, jetzt=None):
         return False
     stabile_felder = 0
     stabile_fahrfelder = 0
-    for feld in FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_FELDER:
+    camp_aktiv = _fleet_telemetrie_profile_camp_aktiv(data)
+    takt_felder = (
+        FLEET_TELEMETRIE_PROFILE_CAMP_TAKTFELDER
+        if camp_aktiv else FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_FELDER
+    )
+    for feld in takt_felder:
         letzter = _fleet_telemetrie_timestamp_sekunden(empfangen.get(feld), jetzt)
         intervall = _as_float(abstände.get(feld))
         if letzter is None or intervall is None:
@@ -6864,6 +6878,8 @@ def _fleet_telemetrie_profile_live_takt_stabil(data, jetzt=None):
         and stabile_fahrfelder < 1
     ):
         return False
+    if camp_aktiv:
+        return stabile_felder >= 1
     return stabile_felder >= FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_FELDER
 
 

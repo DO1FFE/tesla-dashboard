@@ -6200,6 +6200,44 @@ def test_fleet_telemetrie_camp_worker_repariert_bis_echter_sekundentakt_ankommt(
     assert gesendet == [("live", 2000.0), ("live_extended", 2005.0)]
 
 
+@pytest.mark.parametrize("taktfeld", ["PackCurrent", "PackVoltage"])
+def test_fleet_telemetrie_camp_stabiler_takt_braucht_keine_unveränderten_werte(
+    camp_profil_überwachung, taktfeld,
+):
+    daten, jetzt, gesendet = camp_profil_überwachung
+    status = app._fleet_telemetry_profile_status
+    status.update(_bestaetigter_profilstatus("live", 1900.0))
+    for sekunde in range(2000, 2091):
+        jetzt[0] = float(sekunde)
+        daten["fleet_telemetry_received_at"] = sekunde * 1000
+        daten["fleet_telemetry_field_received_at"][taktfeld] = sekunde * 1000
+        app._fleet_telemetrie_profile_sync_erneut_pruefen()
+        assert status["live_retry_active"] is False
+        assert gesendet == ([("live_extended", 2090.0)] if sekunde == 2090 else [])
+
+
+@pytest.mark.parametrize("taktfeld, abstand_ms, alter, bestätigt", [
+    ("PackVoltage", 1000, 0, True),
+    ("PackCurrent", 1000, 0, True),
+    ("PackVoltage", 10000, 0, False),
+    ("PackVoltage", 1000, 20, False),
+    ("BrakePedalPos", 1000, 0, False),
+    ("VehicleSpeed", 1000, 0, False),
+])
+def test_fleet_telemetrie_camp_bestätigung_verlangt_schnelle_frische_akkudaten(
+    camp_profil_überwachung, taktfeld, abstand_ms, alter, bestätigt,
+):
+    daten, jetzt, gesendet = camp_profil_überwachung
+    status = app._fleet_telemetry_profile_status
+    daten["fleet_telemetry_field_received_at"][taktfeld] = (jetzt[0] - alter) * 1000
+    daten["fleet_telemetry_field_interval_ms"][taktfeld] = abstand_ms
+
+    assert app._fleet_telemetrie_profile_live_takt_bestaetigt(
+        daten, status, jetzt[0],
+    ) is bestätigt
+    assert app._fleet_telemetrie_profile_live_takt_stabil(daten, jetzt[0]) is bestätigt
+
+
 def test_fleet_telemetrie_camp_worker_schuetzt_neuverbindung(
     camp_profil_überwachung,
 ):
