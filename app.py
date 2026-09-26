@@ -55,6 +55,7 @@ import requests
 from functools import wraps
 from dotenv import load_dotenv, set_key
 from version import get_version
+import telemetrie_diagnose
 import qrcode
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -2008,7 +2009,7 @@ _fleet_telemetry_queue_verworfen = 0
 _fleet_telemetry_queue_warnung = 0.0
 FLEET_TELEMETRIE_PROFILE = {"live", "live_extended", "parked", "charging"}
 FLEET_TELEMETRIE_PROFILE_STANDARD = "live"
-FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 6
+FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 7
 FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS = max(
     0.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_PARK_PROFILE_DELAY_SECONDS", "120")),
@@ -2143,6 +2144,8 @@ FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_FELDER = max(
 )
 FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER = frozenset()
 FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER = frozenset({
+    "SoftwareUpdateAvailable",
+    "SoftwareUpdateInProgress",
     "SoftwareUpdateDownloadPercentComplete",
     "SoftwareUpdateExpectedDurationMinutes",
     "SoftwareUpdateInstallationPercentComplete",
@@ -2154,6 +2157,7 @@ FLEET_TELEMETRIE_PROFILE_OPTIONALE_FELDER = frozenset({
     "DCDCEnable",
 }) | FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER
 FLEET_TELEMETRIE_PROFILE_LIVE_BEWEGUNGS_INKLUSIVFELDER = frozenset({
+    "GpsAccuracyMeters",
     "BrakePedal",
     "BrakePedalPos",
     "DCDCEnable",
@@ -2170,6 +2174,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_BEWEGUNGS_INKLUSIVFELDER = frozenset({
     "VehicleSpeed",
 })
 FLEET_TELEMETRIE_PROFILE_LIVE_NAVIGATIONS_INKLUSIVFELDER = frozenset({
+    "MaxSpeedToReachDestinationMph",
     "DestinationLocation",
     "DestinationName",
     "ExpectedEnergyPercentAtTripArrival",
@@ -2800,6 +2805,14 @@ def _fleet_telemetrie_cache_pending_schreiben():
         _fleet_telemetry_cache_pending.clear()
     for cache_id, data in pending.items():
         _save_cached(cache_id, data)
+        if _fleet_telemetrie_primärer_cache(cache_id, data):
+            try:
+                telemetrie_diagnose.anreichern(data)
+                telemetrie_diagnose.verlauf_speichern(
+                    _telemetrie_diagnose_datenbankpfad(), cache_id, data,
+                )
+            except Exception:
+                app.logger.exception("Telemetrie-Diagnoseverlauf nicht gespeichert")
 
 
 def _fleet_telemetrie_cache_schreiber_loop():
@@ -6115,6 +6128,10 @@ def _fleet_telemetrie_wert_unveraendert(data, field, value):
     rohwerte = data.get("fleet_telemetry_raw") if isinstance(data, dict) else None
     if not isinstance(rohwerte, dict) or field not in rohwerte:
         return False
+    if field == "Location" and isinstance(value, dict):
+        drive = data.get("drive_state", {})
+        if any(drive.get(key) != value.get(key) for key in ("latitude", "longitude")):
+            return False
     if field in FLEET_TELEMETRIE_FENSTER_FELDER:
         vehicle_state = data.get("vehicle_state")
         if isinstance(vehicle_state, dict):
@@ -6324,7 +6341,9 @@ def _fleet_telemetrie_rohdaten_anreichern(data):
     raw = data.get("fleet_telemetry_raw")
     if not isinstance(raw, dict):
         return
+    telemetrie_diagnose.anreichern(data)
     _fleet_telemetrie_software_status_aus_cache(data)
+    telemetrie_diagnose.software_signale(data)
     vehicle_state = data.setdefault("vehicle_state", {})
     charge = data.setdefault("charge_state", {})
     climate = data.setdefault("climate_state", {})
@@ -7079,6 +7098,8 @@ def _fleet_telemetrie_profile_ziel(data):
 def _fleet_telemetrie_profile_intervall(profil, feld):
     """Gib das gewünschte Intervall für ein Profilfeld zurück."""
 
+    if profil in FLEET_TELEMETRIE_PROFILE and feld in telemetrie_diagnose.INTERVALLE:
+        return telemetrie_diagnose.profilfelder(profil).get(feld)
     if (
         profil in FLEET_TELEMETRIE_PROFILE
         and feld in FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER
@@ -7161,6 +7182,9 @@ def _fleet_telemetrie_profile_config_erstellen(
         for feld in list(fields):
             if feld not in FLEET_TELEMETRIE_PROFILE_CHARGING_FELDER:
                 fields.pop(feld, None)
+    if not wiederherstellung:
+        for feld, intervall in telemetrie_diagnose.profilfelder(profil).items():
+            fields[feld] = {"interval_seconds": intervall}
     for feld, feld_config in fields.items():
         if not isinstance(feld_config, dict):
             continue
@@ -8754,6 +8778,9 @@ def _fleet_telemetrie_empfang_vermerken(
 
 
 FLEET_TELEMETRIE_NAVIGATIONSFELDER = (
+    "active_route_max_speed_mph",
+    "active_route_max_speed_received_at",
+    "active_route_target_changed_at",
     "active_route_destination",
     "active_route_latitude",
     "active_route_longitude",
@@ -8765,6 +8792,7 @@ FLEET_TELEMETRIE_NAVIGATIONSFELDER = (
     "active_route_updated_at",
 )
 FLEET_TELEMETRIE_NAVIGATIONS_ROHFELDER = (
+    "MaxSpeedToReachDestinationMph",
     "DestinationLocation",
     "DestinationName",
     "ExpectedEnergyPercentAtTripArrival",
@@ -8842,6 +8870,8 @@ def _fleet_telemetrie_navigation_beenden(drive, timestamp_ms, data=None):
 def _fleet_telemetrie_navigation_aktivieren(drive, timestamp_ms, data=None):
     """Markiere eine aktiv gemeldete Fahrzeugnavigation."""
 
+    if drive.get("active_route_active") is not True:
+        drive["active_route_target_changed_at"] = timestamp_ms
     drive["active_route_active"] = True
     drive.pop("active_route_ended_at", None)
     drive["active_route_updated_at"] = timestamp_ms
@@ -9201,6 +9231,7 @@ def _fleet_telemetrie_navigation_cache_bereinigen(data):
 
 def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
     """Schreibe ein einzelnes Fleet-Telemetry-Feld in die Dashboard-Struktur."""
+    field = telemetrie_diagnose.feldname(field)
     value = _fleet_telemetrie_wert(value)
     rohwerte = data.setdefault("fleet_telemetry_raw", {})
     drive = data.setdefault("drive_state", {})
@@ -9212,10 +9243,17 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
     if field not in FLEET_TELEMETRIE_TPMS_DRUCKFELDER:
         rohwerte[field] = value
 
+    if field in telemetrie_diagnose.INTERVALLE:
+        data.setdefault("fleet_telemetry_field_received_at", {})[field] = timestamp_ms
+        telemetrie_diagnose.anreichern(data)
+        return True
+
     if field == "Location":
         if isinstance(value, dict):
             lat = value.get("latitude")
             lon = value.get("longitude")
+            if not telemetrie_diagnose.position_plausibel(data, lat, lon, timestamp_ms):
+                return True
             if lat is not None and lon is not None:
                 drive["latitude"] = lat
                 drive["longitude"] = lon
@@ -9241,6 +9279,7 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
                 )
                 hat_altes_ziel = any(wert is not None for wert in altes_ziel)
                 if hat_altes_ziel and altes_ziel != (lat, lon):
+                    drive["active_route_target_changed_at"] = timestamp_ms
                     _fleet_telemetrie_navigation_routenlinie_verwerfen(
                         data,
                         drive,
@@ -9269,6 +9308,7 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         else:
             altes_ziel = drive.get("active_route_destination")
             if altes_ziel is not None and altes_ziel != value:
+                drive["active_route_target_changed_at"] = timestamp_ms
                 _fleet_telemetrie_navigation_routenlinie_verwerfen(
                     data,
                     drive,
@@ -10748,6 +10788,10 @@ def _fleet_telemetrie_position_uebernehmen(vin, drive_data, abgerufen_at_ms=None
             alte_richtung = _as_float(drive.get("heading"))
             geändert = alte_lat != lat or alte_lon != lon
 
+            telemetrie_diagnose.anreichern(data)
+            if not telemetrie_diagnose.position_plausibel(data, lat, lon, positionszeit):
+                continue
+
             drive["latitude"] = lat
             drive["longitude"] = lon
             drive["native_latitude"] = lat
@@ -11064,6 +11108,10 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
 
     if not feldwerte:
         return False
+    feldwerte = [(telemetrie_diagnose.feldname(feld), wert, zeit)
+                 for feld, wert, zeit in feldwerte]
+    # Die Genauigkeit desselben MQTT-Batches muss vor der Position vorliegen.
+    feldwerte.sort(key=lambda eintrag: eintrag[0] != "GpsAccuracyMeters")
     v2l_relevante_felder = {
         "ACChargingPower",
         "BatteryLevel",
@@ -11086,6 +11134,7 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
             data = latest_data.get(cache_id)
             if not isinstance(data, dict):
                 data = _load_cached(cache_id) or {}
+            telemetrie_diagnose.cache_normalisieren(data)
             hatte_timestamp = "timestamp" in data
             timestamp_vorher = data.get("timestamp")
             hatte_update_zeit = "fleet_telemetry_updated_at" in data
@@ -11100,6 +11149,10 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
             for field, value, timestamp_ms in feldwerte:
                 if timestamp_ms is None:
                     timestamp_ms = int(time.time() * 1000)
+                if field in telemetrie_diagnose.INTERVALLE:
+                    vorher = data.get("fleet_telemetry_field_received_at", {}).get(field, 0)
+                    if timestamp_ms < (vorher or 0):
+                        continue
                 if (
                     letzter_empfangszeitstempel is None
                     or timestamp_ms >= letzter_empfangszeitstempel
@@ -11118,7 +11171,8 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
                         navigation_zeitstempel or 0,
                         timestamp_ms,
                     )
-                if _fleet_telemetrie_wert_unveraendert(data, field, value):
+                if (field not in telemetrie_diagnose.INTERVALLE
+                        and _fleet_telemetrie_wert_unveraendert(data, field, value)):
                     continue
                 if field == "Gear" and _fleet_telemetrie_shift(value) == "P":
                     parkposition_zeitstempel = timestamp_ms
@@ -17060,6 +17114,24 @@ def statistics_page():
     payload = _prepare_statistics_payload()
     cfg = load_config()
     return render_template("statistik.html", config=cfg, **payload)
+
+
+def _telemetrie_diagnose_datenbankpfad():
+    return os.path.join(DATA_DIR, "telemetrie-diagnose.sqlite")
+
+
+@app.route("/api/akku-verlauf")
+def api_akku_verlauf():
+    """Liefere echte Messpunkte ohne Kapazitäts- oder Verbrauchsschätzung."""
+    fahrzeug = request.args.get("vehicle_id") or _default_vehicle_id or default_vehicle_id()
+    return jsonify({
+        "vehicle_id": fahrzeug,
+        "field": "NominalFullPackEnergyKwh",
+        "unit": "kWh",
+        "points": telemetrie_diagnose.verlauf_laden(
+            _telemetrie_diagnose_datenbankpfad(), fahrzeug, täglich=True,
+        ),
+    })
 
 
 @app.route("/api/statistik")

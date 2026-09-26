@@ -32,6 +32,7 @@
         {% if show_heat %}<a class="menu-button" href="/heatmap">Heatmap</a>{% endif %}
     </nav>
     {% endif %}
+    <div class="statistik-tabelle">
     <table>
         <thead>
             <tr>
@@ -75,5 +76,20 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
+    <section id="akku-verlauf" aria-labelledby="akku-titel">
+        <h2 id="akku-titel">Nominale Akku-Vollenergie</h2>
+        <p id="akku-status" role="status">Messwerte werden geladen.</p>
+        <p>Fahrzeugschätzung in kWh, keine Restenergie und kein gemessener Gesundheitszustand.</p>
+        <canvas id="akku-diagramm" role="img" aria-label="Verlauf der nominalen Akku-Vollenergie; Messwerte in der folgenden Tabelle" hidden></canvas>
+        <div class="akku-messpunkte">
+            <table hidden id="akku-tabelle">
+                <thead><tr><th>Letzter Empfang je UTC-Tag (Ortszeit)</th><th>Nominale Vollenergie</th></tr></thead>
+                <tbody id="akku-messwerte"></tbody>
+            </table>
+        </div>
+    </section>
+    <footer class="app-version">© 2025-{{ year }} Erik Schauer, do1ffe@darc.de</footer>
+    <script src="/static/js/akku-verlauf.js"></script>
 </body>
 </html>

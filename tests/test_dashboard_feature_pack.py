@@ -299,7 +299,7 @@ def test_technische_packdetails_sind_in_ui_eingebunden():
     js = pathlib.Path("static/js/main.js").read_text(encoding="utf-8")
 
     assert 'id="technical-info"' in html
-    assert "updateTechnischeDetails(charge)" in js
+    assert "updateTechnischeDetails(charge, data.telemetry_diagnostics)" in js
     assert "charge.pack_voltage" in js
     assert "charge.pack_current" in js
     assert "charge.pack_power" in js

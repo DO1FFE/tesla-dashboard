@@ -55,6 +55,29 @@ in `data/trips` and moves them to the appropriate vehicle folder automatically.
 All data paths are resolved relative to the application directory, so the server
 can be started from any location while still accessing existing trips and logs.
 
+### Extended Fleet diagnostics (firmware 2026.32+)
+
+Technical Details include nominal full-pack energy, lifetime charged energy,
+minimum brick SOC, GPS accuracy, road grade, remote-start reporting and the
+two software-update flags. Numeric MQTT enum keys 260–268 from older telemetry
+receivers are normalized to their names. Invalid values remain unknown; every
+diagnostic retains its actual reception timestamp. The navigation speed forecast
+is converted from mph to km/h and is hidden for inactive or stale routes.
+
+Live and Live+ request GPS accuracy every second, grade every 5 seconds, minimum
+brick SOC every 30 seconds and nominal full-pack energy every 300 seconds.
+Update flags use a one-second interval in every profile. These are configured
+reporting intervals, not a guarantee of new vehicle measurements or delivery.
+GPS plausibility uses accuracy, elapsed time and speed, with recovery for
+consistent new fixes and long communication gaps.
+
+`data/telemetrie-diagnose.sqlite` stores the latest valid battery diagnostic
+sample per hour and grade per minute while driving, separated by vehicle.
+`/statistik` and `/api/akku-verlauf` show the last nominal full-pack sample of
+each UTC day, with reception times displayed in Europe/Berlin. Historical values
+are not extrapolated, and capacity estimates do not replace charging or V2L
+energy integration or establish battery state of health.
+
 ### Statistics aggregation
 
 Daily and monthly statistics are persisted in `data/statistics.db` inside the

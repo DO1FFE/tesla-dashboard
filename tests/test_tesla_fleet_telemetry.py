@@ -4891,7 +4891,8 @@ def test_fleet_telemetrie_live_reparatur_sendet_basis_dann_vollprofil(
             "Location",
             "Odometer",
             "VehicleSpeed",
-        } | app.FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER,
+        } | app.FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER
+        | set(app.telemetrie_diagnose.profilfelder("live")),
     ]
     status = app._fleet_telemetry_profile_status
     assert status["live_retry_attempts"] == 2

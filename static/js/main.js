@@ -503,6 +503,8 @@ map.on('zoomend', function() {
 var polyline = null;
 var pendingPath = null;
 var lastDataTimestamp = null;
+var letzteDiagnoseDaten = null;
+var letzteSoftwareUpdateMeldung = null;
 var lastStreamTimestamp = null;
 var lastStateTimestamp = null;
 var lastStateSinceTimestamp = null;
@@ -1207,7 +1209,10 @@ function handleData(data) {
         data.telemetry_config_sync_error,
         data.telemetry_config_sync_profile
     );
-    var vehicle = data.vehicle_state || {};
+    var vehicle = Object.assign({}, data.vehicle_state || {});
+    letzteSoftwareUpdateMeldung = vehicle.software_update;
+    vehicle.software_update = softwareUpdateMitTelemetrie(vehicle.software_update);
+    letzteDiagnoseDaten = data;
     updateOfflineInfo(data.state, vehicle.service_mode, vehicle.service_mode_plus,
         data.fleet_api_blocked_reason);
     updateSoftwareUpdate(vehicle.software_update);
@@ -1238,7 +1243,7 @@ function handleData(data) {
     updateV2LInfos(charge, drive);
     updateChargingInfo(charge, data);
     updateLadeplanungInfo(charge, drive, data);
-    updateTechnischeDetails(charge);
+    updateTechnischeDetails(charge, data.telemetry_diagnostics);
     updateThermometers(
         climate.inside_temp,
         climate.outside_temp,
@@ -3216,7 +3221,27 @@ function formatiereTechnischenWert(wert, nachkommastellen, einheit) {
     return zahl.toFixed(nachkommastellen) + ' ' + einheit;
 }
 
-function updateTechnischeDetails(charge) {
+function diagnoseWertText(punkt, stellen, einheit) {
+    if (!punkt || !punkt.valid || punkt.value == null) {
+        return punkt && punkt.received_at ? 'Nicht verfügbar (ungültig gemeldet)' : 'Noch nicht empfangen';
+    }
+    if (typeof punkt.value === 'boolean') {
+        return punkt.value ? 'Ja' : 'Nein';
+    }
+    return Number(punkt.value).toLocaleString('de-DE', {
+        minimumFractionDigits: stellen, maximumFractionDigits: stellen
+    }) + ' ' + einheit;
+}
+
+function diagnoseEmpfangText(punkt, maxAlter) {
+    if (!punkt || !punkt.received_at) return 'Empfang unbekannt';
+    var datum = new Date(punkt.received_at);
+    var text = 'Empfangen: ' + datum.toLocaleString('de-DE', {timeZone: 'Europe/Berlin'});
+    if (Date.now() - punkt.received_at > maxAlter) text += ' (veraltet)';
+    return text;
+}
+
+function updateTechnischeDetails(charge, diagnose) {
     var $info = $('#technical-info');
     if (!$info.length) {
         return;
@@ -3268,6 +3293,22 @@ function updateTechnischeDetails(charge) {
             'keine HV-Stützung des 12V-Systems';
     }
     rows.push('<tr><th>12V-Versorgung:</th><td>' + escapeHtml(dcdcText) + '</td></tr>');
+    diagnose = diagnose || {};
+    [
+        ['NominalFullPackEnergyKwh', 'Nominale Vollenergie', 2, 'kWh', 900000, 'Fahrzeugschätzung, keine Restenergie'],
+        ['LifetimeEnergyChargedKwh', 'Ladeenergie-Zähler (Lebenszeit)', 2, 'kWh', 900000],
+        ['BrickSocMinPercent', 'Kleinster Zellgruppen-SOC', 2, '%', 180000],
+        ['GpsAccuracyMeters', 'GPS-Genauigkeit', 2, 'm', 120000],
+        ['GradeEstimatePercent', 'Geschätzte Steigung', 1, '%', 30000],
+        ['RemoteStartActive', 'Fernstart (Rohmeldung)', 0, '', 120000],
+        ['SoftwareUpdateAvailable', 'Software-Update verfügbar', 0, '', 120000],
+        ['SoftwareUpdateInProgress', 'Software-Update läuft', 0, '', 120000]
+    ].forEach(function(feld) {
+        var punkt = diagnose[feld[0]];
+        rows.push('<tr><th title="' + escapeHtml(feld[5] || feld[1]) + '">' + escapeHtml(feld[1]) + ':</th><td>' +
+            escapeHtml(diagnoseWertText(punkt, feld[2], feld[3])) +
+            '<small class="diagnose-empfang">' + escapeHtml(diagnoseEmpfangText(punkt, feld[4])) + '</small></td></tr>');
+    });
 
     var html = '<h3>Technische Details</h3>' +
         '<table>' + rows.join('') + '</table>';
@@ -3312,6 +3353,14 @@ function updateNavBar(drive) {
     }
     if (drive.active_route_traffic_minutes_delay != null) {
         rows.push('<tr><th><span class="icon">🚦</span>Stau-Verzögerung:</th><td>+' + Math.round(drive.active_route_traffic_minutes_delay) + ' min</td></tr>');
+    }
+    var prognoseZeit = drive.active_route_max_speed_received_at;
+    if (drive.active_route_max_speed_mph != null && prognoseZeit &&
+            Date.now() - prognoseZeit >= -1000 && Date.now() - prognoseZeit <= 60000) {
+        var prognose = drive.active_route_max_speed_mph * MILES_TO_KM;
+        rows.push('<tr><th>Maximaltempo bis zum Ziel (Fahrzeugprognose):</th><td>' +
+            Math.round(prognose) + ' km/h<small class="diagnose-empfang">' +
+            escapeHtml(diagnoseEmpfangText({received_at: prognoseZeit}, 60000)) + '</small></td></tr>');
     }
     $nav.html('<table>' + rows.join('') + '</table>');
 }
@@ -3775,6 +3824,7 @@ function softwareStatusText(status) {
         downloading: 'Download läuft',
         downloaded: 'Download abgeschlossen',
         installing: 'Installation läuft',
+        updating: 'Update läuft (Phase noch unbekannt)',
         install: 'Installation läuft',
         scheduled: 'Installation geplant',
         pending: 'Wartet',
@@ -3873,6 +3923,25 @@ function updateCenterDisplaySymbol(status) {
         .toggleClass('is-standby', standby)
         .attr('title', beschreibung)
         .attr('aria-label', beschreibung);
+}
+
+function softwareUpdateMitTelemetrie(info) {
+    if (!info || !info.telemetry_status_received_at) return info;
+    var alter = Date.now() - info.telemetry_status_received_at;
+    if (alter < -1000) return info;
+    if (info.telemetry_status === 'none') return null;
+    if (alter > 120000) return info;
+    if (!info.telemetry_status) return info;
+    var ergebnis = Object.assign({}, info, {status: info.telemetry_status});
+    if (!info.telemetry_version_received_at ||
+            info.telemetry_status_received_at - info.telemetry_version_received_at > 120000) {
+        ergebnis.version = '';
+    }
+    if (ergebnis.status === 'updating' || ergebnis.status === 'available') {
+        ergebnis.download_perc = null;
+        ergebnis.install_perc = null;
+    }
+    return ergebnis;
 }
 
 function softwareUpdateAktiv(info) {
@@ -4299,6 +4368,14 @@ setInterval(updateClientCount, 5000);
 setInterval(fetchAnnouncement, 15000);
 setInterval(fetchConfig, 15000);
 setInterval(displayParkTime, 60000);
+setInterval(function() {
+    if (!letzteDiagnoseDaten) return;
+    updateTechnischeDetails(letzteDiagnoseDaten.charge_state, letzteDiagnoseDaten.telemetry_diagnostics);
+    updateNavBar(letzteDiagnoseDaten.drive_state);
+    var info = softwareUpdateMitTelemetrie(letzteSoftwareUpdateMeldung);
+    updateSoftwareUpdate(info);
+    updateSoftwareUpdateSymbol(info);
+}, 5000);
 updateClientCount();
 fetchAnnouncement();
 updateSmsForm();
