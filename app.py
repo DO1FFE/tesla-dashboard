@@ -7061,7 +7061,30 @@ def _fleet_telemetrie_profile_fahrzeug_aktiv(data):
     )
     if _fleet_telemetrie_profile_fahrzeug_fährt(data):
         return True
-    if _fleet_telemetrie_wahr(vehicle.get("is_user_present")):
+    anwesend = vehicle.get("is_user_present")
+    raw = data.get("fleet_telemetry_raw")
+    fahreranwesenheit = data.get("driver_presence")
+    # Camp kann den allgemeinen REST-Wert auf True lassen. Ein tatsächlich
+    # empfangenes Fahrersignal hat Vorrang, auch wenn es ungültig geworden ist.
+    if isinstance(raw, dict) and "DriverSeatOccupied" in raw:
+        anwesend = _fleet_telemetrie_wert(raw["DriverSeatOccupied"])
+        if isinstance(anwesend, str):
+            anwesend = anwesend.strip().lower() == "true"
+        elif not isinstance(anwesend, bool):
+            anwesend = None
+    elif (
+        isinstance(fahreranwesenheit, dict)
+        and fahreranwesenheit.get("source") == "DriverSeatOccupied"
+        and (
+            fahreranwesenheit.get("valid") is True
+            or (_as_float(fahreranwesenheit.get("received_at")) or 0) > 0
+        )
+    ):
+        anwesend = (
+            fahreranwesenheit.get("valid") is True
+            and fahreranwesenheit.get("value") is True
+        )
+    if _fleet_telemetrie_wahr(anwesend):
         return True
     if _fleet_telemetrie_wahr(vehicle.get("brake_pedal")):
         return True
@@ -7069,6 +7092,10 @@ def _fleet_telemetrie_profile_fahrzeug_aktiv(data):
     if pedal is not None and pedal > 1:
         return True
     if _fleet_telemetrie_wahr(climate.get("is_climate_on")):
+        return True
+    if _fleet_telemetrie_klimawächtermodus(
+        climate.get("climate_keeper_mode")
+    ) == "camp":
         return True
     for key in ("df", "pf", "dr", "pr", "ft", "rt"):
         if _fleet_telemetrie_wahr(vehicle.get(key)):
@@ -7937,9 +7964,25 @@ def _fleet_telemetrie_profile_sync_erneut_pruefen():
             jetzt,
         )
     )
+    fahrzustand = (
+        datenstand.get("drive_state") if isinstance(datenstand, dict) else None
+    )
+    parkfrist_prüfen = (
+        isinstance(datenstand, dict)
+        and (
+            status_vorprüfung.get("target") == "parked"
+            or (
+                isinstance(fahrzustand, dict)
+                and str(fahrzustand.get("shift_state") or "").strip().upper() == "P"
+                and _fleet_telemetrie_profile_ziel(datenstand) == "parked"
+            )
+        )
+    )
+    # Die Ruhefrist läuft lokal weiter, auch wenn kein neuer MQTT-Wert kommt.
     if (
         _fleet_telemetrie_profile_offline_seit(datenstand, jetzt) is not None
         or live_takt_prüfen
+        or parkfrist_prüfen
     ):
         _fleet_telemetrie_profile_aktualisieren("profile-worker", datenstand)
     with _fleet_telemetry_profile_lock:

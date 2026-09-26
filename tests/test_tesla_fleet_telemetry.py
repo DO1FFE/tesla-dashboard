@@ -4143,6 +4143,91 @@ def test_fleet_telemetrie_profile_erkennt_zielzustand():
     }) == "parked"
 
 
+@pytest.mark.parametrize("fahrer, erwartet", [
+    (False, "parked"),
+    ("false", "parked"),
+    ({"value": False}, "parked"),
+    (None, "parked"),
+    ({"invalid": True}, "parked"),
+    (True, "live"),
+    ("true", "live"),
+])
+def test_fleet_telemetrie_profil_bevorzugt_fahrersignal_nach_camp(
+    fahrer, erwartet,
+):
+    daten = {
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "vehicle_state": {"is_user_present": True},
+        "climate_state": {"is_climate_on": False, "climate_keeper_mode": "off"},
+        "fleet_telemetry_raw": {"DriverSeatOccupied": fahrer},
+        "driver_presence": {
+            "source": "DriverSeatOccupied", "value": True, "valid": True,
+        },
+    }
+
+    assert app._fleet_telemetrie_profile_ziel(daten) == erwartet
+    assert daten["vehicle_state"]["is_user_present"] is True
+
+
+@pytest.mark.parametrize("fahrer, gültig, empfangen, erwartet", [
+    (False, True, 1000, "parked"),
+    (True, True, 1000, "live"),
+    (None, False, 1000, "parked"),
+    (None, False, None, "live"),
+])
+def test_fleet_telemetrie_profil_nutzt_anwesenheitssnapshot_oder_rest(
+    fahrer, gültig, empfangen, erwartet,
+):
+    daten = {
+        "vehicle_state": {"is_user_present": True},
+        "fleet_telemetry_raw": {},
+        "driver_presence": {
+            "source": "DriverSeatOccupied", "value": fahrer,
+            "valid": gültig, "received_at": empfangen,
+        },
+    }
+
+    assert app._fleet_telemetrie_profile_ziel(daten) == erwartet
+
+
+@pytest.mark.parametrize("modus", ["camp", "party", "ClimateKeeperModeStateParty"])
+def test_fleet_telemetrie_profil_camp_bleibt_ohne_fahrer_und_hvac_live(modus):
+    daten = {
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "vehicle_state": {"is_user_present": False},
+        "fleet_telemetry_raw": {"DriverSeatOccupied": False},
+        "climate_state": {"is_climate_on": False, "climate_keeper_mode": modus},
+    }
+
+    assert app._fleet_telemetrie_profile_ziel(daten) == "live"
+
+
+@pytest.mark.parametrize("ergänzung, erwartet", [
+    ({"drive_state": {"shift_state": "D", "speed": 0}}, "live"),
+    ({"drive_state": {"shift_state": "R", "speed": 0}}, "live"),
+    ({"drive_state": {"shift_state": "N", "speed": 0}}, "live"),
+    ({"drive_state": {"shift_state": "P", "speed": 5}}, "live"),
+    ({"climate_state": {"is_climate_on": True}}, "live"),
+    ({"vehicle_state": {"brake_pedal": True}}, "live"),
+    ({"vehicle_state": {"fp_window": 1}}, "live"),
+    ({"vehicle_state": {"df": 1}}, "live"),
+    ({"vehicle_state": {"center_display_state": "Accessory"}}, "live"),
+    ({"charge_state": {"charging_state": "Charging"}}, "charging"),
+    ({"v2l_active": True}, "live"),
+])
+def test_fleet_telemetrie_profil_freier_fahrersitz_überstimmt_keine_aktivität(
+    ergänzung, erwartet,
+):
+    daten = {
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "vehicle_state": {"is_user_present": True},
+        "fleet_telemetry_raw": {"DriverSeatOccupied": False},
+    }
+    daten.update(ergänzung)
+
+    assert app._fleet_telemetrie_profile_ziel(daten) == erwartet
+
+
 def test_fleet_telemetrie_profile_verlaesst_charging_nach_ladeende():
     assert app._fleet_telemetrie_profile_ziel({
         "charge_state": {
@@ -7415,6 +7500,102 @@ def test_fleet_telemetrie_profile_pending_prueft_vor_timeout_nur_sync(monkeypatc
     assert pruefungen == ["sync"]
     assert app._fleet_telemetry_profile_status["last_sent"] == 1000.0
     assert app._fleet_telemetry_profile_status["config_sync_state"] == "pending"
+
+
+@pytest.mark.parametrize("daten", [
+    {},
+    {"state": "online", "vehicle_state": {"is_user_present": False}},
+    {"state": "online", "drive_state": {"shift_state": None, "speed": 0}},
+])
+def test_fleet_telemetrie_worker_startet_ohne_parkzustand_keine_ruhefrist(
+    monkeypatch, daten,
+):
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: True)
+    monkeypatch.setattr(app, "latest_data", {"veh-1": daten})
+    monkeypatch.setattr(
+        app, "_fleet_telemetry_profile_status",
+        _bestaetigter_profilstatus("live", 1900.0),
+    )
+    monkeypatch.setattr(
+        app, "_fleet_telemetrie_profile_aktualisieren",
+        lambda *args: pytest.fail("Unvollständige Daten sind kein Parknachweis"),
+    )
+
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+
+    assert app._fleet_telemetry_profile_status["target"] == "live"
+
+
+@pytest.mark.parametrize("profil", ["live", "live_extended"])
+@pytest.mark.parametrize("unterbrechung", [None, "camp", "fahrt"])
+def test_fleet_telemetrie_worker_beendet_camp_parkfrist_ohne_neue_pakete(
+    monkeypatch, profil, unterbrechung,
+):
+    angefordert = []
+    jetzt = [2000.0]
+    daten = {
+        "state": "online",
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "vehicle_state": {"is_user_present": True, "center_display_state": "Off"},
+        "climate_state": {"is_climate_on": False, "climate_keeper_mode": "off"},
+        "fleet_telemetry_raw": {"DriverSeatOccupied": False},
+        "fleet_telemetry_received_at": 1_999_000,
+    }
+    monkeypatch.setattr(app.time, "time", lambda: jetzt[0])
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: True)
+    monkeypatch.setattr(app, "FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS", 120.0)
+    monkeypatch.setattr(app, "latest_data", {"veh-1": daten})
+    monkeypatch.setattr(
+        app, "_fleet_telemetry_profile_status",
+        _bestaetigter_profilstatus(profil, 1900.0, target="live"),
+    )
+    monkeypatch.setattr(
+        app, "_fleet_telemetrie_profile_spaeter_anwenden", angefordert.append,
+    )
+    monkeypatch.setattr(
+        app, "_fleet_telemetrie_profile_sync_pruefen",
+        lambda: pytest.fail("Die lokale Ruhefrist braucht keine Tesla-Abfrage"),
+    )
+
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+
+    status = app._fleet_telemetry_profile_status
+    assert status["target"] == "parked"
+    assert status["target_since"] == 2000.0
+    assert status["current"] == profil
+    assert angefordert == []
+
+    if unterbrechung:
+        jetzt[0] = 2090.0
+        if unterbrechung == "camp":
+            daten["climate_state"]["climate_keeper_mode"] = "camp"
+        else:
+            daten["drive_state"]["shift_state"] = "D"
+        app._fleet_telemetrie_profile_sync_erneut_pruefen()
+        assert status["target"] == "live"
+        assert angefordert == []
+
+        jetzt[0] = 2100.0
+        daten["climate_state"]["climate_keeper_mode"] = "off"
+        daten["drive_state"]["shift_state"] = "P"
+        app._fleet_telemetrie_profile_sync_erneut_pruefen()
+        assert status["target"] == "parked"
+        assert status["target_since"] == 2100.0
+
+    beginn = status["target_since"]
+    jetzt[0] = beginn + 119
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+    assert angefordert == []
+    assert status["current"] == profil
+
+    jetzt[0] = beginn + 120
+    app._fleet_telemetrie_profile_sync_erneut_pruefen()
+    assert angefordert == ["parked"]
+    assert status["target_since"] == beginn
+    assert status["last_sent_profile"] == "parked"
+    assert status["config_sync_state"] == "pending"
+    assert daten["fleet_telemetry_received_at"] == 1_999_000
 
 
 def test_fleet_telemetrie_profile_worker_stuft_offline_nach_parkfrist_ab(
