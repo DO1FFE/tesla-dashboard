@@ -1352,10 +1352,6 @@ select {
   white-space: nowrap;
 }
 
-#speedometer .steigung.ist-unbekannt {
-  opacity: 0.6;
-}
-
 /* Thermometers for inside/outside temperature */
 #thermometers {
   display: flex;
