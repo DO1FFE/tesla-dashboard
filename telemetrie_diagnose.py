@@ -26,7 +26,7 @@ INTERVALLE = {
     "LifetimeEnergyChargedKwh": (300, 300, 60),
     "BrickSocMinPercent": (30, 60, 30),
     "NominalFullPackEnergyKwh": (300, 300, 300),
-    "GradeEstimatePercent": (5, None, None),
+    "GradeEstimatePercent": (1, None, None),
     "MaxSpeedToReachDestinationMph": (30, None, None),
     "SoftwareUpdateAvailable": (1, 1, 1),
     "SoftwareUpdateInProgress": (1, 1, 1),

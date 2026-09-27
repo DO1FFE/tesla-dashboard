@@ -1341,6 +1341,21 @@ select {
   margin-top: 2px;
 }
 
+#speedometer .steigung {
+  width: 140px;
+  max-width: 100%;
+  min-height: 20px;
+  margin: 2px auto 0;
+  font-size: 13px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+#speedometer .steigung.ist-unbekannt {
+  opacity: 0.6;
+}
+
 /* Thermometers for inside/outside temperature */
 #thermometers {
   display: flex;

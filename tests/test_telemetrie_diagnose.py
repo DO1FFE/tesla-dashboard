@@ -65,6 +65,8 @@ def test_profile_mit_passenden_intervallen_ohne_semi(profil):
     assert not {"SemiCruiseSpeedLimitMph", "Cabin12vPortKeepOn", "Cabin48vPortKeepOn"} & set(felder)
     if profil in {"live", "live_extended"}:
         assert "GpsAccuracyMeters" in felder["Location"]["include_fields"]
+        assert felder["GradeEstimatePercent"] == {"interval_seconds": 1}
+        assert "GradeEstimatePercent" in felder["Location"]["include_fields"]
     else:
         assert "GradeEstimatePercent" not in felder
         assert "MaxSpeedToReachDestinationMph" not in felder
@@ -240,7 +242,14 @@ def test_verlauf_api_und_statistik_leerzustand(monkeypatch, tmp_path):
         assert '© 2025-' in html
 
 
-def test_mqtt_neue_werte_auch_unveraendert_mit_zeit_bis_sse(monkeypatch):
+@pytest.mark.parametrize("nummer, feld, wert, intervall", [
+    ("263", "NominalFullPackEnergyKwh", 71.1, 300000),
+    ("264", "GradeEstimatePercent", -3.5, 1000),
+    ("264", "GradeEstimatePercent", 0, 1000),
+])
+def test_mqtt_neue_werte_auch_unveraendert_mit_zeit_bis_sse(
+    monkeypatch, nummer, feld, wert, intervall,
+):
     cache = {"A": {"id_s": "A"}}
     monkeypatch.setattr(app, "latest_data", cache)
     monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda vin: ["A"])
@@ -251,13 +260,13 @@ def test_mqtt_neue_werte_auch_unveraendert_mit_zeit_bis_sse(monkeypatch):
         monkeypatch.setattr(app, name, lambda *args: None)
     nachrichten = []
     monkeypatch.setattr(app, "_subscriber_daten_senden", lambda _id, daten: nachrichten.append(app._subscriber_stream_payload(daten)))
-    app._fleet_telemetrie_v_felder_aktualisieren("VIN", [("263", 71.1, ZEIT)])
-    app._fleet_telemetrie_v_felder_aktualisieren("VIN", [("NominalFullPackEnergyKwh", 71.1, ZEIT + 300000)])
-    app._fleet_telemetrie_v_felder_aktualisieren("VIN", [("263", None, ZEIT + 1000)])
-    punkt = nachrichten[-1]["telemetry_diagnostics"]["NominalFullPackEnergyKwh"]
-    assert punkt == {"value": 71.1, "received_at": ZEIT + 300000, "valid": True}
+    app._fleet_telemetrie_v_felder_aktualisieren("VIN", [(nummer, wert, ZEIT)])
+    app._fleet_telemetrie_v_felder_aktualisieren("VIN", [(feld, wert, ZEIT + intervall)])
+    app._fleet_telemetrie_v_felder_aktualisieren("VIN", [(nummer, None, ZEIT + intervall // 2)])
+    punkt = nachrichten[-1]["telemetry_diagnostics"][feld]
+    assert punkt == {"value": wert, "received_at": ZEIT + intervall, "valid": True}
     assert "fleet_telemetry_field_received_at" not in nachrichten[-1]
-    assert cache["A"]["fleet_telemetry_raw"]["NominalFullPackEnergyKwh"] == 71.1
+    assert cache["A"]["fleet_telemetry_raw"][feld] == wert
 
 
 def test_frontend_null_false_zeit_update_und_navigationsprognose():
@@ -295,6 +304,77 @@ updateNavBar({...fahrt, active_route_active: false});
 assert.doesNotMatch(html, /97 km\/h/);
 updateNavBar({...fahrt, active_route_max_speed_received_at: jetzt-61000});
 assert.doesNotMatch(html, /97 km\/h/);
+"""
+    ergebnis = subprocess.run([node, "-e", skript], capture_output=True, text=True, timeout=10)
+    assert ergebnis.returncode == 0, ergebnis.stdout + ergebnis.stderr
+
+
+def test_steigungsanzeige_live_null_vorzeichen_und_ablauf():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js nicht verfügbar")
+    skript = r"""
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const quelle = fs.readFileSync('static/js/main.js', 'utf8');
+for (const name of ['aktualisiereSteigungsanzeige', 'diagnoseEmpfangText']) {
+    const start = quelle.indexOf('function ' + name + '(');
+    const ende = quelle.indexOf('\nfunction ', start + 1);
+    vm.runInThisContext(quelle.slice(start, ende));
+}
+let jetzt = 1790500000000;
+Date.now = () => jetzt;
+const elemente = {};
+global.$ = id => elemente[id] || (elemente[id] = {
+    length: 1, inhalt: '', eigenschaften: {}, attribute: {}, klassen: {},
+    text(wert) { if (wert === undefined) return this.inhalt; this.inhalt = wert; return this; },
+    prop(name, wert) { this.eigenschaften[name] = wert; return this; },
+    attr(name, wert) { this.attribute[name] = wert; return this; },
+    toggleClass(name, wert) { this.klassen[name] = wert; return this; }
+});
+const daten = {state: 'online', telemetry_profile: 'live', telemetry_diagnostics: {}};
+for (const profil of ['live', 'live_extended']) {
+    daten.telemetry_profile = profil;
+    for (const [wert, erwartet] of [[5.2, '+5,2 %'], [-3.5, '-3,5 %'], [0, '0,0 %'], [-0.01, '0,0 %'], [-100, '-100,0 %']]) {
+        daten.telemetry_diagnostics.GradeEstimatePercent = {value: wert, valid: true, received_at: jetzt};
+        aktualisiereSteigungsanzeige(daten);
+        assert.equal(elemente['#steigungswert'].inhalt, erwartet);
+        assert.equal(elemente['#steigungsanzeige'].eigenschaften.hidden, false);
+        assert.equal(elemente['#steigungsanzeige'].klassen['ist-unbekannt'], false);
+    }
+}
+const punkt = daten.telemetry_diagnostics.GradeEstimatePercent;
+jetzt += 30001;
+aktualisiereSteigungsanzeige(daten);
+assert.equal(elemente['#steigungswert'].inhalt, '-- %');
+assert.match(elemente['#steigungsanzeige'].attribute.title, /veraltet/);
+punkt.received_at = jetzt;
+for (const wert of [null, false, '5.2', NaN, Infinity, 101]) {
+    punkt.value = wert;
+    aktualisiereSteigungsanzeige(daten);
+    assert.equal(elemente['#steigungswert'].inhalt, '-- %');
+}
+punkt.value = 0;
+punkt.valid = false;
+aktualisiereSteigungsanzeige(daten);
+assert.equal(elemente['#steigungswert'].inhalt, '-- %');
+punkt.valid = true;
+for (const zustand of ['offline', 'asleep']) {
+    daten.state = zustand;
+    aktualisiereSteigungsanzeige(daten);
+    assert.equal(elemente['#steigungswert'].inhalt, '-- %');
+}
+daten.state = 'online';
+for (const profil of ['parked', 'charging', undefined]) {
+    daten.telemetry_profile = profil;
+    aktualisiereSteigungsanzeige(daten);
+    assert.equal(elemente['#steigungsanzeige'].eigenschaften.hidden, true);
+}
+daten.telemetry_profile = 'live';
+for (const zeit of [null, undefined, jetzt + 10000]) {
+    punkt.received_at = zeit;
+    aktualisiereSteigungsanzeige(daten);
+    assert.equal(elemente['#steigungswert'].inhalt, '-- %');
+}
 """
     ergebnis = subprocess.run([node, "-e", skript], capture_output=True, text=True, timeout=10)
     assert ergebnis.returncode == 0, ergebnis.stdout + ergebnis.stderr

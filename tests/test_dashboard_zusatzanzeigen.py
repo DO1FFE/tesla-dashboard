@@ -47,3 +47,11 @@ def test_navigation_steht_vor_technischen_details(monkeypatch):
     assert response.status_code == 200
     assert html.index('id="nav-bar"') < html.index('id="technical-info"')
     assert ids.index("nav-bar") < ids.index("technical-info")
+
+
+def test_steigung_steht_direkt_über_dem_kilometerstand(monkeypatch):
+    html = _test_client(monkeypatch).get("/").get_data(as_text=True)
+
+    assert html.index('id="power-value"') < html.index('id="steigungsanzeige"')
+    assert html.index('id="steigungsanzeige"') < html.index('id="odometer-value"')
+    assert 'id="steigungswert">-- %</span>' in html

@@ -1234,6 +1234,7 @@ function handleData(data) {
     }
     updateSpeedometer(drive.speed, displayPower, charge.charging_state);
     updatePedalPosition(vehicle.pedal_position);
+    aktualisiereSteigungsanzeige(data);
     updateOdometer(vehicle.odometer);
     var rangeMiles = charge.ideal_battery_range;
     if (rangeMiles == null) {
@@ -2351,6 +2352,36 @@ function updatePedalPosition(value) {
         .attr('transform', 'rotate(' + winkel + ' 60 50)')
         .addClass('is-active');
     $needle.find('title').text('Pedalposition ' + prozent.toFixed(1) + ' %');
+}
+
+function aktualisiereSteigungsanzeige(data) {
+    var $anzeige = $('#steigungsanzeige');
+    if (!$anzeige.length) return;
+    data = data || {};
+    var live = data.telemetry_profile === 'live' || data.telemetry_profile === 'live_extended';
+    $anzeige.prop('hidden', !live);
+    var punkt = (data.telemetry_diagnostics || {}).GradeEstimatePercent;
+    var wert = punkt && punkt.valid === true && typeof punkt.value === 'number' ? punkt.value : null;
+    var empfangen = punkt && Number(punkt.received_at);
+    var alter = Date.now() - empfangen;
+    var frisch = empfangen > 0 && alter >= -1000 && alter <= 30000;
+    var gültig = live && data.state === 'online' && frisch && wert != null &&
+        isFinite(wert) && wert >= -100 && wert <= 100;
+    var text = '-- %';
+    var hinweis = 'Geschätzte Steigung: nicht verfügbar';
+    if (gültig) {
+        var gerundet = Math.round(wert * 10) / 10 || 0;
+        text = (gerundet > 0 ? '+' : '') + gerundet.toLocaleString('de-DE', {
+            minimumFractionDigits: 1, maximumFractionDigits: 1
+        }) + ' %';
+        hinweis = 'Geschätzte Steigung: ' + text;
+    }
+    if (punkt && punkt.received_at) {
+        hinweis += '; ' + diagnoseEmpfangText(punkt, 30000);
+    }
+    var $wert = $('#steigungswert');
+    if ($wert.text() !== text) $wert.text(text);
+    $anzeige.toggleClass('ist-unbekannt', !gültig).attr('title', hinweis).attr('aria-label', hinweis);
 }
 
 function updateOdometer(value) {
@@ -4374,6 +4405,7 @@ setInterval(function() {
     updateDataAge();
     zeichneVehicleState();
     zeichneTelemetryProfile();
+    if (letzteDiagnoseDaten) aktualisiereSteigungsanzeige(letzteDiagnoseDaten);
 }, 1000);
 setInterval(updateClientCount, 5000);
 setInterval(fetchAnnouncement, 15000);

@@ -2009,7 +2009,7 @@ _fleet_telemetry_queue_verworfen = 0
 _fleet_telemetry_queue_warnung = 0.0
 FLEET_TELEMETRIE_PROFILE = {"live", "live_extended", "parked", "charging"}
 FLEET_TELEMETRIE_PROFILE_STANDARD = "live"
-FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 7
+FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 8
 FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS = max(
     0.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_PARK_PROFILE_DELAY_SECONDS", "120")),
@@ -2158,6 +2158,7 @@ FLEET_TELEMETRIE_PROFILE_OPTIONALE_FELDER = frozenset({
 }) | FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER
 FLEET_TELEMETRIE_PROFILE_LIVE_BEWEGUNGS_INKLUSIVFELDER = frozenset({
     "GpsAccuracyMeters",
+    "GradeEstimatePercent",
     "BrakePedal",
     "BrakePedalPos",
     "DCDCEnable",
