@@ -2358,23 +2358,24 @@ function aktualisiereSteigungsanzeige(data) {
     var $anzeige = $('#steigungsanzeige');
     if (!$anzeige.length) return;
     data = data || {};
-    var live = data.telemetry_profile === 'live' || data.telemetry_profile === 'live_extended';
-    $anzeige.prop('hidden', !live);
-    var punkt = (data.telemetry_diagnostics || {}).GradeEstimatePercent;
-    var wert = punkt && punkt.valid === true && typeof punkt.value === 'number' ? punkt.value : null;
-    var empfangen = punkt && Number(punkt.received_at);
-    var alter = Date.now() - empfangen;
-    var frisch = empfangen > 0 && alter >= -1000 && alter <= 30000;
-    var gültig = live && data.state === 'online' && frisch && wert != null &&
-        isFinite(wert) && wert >= -100 && wert <= 100;
+    $anzeige.prop('hidden', false);
+    var punkt = null;
+    [data.last_valid_grade, (data.telemetry_diagnostics || {}).GradeEstimatePercent].forEach(function(kandidat) {
+        if (!kandidat || kandidat.valid !== true || typeof kandidat.value !== 'number' ||
+            !isFinite(kandidat.value) || kandidat.value < -100 || kandidat.value > 100) return;
+        var empfangen = Number(kandidat.received_at);
+        if (!(empfangen > 0) || empfangen > Date.now() + 1000) return;
+        if (!punkt || empfangen > Number(punkt.received_at)) punkt = kandidat;
+    });
+    var gültig = punkt !== null;
     var text = '-- %';
     var hinweis = 'Geschätzte Steigung: nicht verfügbar';
     if (gültig) {
-        var gerundet = Math.round(wert * 10) / 10 || 0;
+        var gerundet = Math.round(punkt.value * 10) / 10 || 0;
         text = (gerundet > 0 ? '+' : '') + gerundet.toLocaleString('de-DE', {
             minimumFractionDigits: 1, maximumFractionDigits: 1
         }) + ' %';
-        hinweis = 'Geschätzte Steigung: ' + text;
+        hinweis = 'Zuletzt gemessene Steigung: ' + text;
     }
     if (punkt && punkt.received_at) {
         hinweis += '; ' + diagnoseEmpfangText(punkt, 30000);

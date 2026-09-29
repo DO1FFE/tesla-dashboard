@@ -5803,7 +5803,14 @@ def _load_cached(vehicle_id):
     """Load cached vehicle data from disk."""
     try:
         with open(_cache_file(vehicle_id), "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        if isinstance(data, dict) and isinstance(data.get("fleet_telemetry_raw"), dict):
+            telemetrie_diagnose.anreichern(data)
+            telemetrie_diagnose.letzte_steigung_aus_verlauf(
+                data, _telemetrie_diagnose_datenbankpfad(),
+                data.get("id_s") or vehicle_id,
+            )
+        return data
     except Exception:
         return None
 

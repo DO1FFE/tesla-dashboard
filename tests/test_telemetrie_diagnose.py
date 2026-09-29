@@ -309,7 +309,97 @@ assert.doesNotMatch(html, /97 km\/h/);
     assert ergebnis.returncode == 0, ergebnis.stdout + ergebnis.stderr
 
 
-def test_steigungsanzeige_live_null_vorzeichen_und_ablauf():
+@pytest.mark.parametrize("wert", [-3.5, 0, 4.2])
+def test_letzte_steigung_überlebt_ungültige_meldungen_und_neustart(
+    monkeypatch, tmp_path, wert,
+):
+    daten = daten_mit({"264": wert})
+    letzter = {"value": wert, "received_at": ZEIT, "valid": True}
+    assert daten["last_valid_grade"] == letzter
+    for profil in ("live", "live_extended", "parked", "charging"):
+        daten["telemetry_profile"] = profil
+        daten["fleet_telemetry_raw"]["GradeEstimatePercent"] = None
+        daten["fleet_telemetry_field_received_at"]["GradeEstimatePercent"] = ZEIT + 1000
+        diagnose.anreichern(daten)
+        assert daten["last_valid_grade"] == letzter
+        assert daten["telemetry_diagnostics"]["GradeEstimatePercent"]["valid"] is False
+
+    datei = tmp_path / "cache.json"
+    monkeypatch.setattr(app, "_cache_file", lambda _id: str(datei))
+    app._save_cached("A", app._fleet_telemetrie_cache_kopie(daten))
+    geladen = app._load_cached("A")
+    payload = app._subscriber_stream_payload(geladen)
+    assert payload["last_valid_grade"] == letzter
+    assert payload["telemetry_diagnostics"]["GradeEstimatePercent"]["valid"] is False
+
+
+def test_steigung_nur_neuerer_gültiger_wert_ersetzt_cache():
+    daten = daten_mit({"264": -3.5})
+    diagnose.letzte_steigung_merken(daten, {"valid": True, "value": 0, "received_at": ZEIT + 1000})
+    diagnose.letzte_steigung_merken(daten, {"valid": True, "value": 8, "received_at": ZEIT})
+    diagnose.letzte_steigung_merken(daten, {"valid": False, "value": None, "received_at": ZEIT + 2000})
+    assert daten["last_valid_grade"] == {"value": 0, "received_at": ZEIT + 1000, "valid": True}
+    assert "last_valid_grade" not in daten_mit({"264": None})
+
+
+def test_bisherige_diagnose_bleibt_beim_ersten_ungültigen_signal_erhalten():
+    daten = daten_mit({"264": -3})
+    daten.pop("last_valid_grade")
+    daten["fleet_telemetry_raw"]["GradeEstimatePercent"] = None
+    daten["fleet_telemetry_field_received_at"]["GradeEstimatePercent"] = ZEIT + 1000
+    diagnose.anreichern(daten)
+    assert daten["last_valid_grade"] == {"value": -3, "received_at": ZEIT, "valid": True}
+    assert daten["telemetry_diagnostics"]["GradeEstimatePercent"]["valid"] is False
+
+
+@pytest.mark.parametrize("defekt", [False, True])
+def test_cache_bleibt_ohne_lesbaren_messwertverlauf_erhalten(
+    monkeypatch, tmp_path, defekt,
+):
+    if defekt:
+        with open(app._telemetrie_diagnose_datenbankpfad(), "wb") as datei:
+            datei.write(b"keine SQLite-Datenbank")
+    datei = tmp_path / "cache.json"
+    monkeypatch.setattr(app, "_cache_file", lambda _id: str(datei))
+    daten = dict(daten_mit({"264": None}), id_s="A", state="asleep")
+    app._save_cached("A", daten)
+    assert app._load_cached("A") == daten
+
+
+@pytest.mark.parametrize("wert, zeit", [
+    (None, ZEIT), (True, ZEIT), (101, ZEIT), (float("nan"), ZEIT),
+    (float("inf"), ZEIT), (3, None), (3, 0), (3, 9999999999999),
+])
+def test_ungültige_steigung_verändert_cache_nicht(wert, zeit):
+    daten = daten_mit({"264": 0})
+    diagnose.letzte_steigung_merken(daten, {"valid": True, "value": wert, "received_at": zeit})
+    assert daten["last_valid_grade"] == {"value": 0, "received_at": ZEIT, "valid": True}
+
+
+def test_alter_cache_bekommt_nur_den_eigenen_letzten_fahrtwert(monkeypatch, tmp_path):
+    pfad = app._telemetrie_diagnose_datenbankpfad()
+    for fahrzeug, wert, zeit in [("A", -3, ZEIT), ("B", 5, ZEIT + 1000)]:
+        daten = daten_mit({"264": wert}, zeit)
+        daten["drive_state"]["shift_state"] = "D"
+        diagnose.verlauf_speichern(pfad, fahrzeug, daten)
+    datei = tmp_path / "cache.json"
+    monkeypatch.setattr(app, "_cache_file", lambda _id: str(datei))
+    app._save_cached("default", dict(daten_mit({"264": None}), id_s="A"))
+
+    geladen = app._load_cached("default")
+    assert geladen["last_valid_grade"] == {"value": -3, "received_at": ZEIT, "valid": True}
+    assert geladen["telemetry_diagnostics"]["GradeEstimatePercent"]["valid"] is False
+    diagnose.verlauf_speichern(pfad, "A", geladen)
+    assert diagnose.verlauf_laden(pfad, "A", "GradeEstimatePercent") == [
+        {"value": -3, "received_at": ZEIT},
+    ]
+    app._save_cached("A", geladen)
+    monkeypatch.setattr(diagnose, "verlauf_laden", lambda *args, **kwargs: pytest.fail("Cache braucht keinen erneuten Verlaufsabruf"))
+    assert app._load_cached("A")["last_valid_grade"] == geladen["last_valid_grade"]
+    assert "last_valid_grade" not in daten_mit({"264": None})
+
+
+def test_steigungsanzeige_live_cache_und_parkmodus():
     node = shutil.which("node")
     if not node:
         pytest.skip("Node.js nicht verfügbar")
@@ -345,7 +435,7 @@ for (const profil of ['live', 'live_extended']) {
 const punkt = daten.telemetry_diagnostics.GradeEstimatePercent;
 jetzt += 30001;
 aktualisiereSteigungsanzeige(daten);
-assert.equal(elemente['#steigungswert'].inhalt, '-- %');
+assert.equal(elemente['#steigungswert'].inhalt, '-100,0 %');
 assert.match(elemente['#steigungsanzeige'].attribute.title, /veraltet/);
 punkt.received_at = jetzt;
 for (const wert of [null, false, '5.2', NaN, Infinity, 101]) {
@@ -361,13 +451,14 @@ punkt.valid = true;
 for (const zustand of ['offline', 'asleep']) {
     daten.state = zustand;
     aktualisiereSteigungsanzeige(daten);
-    assert.equal(elemente['#steigungswert'].inhalt, '-- %');
+    assert.equal(elemente['#steigungswert'].inhalt, '0,0 %');
 }
 daten.state = 'online';
 for (const profil of ['parked', 'charging', undefined]) {
     daten.telemetry_profile = profil;
     aktualisiereSteigungsanzeige(daten);
-    assert.equal(elemente['#steigungsanzeige'].eigenschaften.hidden, true);
+    assert.equal(elemente['#steigungsanzeige'].eigenschaften.hidden, false);
+    assert.equal(elemente['#steigungswert'].inhalt, '0,0 %');
 }
 daten.telemetry_profile = 'live';
 for (const zeit of [null, undefined, jetzt + 10000]) {
@@ -375,6 +466,25 @@ for (const zeit of [null, undefined, jetzt + 10000]) {
     aktualisiereSteigungsanzeige(daten);
     assert.equal(elemente['#steigungswert'].inhalt, '-- %');
 }
+daten.last_valid_grade = {value: -3, valid: true, received_at: jetzt-86400000};
+punkt.value = null;
+punkt.valid = false;
+for (const profil of ['live', 'live_extended', 'parked', 'charging']) {
+    daten.telemetry_profile = profil;
+    daten.state = 'offline';
+    aktualisiereSteigungsanzeige(daten);
+    assert.equal(elemente['#steigungswert'].inhalt, '-3,0 %');
+    assert.equal(elemente['#steigungsanzeige'].eigenschaften.hidden, false);
+    assert.match(elemente['#steigungsanzeige'].attribute.title, /Zuletzt gemessene Steigung/);
+}
+punkt.value = 0;
+punkt.valid = true;
+punkt.received_at = jetzt;
+aktualisiereSteigungsanzeige(daten);
+assert.equal(elemente['#steigungswert'].inhalt, '0,0 %');
+// Ein Fahrzeugwechsel darf den Cache des vorherigen Fahrzeugs nicht übernehmen.
+aktualisiereSteigungsanzeige({state:'online',telemetry_profile:'parked'});
+assert.equal(elemente['#steigungswert'].inhalt, '-- %');
 """
     ergebnis = subprocess.run([node, "-e", skript], capture_output=True, text=True, timeout=10)
     assert ergebnis.returncode == 0, ergebnis.stdout + ergebnis.stderr

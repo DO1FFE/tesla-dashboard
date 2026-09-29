@@ -95,7 +95,39 @@ def cache_normalisieren(daten):
         roh.pop(nummer, None)
 
 
+def letzte_steigung_merken(daten, punkt):
+    """Behalte den jüngsten gültigen Steigungswert mit seiner echten Empfangszeit."""
+    if not isinstance(punkt, dict) or punkt.get("valid") is not True:
+        return False
+    wert = messwert("GradeEstimatePercent", punkt.get("value"))
+    zeit = zahl(punkt.get("received_at"))
+    if wert is None or zeit is None or not 0 < zeit <= time.time() * 1000 + 1000:
+        return False
+    bisher = daten.get("last_valid_grade") or {}
+    if isinstance(bisher, dict) and zeit <= (zahl(bisher.get("received_at")) or 0):
+        return False
+    daten["last_valid_grade"] = {
+        "value": wert, "received_at": int(zeit), "valid": True,
+    }
+    return True
+
+
+def letzte_steigung_aus_verlauf(daten, pfad, fahrzeug):
+    """Ergänze ältere Fahrzeugcaches einmalig aus dem gespeicherten Fahrtverlauf."""
+    if daten.get("last_valid_grade") or not fahrzeug:
+        return
+    try:
+        punkte = verlauf_laden(pfad, fahrzeug, "GradeEstimatePercent", limit=1)
+    except (sqlite3.Error, OSError):
+        return
+    if punkte:
+        letzte_steigung_merken(daten, dict(punkte[-1], valid=True))
+
+
 def anreichern(daten):
+    letzte_steigung_merken(
+        daten, daten.get("telemetry_diagnostics", {}).get("GradeEstimatePercent"),
+    )
     cache_normalisieren(daten)
     roh = daten.get("fleet_telemetry_raw", {})
     zeiten = daten.get("fleet_telemetry_field_received_at", {})
@@ -109,6 +141,7 @@ def anreichern(daten):
             "valid": wert is not None,
         }
     daten["telemetry_diagnostics"] = diagnose
+    letzte_steigung_merken(daten, diagnose["GradeEstimatePercent"])
     drive = daten.setdefault("drive_state", {})
     prognose = diagnose["MaxSpeedToReachDestinationMph"]
     zielzeit = zahl(drive.get("active_route_target_changed_at")) or 0
