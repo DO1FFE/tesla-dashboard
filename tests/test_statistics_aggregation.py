@@ -1,5 +1,9 @@
 import importlib
+import json
+import os
 import pathlib
+import subprocess
+import sys
 from datetime import datetime
 
 
@@ -145,6 +149,36 @@ def test_import_startet_statistik_nicht_synchron(monkeypatch, tmp_path):
     assert app._aggregation_thread is None
 
 
+def test_statistikpfade_bleiben_nach_neuladen_isoliert(tmp_path):
+    import app
+
+    importlib.reload(app)
+
+    assert pathlib.Path(app.DATA_DIR) == tmp_path
+    assert pathlib.Path(app.STAT_FILE) == tmp_path / "statistics.json"
+    assert pathlib.Path(app.STATISTICS_DB) == tmp_path / "statistics.db"
+    assert pathlib.Path(app.PARKTIME_FILE) == tmp_path / "parktime.json"
+    assert pathlib.Path(app.TESLA_FLEET_KEY_DIR) == tmp_path / "tesla_fleet"
+
+
+def test_statistik_unterprozess_nutzt_isolierte_dateien(tmp_path):
+    import app
+
+    statistik_datei = tmp_path / "statistics.json"
+    statistik_datei.write_text(json.dumps({"2020-01-02": {"km": 12.5}}), encoding="utf-8")
+    ergebnis = subprocess.run(
+        [sys.executable, str(pathlib.Path(app.__file__).resolve()), "--statistics-once"],
+        capture_output=True, text=True, timeout=30, check=False,
+        env=os.environ.copy(),
+    )
+
+    assert ergebnis.returncode == 0, ergebnis.stderr
+    assert (tmp_path / "statistics.db").is_file()
+    assert json.loads(statistik_datei.read_text(encoding="utf-8")) == {
+        "2020-01-02": {"km": 12.5},
+    }
+
+
 def test_statistikaggregation_startet_prozess_im_eventlet_threadpool(monkeypatch):
     import app
 
@@ -264,6 +298,7 @@ def test_state_backfill_und_increment_verteilen_offenen_zeitraum_nicht_doppelt(m
     monkeypatch.setattr(app, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(app, "_default_vehicle_id", "1")
 
+    assert pathlib.Path(app.STAT_FILE) == tmp_path / "statistics.json"
     now_ts = 1_700_000_000
     log_ts = now_ts - 3600
     log_dt = datetime.fromtimestamp(log_ts, app.LOCAL_TZ)

@@ -844,7 +844,10 @@ def block_ip_clients():
 # current working directory.  This allows running the application
 # from any location while still finding the trip files and caches.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data")
+# Ein eigenes Datenverzeichnis isoliert auch Modul-Neuladungen und Unterprozesse.
+DATA_DIR = os.path.abspath(
+    os.getenv("TESLA_DASHBOARD_DATA_DIR") or os.path.join(BASE_DIR, "data")
+)
 os.makedirs(DATA_DIR, exist_ok=True)
 ENV_FILE = os.getenv("TESLA_DASHBOARD_ENV_FILE", os.path.join(BASE_DIR, ".env"))
 TESLA_FLEET_KEY_DIR = os.path.join(DATA_DIR, "tesla_fleet")
