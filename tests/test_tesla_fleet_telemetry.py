@@ -4807,6 +4807,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "minimum_delta" not in live_fields["Location"]
     assert set(live_fields["Location"]["include_fields"]) == (
         app.FLEET_TELEMETRIE_PROFILE_LIVE_BEWEGUNGS_INKLUSIVFELDER
+        | app.FLEET_TELEMETRIE_TPMS_PROFILFELDER
     )
     assert live_fields["VehicleSpeed"]["interval_seconds"] == 1
     assert "minimum_delta" not in live_fields["VehicleSpeed"]
@@ -4887,6 +4888,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert set(wiederherstellungsfelder["Location"]["include_fields"]) == (
         app.FLEET_TELEMETRIE_PROFILE_LIVE_BEWEGUNGS_INKLUSIVFELDER
         & app.FLEET_TELEMETRIE_PROFILE_LIVE_WIEDERHERSTELLUNGSFELDER
+        | app.FLEET_TELEMETRIE_TPMS_PROFILFELDER
     )
     assert (
         "RouteLine"
@@ -4917,6 +4919,7 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert erweitert_fields["VehicleSpeed"]["interval_seconds"] == 1
     assert set(erweitert_fields["Location"]["include_fields"]) == (
         app.FLEET_TELEMETRIE_PROFILE_LIVE_BEWEGUNGS_INKLUSIVFELDER
+        | app.FLEET_TELEMETRIE_TPMS_PROFILFELDER
     )
     assert erweitert_fields["DestinationLocation"]["interval_seconds"] == 1
     assert erweitert_fields["DestinationName"]["interval_seconds"] == 30
@@ -4950,7 +4953,11 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "Location" not in fields
     assert "MediaNowPlayingTitle" not in fields
     assert "RouteLine" not in fields
-    assert all("include_fields" not in config for config in fields.values())
+    for feld, config in fields.items():
+        if feld in {"BatteryLevel", "ACChargingPower", "DCChargingPower"}:
+            assert set(config["include_fields"]) == app.FLEET_TELEMETRIE_TPMS_PROFILFELDER
+        else:
+            assert "include_fields" not in config
     assert fields["BatteryLevel"]["interval_seconds"] == 60
     assert "minimum_delta" not in fields["BatteryLevel"]
     assert fields["BatteryHeaterOn"]["interval_seconds"] == 60
@@ -4989,14 +4996,94 @@ def test_fleet_telemetrie_profile_config_filtert_parkwerte():
     assert "DestinationName" not in charging_fields
     assert "MediaNowPlayingTitle" not in charging_fields
     assert "VehicleName" not in charging_fields
-    assert all(
-        "include_fields" not in config
-        for config in charging_fields.values()
-    )
+    for feld, config in charging_fields.items():
+        if feld in {"Location", "BatteryLevel", "ACChargingPower", "DCChargingPower"}:
+            assert set(config["include_fields"]) == app.FLEET_TELEMETRIE_TPMS_PROFILFELDER
+        else:
+            assert "include_fields" not in config
     assert all(
         "minimum_delta" not in feld_config
         for feld_config in charging_fields.values()
     )
+
+
+@pytest.mark.parametrize("profil, wiederherstellung", [
+    ("live", False), ("live_extended", False), ("parked", False),
+    ("charging", False), ("live", True),
+])
+@pytest.mark.parametrize("alte_felder", [False, True])
+def test_tpms_in_allen_profilen_ohne_delta_und_mit_wiederholung(
+    profil, wiederherstellung, alte_felder,
+):
+    tpms = {
+        "TpmsPressureFl", "TpmsPressureFr", "TpmsPressureRl", "TpmsPressureRr",
+        "TpmsHardWarnings", "TpmsSoftWarnings",
+    }
+    felder = {
+        feld: {"interval_seconds": 300, "include_fields": ["RouteLine"]}
+        for feld in ("Location", "BatteryLevel", "ACChargingPower", "DCChargingPower")
+    }
+    if alte_felder:
+        felder.update({feld: {"interval_seconds": 60, "minimum_delta": 0.05}
+                       for feld in tpms})
+    basis = {"config": {"fields": felder}}
+    vorher = json.dumps(basis, sort_keys=True)
+    ergebnis = app._fleet_telemetrie_profile_config_erstellen(
+        basis, profil, wiederherstellung=wiederherstellung,
+    )
+    felder = ergebnis["config"]["fields"]
+    for feld in tpms:
+        assert felder[feld] == {"interval_seconds": 1}
+    for feld in ("Location", "BatteryLevel", "ACChargingPower", "DCChargingPower"):
+        if feld not in felder:
+            continue
+        assert tpms <= set(felder[feld]["include_fields"])
+        assert feld not in felder[feld]["include_fields"]
+        if profil in {"parked", "charging"}:
+            assert set(felder[feld]["include_fields"]) == tpms
+    if profil in {"live", "live_extended"}:
+        assert "RouteLine" in felder["Odometer"]["include_fields"]
+    assert json.dumps(basis, sort_keys=True) == vorher
+    assert app._fleet_telemetrie_profile_config_erstellen(
+        ergebnis, profil, wiederherstellung=wiederherstellung,
+    ) == ergebnis
+
+
+@pytest.mark.parametrize("profil", ["live", "live_extended", "parked", "charging"])
+@pytest.mark.parametrize("rad", ["Fl", "Fr", "Rl", "Rr"])
+def test_tpms_kleine_änderungen_und_gleiche_werte_erreichen_dashboard(
+    monkeypatch, profil, rad,
+):
+    feld = "TpmsPressure" + rad
+    druckfeld = "tpms_pressure_" + rad.lower()
+    zeitfeld = "tpms_last_seen_pressure_time_" + rad.lower()
+    jetzt = int(app.time.time() * 1000)
+    messzeit = jetzt - 600000
+    daten = {
+        "telemetry_profile": profil,
+        "vehicle_state": {druckfeld: 2.9, zeitfeld: messzeit},
+        "fleet_telemetry_raw": {feld: 2.9},
+    }
+    gesendet = []
+    monkeypatch.setattr(app, "latest_data", {"TEST": daten})
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda _vin: ["TEST"])
+    monkeypatch.setattr(app, "_load_cached", lambda _id: {})
+    monkeypatch.setattr(app, "_fleet_telemetrie_cache_spaeter_speichern", lambda *args: None)
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktualisieren", lambda _id, d: d)
+    monkeypatch.setattr(app, "_aprs_spaeter_senden", lambda _daten: None)
+    monkeypatch.setattr(
+        app, "_subscriber_daten_senden",
+        lambda _id, d: gesendet.append(app._subscriber_stream_payload(d)),
+    )
+    for nummer, (wert, erwartet) in enumerate([
+        (2.9, 2.9), (2.901, 2.901), (2.901, 2.901), (None, 2.901),
+    ]):
+        empfangen = jetzt + nummer * 1000
+        assert app._fleet_telemetrie_cache_aktualisieren("TESTVIN", feld, wert, empfangen)
+        assert len(gesendet) == nummer + 1
+        assert gesendet[-1]["vehicle_state"][druckfeld] == erwartet
+        assert gesendet[-1]["vehicle_state"][zeitfeld] == messzeit
+        assert daten["fleet_telemetry_field_received_at"][feld] == empfangen
 
 
 def test_fleet_telemetrie_live_reparatur_sendet_basis_dann_vollprofil(
@@ -5069,7 +5156,8 @@ def test_fleet_telemetrie_live_reparatur_sendet_basis_dann_vollprofil(
 
     assert gesendete_felder == [
         {"DCDCEnable", "Location", "Odometer", "VehicleSpeed"}
-        | app.FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER,
+        | app.FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER
+        | app.FLEET_TELEMETRIE_TPMS_PROFILFELDER,
         {
             "DCDCEnable",
             "InsideTemp",
@@ -5077,6 +5165,7 @@ def test_fleet_telemetrie_live_reparatur_sendet_basis_dann_vollprofil(
             "Odometer",
             "VehicleSpeed",
         } | app.FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER
+        | app.FLEET_TELEMETRIE_TPMS_PROFILFELDER
         | set(app.telemetrie_diagnose.profilfelder("live")),
     ]
     status = app._fleet_telemetry_profile_status

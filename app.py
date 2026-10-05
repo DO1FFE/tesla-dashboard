@@ -2009,7 +2009,7 @@ _fleet_telemetry_queue_verworfen = 0
 _fleet_telemetry_queue_warnung = 0.0
 FLEET_TELEMETRIE_PROFILE = {"live", "live_extended", "parked", "charging"}
 FLEET_TELEMETRIE_PROFILE_STANDARD = "live"
-FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 8
+FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 9
 FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS = max(
     0.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_PARK_PROFILE_DELAY_SECONDS", "120")),
@@ -2143,6 +2143,14 @@ FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_FELDER = max(
     int(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MIN_FIELDS", "2")),
 )
 FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER = frozenset()
+FLEET_TELEMETRIE_TPMS_PROFILFELDER = frozenset({
+    "TpmsHardWarnings",
+    "TpmsPressureFl",
+    "TpmsPressureFr",
+    "TpmsPressureRl",
+    "TpmsPressureRr",
+    "TpmsSoftWarnings",
+})
 FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER = frozenset({
     "SoftwareUpdateAvailable",
     "SoftwareUpdateInProgress",
@@ -2155,7 +2163,7 @@ FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER = frozenset({
 })
 FLEET_TELEMETRIE_PROFILE_OPTIONALE_FELDER = frozenset({
     "DCDCEnable",
-}) | FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER
+}) | FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER | FLEET_TELEMETRIE_TPMS_PROFILFELDER
 FLEET_TELEMETRIE_PROFILE_LIVE_BEWEGUNGS_INKLUSIVFELDER = frozenset({
     "GpsAccuracyMeters",
     "GradeEstimatePercent",
@@ -2314,7 +2322,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_FELDER = frozenset({
     "SeatHeaterRight",
     "Soc",
     "VehicleSpeed",
-}) | FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER
+}) | FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER | FLEET_TELEMETRIE_TPMS_PROFILFELDER
 FLEET_TELEMETRIE_PROFILE_LIVE_WIEDERHERSTELLUNGSFELDER = frozenset({
     "ACChargingPower",
     "BrakePedal",
@@ -2341,7 +2349,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_WIEDERHERSTELLUNGSFELDER = frozenset({
     "RouteLine",
     "RpWindow",
     "VehicleSpeed",
-}) | FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER
+}) | FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER | FLEET_TELEMETRIE_TPMS_PROFILFELDER
 FLEET_TELEMETRIE_PROFILE_LIVE_ERWEITERT_60S_FELDER = frozenset({
     "ChargePort",
     "ChargePortDoorOpen",
@@ -2361,12 +2369,6 @@ FLEET_TELEMETRIE_PROFILE_LIVE_ERWEITERT_60S_FELDER = frozenset({
     "ModuleTempMin",
     "SentryMode",
     "ServiceMode",
-    "TpmsHardWarnings",
-    "TpmsPressureFl",
-    "TpmsPressureFr",
-    "TpmsPressureRl",
-    "TpmsPressureRr",
-    "TpmsSoftWarnings",
     "ValetModeEnabled",
     "VehicleName",
     "Version",
@@ -2452,18 +2454,13 @@ FLEET_TELEMETRIE_PROFILE_PARKED_60S_FELDER = frozenset({
     "IdealBatteryRange",
     "RatedRange",
     "Soc",
-    "TpmsHardWarnings",
-    "TpmsPressureFl",
-    "TpmsPressureFr",
-    "TpmsPressureRl",
-    "TpmsPressureRr",
-    "TpmsSoftWarnings",
     "WiperHeatEnabled",
 })
 FLEET_TELEMETRIE_PROFILE_PARKED_FELDER = (
     FLEET_TELEMETRIE_PROFILE_PARKED_10S_FELDER
     | FLEET_TELEMETRIE_PROFILE_PARKED_60S_FELDER
     | FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER
+    | FLEET_TELEMETRIE_TPMS_PROFILFELDER
 )
 FLEET_TELEMETRIE_PROFILE_CHARGING_10S_FELDER = frozenset({
     "ACChargingPower",
@@ -2537,18 +2534,13 @@ FLEET_TELEMETRIE_PROFILE_CHARGING_60S_FELDER = frozenset({
     "GpsState",
     "Location",
     "Odometer",
-    "TpmsHardWarnings",
-    "TpmsPressureFl",
-    "TpmsPressureFr",
-    "TpmsPressureRl",
-    "TpmsPressureRr",
-    "TpmsSoftWarnings",
 })
 FLEET_TELEMETRIE_PROFILE_CHARGING_FELDER = (
     FLEET_TELEMETRIE_PROFILE_CHARGING_10S_FELDER
     | FLEET_TELEMETRIE_PROFILE_CHARGING_30S_FELDER
     | FLEET_TELEMETRIE_PROFILE_CHARGING_60S_FELDER
     | FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER
+    | FLEET_TELEMETRIE_TPMS_PROFILFELDER
 )
 
 
@@ -7204,6 +7196,8 @@ def _fleet_telemetrie_profile_ziel(data):
 def _fleet_telemetrie_profile_intervall(profil, feld):
     """Gib das gewünschte Intervall für ein Profilfeld zurück."""
 
+    if profil in FLEET_TELEMETRIE_PROFILE and feld in FLEET_TELEMETRIE_TPMS_PROFILFELDER:
+        return 1
     if profil in FLEET_TELEMETRIE_PROFILE and feld in telemetrie_diagnose.INTERVALLE:
         return telemetrie_diagnose.profilfelder(profil).get(feld)
     if (
@@ -7328,6 +7322,15 @@ def _fleet_telemetrie_profile_config_erstellen(
         if isinstance(odometer_config, dict):
             odometer_config["interval_seconds"] = (
                 FLEET_TELEMETRIE_PROFILE_LIVE_NAVIGATION_NEUVERSAND_SECONDS
+            )
+    # Ohne include_fields sendet Tesla unveränderte Drücke trotz fehlendem Delta
+    # nicht erneut. Vorhandene Meldungen übertragen den letzten Sensorstand mit.
+    for auslöser in ("Location", "BatteryLevel", "ACChargingPower", "DCChargingPower"):
+        feld_config = fields.get(auslöser)
+        if isinstance(feld_config, dict):
+            feld_config["include_fields"] = sorted(
+                set(feld_config.get("include_fields", []))
+                | FLEET_TELEMETRIE_TPMS_PROFILFELDER
             )
     return config_request
 
