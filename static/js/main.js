@@ -33,6 +33,7 @@ var letztePfadSignatur = null;
 var privacyCircle = null;
 var letzterReifendruckStatus = {};
 var REIFENDRUCK_CACHE_FELDER = [
+    'tpms_timing',
     'tpms_pressure_fl',
     'tpms_pressure_fr',
     'tpms_pressure_rl',
@@ -1992,6 +1993,7 @@ function reifendruckMitLetztenWerten(vehicle) {
 
 function reifendruckReifen(vehicle) {
     vehicle = reifendruckMitLetztenWerten(vehicle);
+    var zeiten = vehicle.tpms_timing || {};
     var vorneSoll = vehicle.tpms_rcp_front_value;
     var hintenSoll = vehicle.tpms_rcp_rear_value;
     return [
@@ -2002,7 +2004,8 @@ function reifendruckReifen(vehicle) {
             soll: vorneSoll,
             weich: vehicle.tpms_soft_warning_fl,
             hart: vehicle.tpms_hard_warning_fl,
-            zeit: vehicle.tpms_last_seen_pressure_time_fl
+            zeit: (zeiten.fl || {}).measured_at,
+            empfangen: (zeiten.fl || {}).received_at
         },
         {
             id: 'VR',
@@ -2011,7 +2014,8 @@ function reifendruckReifen(vehicle) {
             soll: vorneSoll,
             weich: vehicle.tpms_soft_warning_fr,
             hart: vehicle.tpms_hard_warning_fr,
-            zeit: vehicle.tpms_last_seen_pressure_time_fr
+            zeit: (zeiten.fr || {}).measured_at,
+            empfangen: (zeiten.fr || {}).received_at
         },
         {
             id: 'HL',
@@ -2020,7 +2024,8 @@ function reifendruckReifen(vehicle) {
             soll: hintenSoll,
             weich: vehicle.tpms_soft_warning_rl,
             hart: vehicle.tpms_hard_warning_rl,
-            zeit: vehicle.tpms_last_seen_pressure_time_rl
+            zeit: (zeiten.rl || {}).measured_at,
+            empfangen: (zeiten.rl || {}).received_at
         },
         {
             id: 'HR',
@@ -2029,9 +2034,31 @@ function reifendruckReifen(vehicle) {
             soll: hintenSoll,
             weich: vehicle.tpms_soft_warning_rr,
             hart: vehicle.tpms_hard_warning_rr,
-            zeit: vehicle.tpms_last_seen_pressure_time_rr
+            zeit: (zeiten.rr || {}).measured_at,
+            empfangen: (zeiten.rr || {}).received_at
         }
     ];
+}
+
+function reifendruckZeittext(wert) {
+    var millis = leseZeitstempelMillis(wert);
+    if (millis == null || millis < Date.UTC(2000, 0, 1) || millis > Date.now() + 60000) {
+        return 'Nicht verfügbar';
+    }
+    var minuten = Math.max(0, Math.floor((Date.now() - millis) / 60000));
+    if (minuten < 1) return 'gerade eben';
+    if (minuten < 60) return 'vor ' + minuten + ' min';
+    if (minuten < 1440) {
+        return 'vor ' + Math.floor(minuten / 60) + ' h ' + (minuten % 60) + ' min';
+    }
+    return formatiereZeitpunkt(millis);
+}
+
+function reifendruckZeitZelle(wert) {
+    var text = reifendruckZeittext(wert);
+    var titel = text === 'Nicht verfügbar' ? text :
+        new Date(leseZeitstempelMillis(wert)).toLocaleString('de-DE', {timeZone: 'Europe/Berlin'});
+    return '<td title="' + escapeHtml(titel) + '">' + escapeHtml(text) + '</td>';
 }
 
 function updateTPMS(vehicle) {
@@ -2070,10 +2097,8 @@ function updateTPMS(vehicle) {
         if (ziel != null) {
             text += ', Soll ' + ziel.toFixed(2) + ' bar';
         }
-        var alter = formatiereAlter(reifen.zeit);
-        if (alter) {
-            text += ', Messung ' + alter;
-        }
+        text += ', Zuletzt empfangen: ' + reifendruckZeittext(reifen.empfangen);
+        text += ', Letzte Sensormessung: ' + reifendruckZeittext(reifen.zeit);
         text += ', Status ' + reifendruckHinweis(reifen, status);
         $group.attr('aria-label', text);
         $title.text(text);
@@ -2104,7 +2129,7 @@ function updateReifendruckKurzstatus(reifen) {
     var kritische = 0;
     var warnungen = 0;
     var niedrigster = null;
-    var juengsteMessung = null;
+    var aeltesterEmpfang = null;
     mitDaten.forEach(function(eintrag) {
         var status = reifendruckStatus(eintrag.wert, eintrag.soll, eintrag.weich, eintrag.hart);
         if (status.klasse === 'kritisch') {
@@ -2116,9 +2141,9 @@ function updateReifendruckKurzstatus(reifen) {
         if (wert != null && (niedrigster == null || wert < niedrigster)) {
             niedrigster = wert;
         }
-        var zeit = leseZeitstempelMillis(eintrag.zeit);
-        if (zeit != null && (juengsteMessung == null || zeit > juengsteMessung)) {
-            juengsteMessung = zeit;
+        var zeit = leseZeitstempelMillis(eintrag.empfangen);
+        if (zeit != null && (aeltesterEmpfang == null || zeit < aeltesterEmpfang)) {
+            aeltesterEmpfang = zeit;
         }
     });
     var text = 'Reifendruck OK';
@@ -2132,9 +2157,8 @@ function updateReifendruckKurzstatus(reifen) {
     if (niedrigster != null) {
         text += ' · min ' + niedrigster.toFixed(1) + ' bar';
     }
-    var alter = formatiereAlter(juengsteMessung);
-    if (alter) {
-        text += ' · ' + alter;
+    if (aeltesterEmpfang != null) {
+        text += ' · Empfang ' + reifendruckZeittext(aeltesterEmpfang);
     }
     $summary
         .removeClass('tpms-ok tpms-warnung tpms-kritisch tpms-unbekannt')
@@ -2174,13 +2198,13 @@ function updateReifendruckDetails(vehicle) {
             var diff = ist - soll;
             abweichung = (diff >= 0 ? '+' : '') + diff.toFixed(2) + ' bar';
         }
-        var alter = formatiereAlter(eintrag.zeit) || '--';
         return '<tr class="reifendruck-' + status.klasse + '">' +
                '<th>' + escapeHtml(eintrag.name) + '</th>' +
                '<td>' + formatiereBar(ist) + '</td>' +
                '<td>' + formatiereBar(soll) + '</td>' +
                '<td>' + escapeHtml(abweichung) + '</td>' +
-               '<td>' + escapeHtml(alter) + '</td>' +
+               reifendruckZeitZelle(eintrag.empfangen) +
+               reifendruckZeitZelle(eintrag.zeit) +
                '<td><span class="tpms-status tpms-status-' + status.klasse + '">' +
                escapeHtml(reifendruckHinweis(eintrag, status)) + '</span></td>' +
                '</tr>';
@@ -2195,7 +2219,8 @@ function updateReifendruckDetails(vehicle) {
     var html = '<h3>Reifendruckdetails</h3>' +
                '<p class="panel-summary">' + escapeHtml(zusammenfassung) + '</p>' +
                '<table><thead><tr>' +
-               '<th>Reifen</th><th>Ist</th><th>Soll</th><th>Abweichung</th><th>Messung</th><th>Status</th>' +
+               '<th>Reifen</th><th>Ist</th><th>Soll</th><th>Abweichung</th>' +
+               '<th>Zuletzt empfangen</th><th>Letzte Sensormessung</th><th>Status</th>' +
                '</tr></thead><tbody>' + rows.join('') + '</tbody></table>';
     $details.html(html).show();
 }
@@ -4415,6 +4440,8 @@ setInterval(displayParkTime, 60000);
 setInterval(function() {
     if (!letzteDiagnoseDaten) return;
     updateUserPresence(letzteDiagnoseDaten);
+    updateTPMS(letzteDiagnoseDaten.vehicle_state || {});
+    updateReifendruckDetails(letzteDiagnoseDaten.vehicle_state || {});
     updateTechnischeDetails(letzteDiagnoseDaten.charge_state, letzteDiagnoseDaten.telemetry_diagnostics);
     updateNavBar(letzteDiagnoseDaten.drive_state);
     var info = softwareUpdateMitTelemetrie(letzteSoftwareUpdateMeldung);

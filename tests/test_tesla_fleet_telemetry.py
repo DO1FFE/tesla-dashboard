@@ -5018,6 +5018,8 @@ def test_tpms_in_allen_profilen_ohne_delta_und_mit_wiederholung(
     tpms = {
         "TpmsPressureFl", "TpmsPressureFr", "TpmsPressureRl", "TpmsPressureRr",
         "TpmsHardWarnings", "TpmsSoftWarnings",
+        "TpmsLastSeenPressureTimeFl", "TpmsLastSeenPressureTimeFr",
+        "TpmsLastSeenPressureTimeRl", "TpmsLastSeenPressureTimeRr",
     }
     felder = {
         feld: {"interval_seconds": 300, "include_fields": ["RouteLine"]}

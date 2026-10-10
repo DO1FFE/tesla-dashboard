@@ -830,6 +830,10 @@ select {
   background: rgba(76, 175, 80, 0.08);
 }
 
+#reifendruck-details thead th {
+  white-space: normal;
+}
+
 #reifendruck-details tr.reifendruck-warnung td,
 #reifendruck-details tr.reifendruck-warnung th {
   background: rgba(255, 152, 0, 0.16);
@@ -1599,9 +1603,12 @@ select {
     content: 'Abweichung';
   }
   #reifendruck-details td:nth-child(5)::before {
-    content: 'Messung';
+    content: 'Zuletzt empfangen';
   }
   #reifendruck-details td:nth-child(6)::before {
+    content: 'Letzte Sensormessung';
+  }
+  #reifendruck-details td:nth-child(7)::before {
     content: 'Status';
   }
   #sms-form {

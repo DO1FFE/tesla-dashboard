@@ -16,6 +16,7 @@ import csv
 import hashlib
 import ipaddress
 import json
+import math
 import queue
 import copy
 from collections import deque
@@ -2012,7 +2013,7 @@ _fleet_telemetry_queue_verworfen = 0
 _fleet_telemetry_queue_warnung = 0.0
 FLEET_TELEMETRIE_PROFILE = {"live", "live_extended", "parked", "charging"}
 FLEET_TELEMETRIE_PROFILE_STANDARD = "live"
-FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 9
+FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 10
 FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS = max(
     0.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_PARK_PROFILE_DELAY_SECONDS", "120")),
@@ -2148,6 +2149,10 @@ FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_FELDER = max(
 FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER = frozenset()
 FLEET_TELEMETRIE_TPMS_PROFILFELDER = frozenset({
     "TpmsHardWarnings",
+    "TpmsLastSeenPressureTimeFl",
+    "TpmsLastSeenPressureTimeFr",
+    "TpmsLastSeenPressureTimeRl",
+    "TpmsLastSeenPressureTimeRr",
     "TpmsPressureFl",
     "TpmsPressureFr",
     "TpmsPressureRl",
@@ -6130,6 +6135,8 @@ def _fleet_telemetrie_vergleichswert(value):
 
 def _fleet_telemetrie_wert_unveraendert(data, field, value):
     """Prüfe, ob ein Telemetry-Feld bereits mit gleichem Wert im Cache liegt."""
+    if field in FLEET_TELEMETRIE_TPMS_PROFILFELDER:
+        return False
     rohwerte = data.get("fleet_telemetry_raw") if isinstance(data, dict) else None
     if not isinstance(rohwerte, dict) or field not in rohwerte:
         return False
@@ -6189,6 +6196,73 @@ FLEET_TELEMETRIE_TPMS_SOLLWERTFELDER = (
     "tpms_rcp_front_value",
     "tpms_rcp_rear_value",
 )
+
+
+def _fleet_telemetrie_tpms_messzeit(wert, empfangen):
+    """Korrigiere ausschließlich originale Fleet-TPMS-Zeitstempel."""
+
+    try:
+        rohzeit = _fleet_telemetrie_zeitstempel_ms(wert)
+        if not isinstance(rohzeit, (int, float)) or rohzeit <= 0:
+            return None
+        # Tesla kodiert die Fahrzeug-Ortszeit als Pacific Time, nicht als UTC.
+        # developer.tesla.com/docs/fleet-api/fleet-telemetry/available-data
+        ortszeit = datetime.fromtimestamp(
+            rohzeit / 1000, ZoneInfo("America/Los_Angeles")
+        ).replace(tzinfo=None)
+        lokal = ortszeit.replace(tzinfo=LOCAL_TZ, fold=0)
+        if lokal.utcoffset() != ortszeit.replace(tzinfo=LOCAL_TZ, fold=1).utcoffset():
+            return None
+        zeit = int(lokal.timestamp() * 1000)
+        if zeit < 946684800000 or zeit > empfangen + 60000:
+            return None
+        return zeit
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _fleet_telemetrie_tpms_zeiten_anreichern(data):
+    """Trenne gültigen Druckempfang von einer belegbaren Sensormesszeit."""
+
+    vehicle = data.setdefault("vehicle_state", {})
+    rohwerte = data.get("fleet_telemetry_raw") or {}
+    empfang = data.get("fleet_telemetry_field_received_at") or {}
+    zeiten = {}
+    for feld, ziel in FLEET_TELEMETRIE_TPMS_DRUCKFELDER.items():
+        rad = ziel.rsplit("_", 1)[-1]
+        zeitfeld = "TpmsLastSeenPressureTime" + rad.capitalize()
+        empfangen = vehicle.get(ziel + "_received_at")
+        if (
+            ziel + "_received_at" not in vehicle
+            and _as_float(rohwerte.get(feld)) is not None
+        ):
+            empfangen = empfang.get(feld)
+        geändert = vehicle.get(ziel + "_changed_at", empfangen)
+        messung_empfangen = empfang.get(zeitfeld)
+        messzeit = None
+        if (
+            isinstance(messung_empfangen, (int, float))
+            and messung_empfangen > 0
+            and (geändert is None or messung_empfangen >= geändert - 1000)
+        ):
+            messzeit = _fleet_telemetrie_tpms_messzeit(
+                rohwerte.get(zeitfeld), messung_empfangen,
+            )
+        zeiten[rad] = {"received_at": empfangen, "measured_at": messzeit}
+    vehicle["tpms_timing"] = zeiten
+
+
+def _fleet_telemetrie_tpms_druckempfang(vehicle, ziel, wert, zeit):
+    """Datiere nur gültige Druckwerte, auch bei unveränderten Wiederholungen."""
+
+    druck = _as_float(wert)
+    if druck is None or not math.isfinite(druck) or isinstance(wert, bool):
+        return False
+    vehicle[ziel + "_received_at"] = zeit
+    vehicle.setdefault(ziel + "_changed_at", zeit)
+    if druck != _as_float(vehicle.get(ziel)):
+        vehicle[ziel + "_changed_at"] = zeit
+    return True
 
 
 def _fleet_telemetrie_tpms_druckwert(vehicle_state, rohwerte, field, target, value):
@@ -6362,6 +6436,7 @@ def _fleet_telemetrie_rohdaten_anreichern(data):
 
     if not isinstance(data, dict):
         return
+    _fleet_telemetrie_tpms_zeiten_anreichern(data)
     status = _fleet_telemetrie_profile_status_kopie()
     data["fleet_api_blocked_reason"] = status.get("fleet_api_blocked_reason")
     data["fleet_api_retry_at"] = status.get("fleet_api_retry_at", 0.0)
@@ -9916,6 +9991,14 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         return True
     if field in FLEET_TELEMETRIE_TPMS_DRUCKFELDER:
         target = FLEET_TELEMETRIE_TPMS_DRUCKFELDER[field]
+        vehicle_state.setdefault(
+            target + "_received_at",
+            data.get("fleet_telemetry_field_previous_received_at", {}).get(field),
+        )
+        if not _fleet_telemetrie_tpms_druckempfang(
+            vehicle_state, target, value, timestamp_ms,
+        ):
+            value = None
         value = _fleet_telemetrie_tpms_druckwert(
             vehicle_state, rohwerte, field, target, value
         )
@@ -10722,6 +10805,14 @@ def _fleet_telemetrie_fallbackdaten_uebernehmen(
                     ziel = {}
                     data[abschnitt] = ziel
                 for key, value in quelle.items():
+                    if (
+                        abschnitt == "vehicle_state"
+                        and key in FLEET_TELEMETRIE_TPMS_DRUCKFELDER.values()
+                        and not _fleet_telemetrie_tpms_druckempfang(
+                            ziel, key, value, int(abgerufen_at_ms),
+                        )
+                    ):
+                        continue
                     ziel[key] = copy.deepcopy(value)
             _fleet_telemetrie_fallback_rohwerte_bereinigen(data, fahrzeugdaten)
 
@@ -11291,6 +11382,7 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
                 if (
                     field in telemetrie_diagnose.INTERVALLE
                     or field == "DriverSeatOccupied"
+                    or field in FLEET_TELEMETRIE_TPMS_PROFILFELDER
                 ):
                     vorher = data.get("fleet_telemetry_field_received_at", {}).get(field, 0)
                     if timestamp_ms < (vorher or 0):
