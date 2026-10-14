@@ -924,6 +924,8 @@ FLEET_TELEMETRIE_LADEABGLEICH_MIN_LEISTUNG_KW = max(
     0.1,
     float(os.getenv("TESLA_FLEET_CHARGE_RECONCILE_MIN_POWER_KW", "1")),
 )
+FLEET_TELEMETRIE_LENKRADHEIZUNG_ABGLEICH_SECONDS = 30
+FLEET_TELEMETRIE_LENKRADHEIZUNG_MAX_ALTER_SECONDS = 90
 FLEET_TELEMETRIE_STREAM_WIEDERHERSTELLUNG_NACH_SECONDS = max(
     FLEET_TELEMETRIE_POSITION_STREAM_MAX_ALTER_SECONDS,
     float(os.getenv("TESLA_FLEET_STREAM_RECOVERY_AFTER_SECONDS", "20")),
@@ -1967,6 +1969,7 @@ _fleet_telemetry_position_lock = threading.Lock()
 _fleet_telemetry_position_letzte_abfrage = {}
 _fleet_telemetry_parkabgleich_letzte_abfrage = {}
 _fleet_telemetry_ladeabgleich_letzte_abfrage = {}
+_fleet_telemetry_lenkradheizung_letzte_abfrage = {}
 _fleet_telemetry_stream_wiederherstellung_letzte_abfrage = {}
 _fleet_telemetry_fahrtverbindung_letzte_prüfung = {}
 FLEET_TELEMETRIE_FAHRTVERBINDUNG_COOLDOWN_SECONDS = 300
@@ -5860,7 +5863,7 @@ def _fleet_telemetrie_heizstufe(value):
     if isinstance(value, bool):
         return 1 if value else 0
     if isinstance(value, (int, float)):
-        return max(0, int(round(float(value))))
+        return max(0, int(round(value))) if math.isfinite(value) else None
     if isinstance(value, str):
         text = value.strip()
         if not text:
@@ -5880,8 +5883,8 @@ def _fleet_telemetrie_heizstufe(value):
             return None
         zahl = _as_float(norm)
         if zahl is not None:
-            return max(0, int(round(zahl)))
-        if norm in {"0", "false", "off", "none", "null", "unknown"}:
+            return max(0, int(round(zahl))) if math.isfinite(zahl) else None
+        if norm in {"0", "false", "off"}:
             return 0
         if norm in {"1", "true", "on", "active", "enabled", "low"}:
             return 1
@@ -5889,7 +5892,80 @@ def _fleet_telemetrie_heizstufe(value):
             return 2
         if norm in {"3", "high", "max", "maximum"}:
             return 3
-    return 1 if _fleet_telemetrie_wahr(value) else 0
+    return None
+
+
+def _fleet_telemetrie_lenkradheizung_nur_ein_aus(data):
+    """Nutze beim Model S mit AP1 den verifizierten Ein/Aus-Status."""
+
+    config = data.get("vehicle_config") or {}
+    return (
+        config.get("car_type") == "models"
+        and config.get("driver_assist") == "MonoCam"
+    )
+
+
+def _fleet_telemetrie_lenkradheizung_rest_merken(data, klima, empfangen_ms):
+    """Bewahre die echte REST-Quelle getrennt von abgeleiteten Heizstufen."""
+
+    wert = klima.get("steering_wheel_heater")
+    if not isinstance(wert, bool):
+        return False
+    zeit = _fleet_telemetrie_zeitstempel_ms(klima.get("timestamp"))
+    if not isinstance(zeit, (int, float)):
+        zeit = empfangen_ms
+    alter = empfangen_ms - zeit
+    max_alter = FLEET_TELEMETRIE_LENKRADHEIZUNG_MAX_ALTER_SECONDS * 1000
+    if not -30000 <= alter <= max_alter:
+        return False
+    vorher = data.get("steering_wheel_heater_rest") or {}
+    if zeit < (vorher.get("timestamp") or 0):
+        return False
+    data["steering_wheel_heater_rest"] = {
+        "value": wert,
+        "level": _fleet_telemetrie_heizstufe(
+            klima.get("steering_wheel_heat_level")
+        ),
+        "auto": _fleet_telemetrie_optional_wahr(
+            klima.get("auto_steering_wheel_heat")
+        ),
+        "timestamp": zeit,
+        "received_at": empfangen_ms,
+    }
+    return True
+
+
+def _fleet_telemetrie_lenkradheizung_anreichern(data):
+    """Lasse eine nicht unterstützte Stufe 0 keinen echten Schaltzustand ersetzen."""
+
+    klima = data.setdefault("climate_state", {})
+    raw = data.get("fleet_telemetry_raw") or {}
+    rest = data.get("steering_wheel_heater_rest") or {}
+    empfang = data.get("fleet_telemetry_field_received_at") or {}
+    nur_schalter = _fleet_telemetrie_lenkradheizung_nur_ein_aus(data)
+    rest_nutzen = rest and (
+        nur_schalter
+        or (rest.get("timestamp") or 0)
+        >= (empfang.get("HvacSteeringWheelHeatLevel") or 0)
+    )
+    if rest_nutzen or nur_schalter:
+        alter = time.time() * 1000 - (rest.get("timestamp") or 0)
+        max_alter = FLEET_TELEMETRIE_LENKRADHEIZUNG_MAX_ALTER_SECONDS * 1000
+        gültig = bool(rest) and -30000 <= alter <= max_alter
+        klima["steering_wheel_heater"] = rest.get("value") if gültig else None
+        klima["steering_wheel_heat_level"] = (
+            rest.get("level") if gültig and not nur_schalter else None
+        )
+        klima["auto_steering_wheel_heat"] = rest.get("auto") if gültig else None
+        return
+    if "HvacSteeringWheelHeatLevel" in raw:
+        stufe = _fleet_telemetrie_heizstufe(raw["HvacSteeringWheelHeatLevel"])
+        klima["steering_wheel_heat_level"] = stufe
+        klima["steering_wheel_heater"] = stufe > 0 if stufe is not None else None
+    if "HvacSteeringWheelHeatAuto" in raw:
+        klima["auto_steering_wheel_heat"] = _fleet_telemetrie_optional_wahr(
+            raw["HvacSteeringWheelHeatAuto"]
+        )
 
 
 def _fleet_telemetrie_norm_text(value):
@@ -6437,6 +6513,7 @@ def _fleet_telemetrie_rohdaten_anreichern(data):
     if not isinstance(data, dict):
         return
     _fleet_telemetrie_tpms_zeiten_anreichern(data)
+    _fleet_telemetrie_lenkradheizung_anreichern(data)
     status = _fleet_telemetrie_profile_status_kopie()
     data["fleet_api_blocked_reason"] = status.get("fleet_api_blocked_reason")
     data["fleet_api_retry_at"] = status.get("fleet_api_retry_at", 0.0)
@@ -6475,14 +6552,6 @@ def _fleet_telemetrie_rohdaten_anreichern(data):
         charge["battery_heater_on"] = batterieheizung
         climate["battery_heater_on"] = batterieheizung
         climate["battery_heater"] = batterieheizung
-    if "HvacSteeringWheelHeatLevel" in raw:
-        stufe = _fleet_telemetrie_heizstufe(raw.get("HvacSteeringWheelHeatLevel"))
-        climate["steering_wheel_heat_level"] = stufe
-        climate["steering_wheel_heater"] = bool(stufe and stufe > 0)
-    if "HvacSteeringWheelHeatAuto" in raw:
-        climate["auto_steering_wheel_heat"] = _fleet_telemetrie_wahr(
-            raw.get("HvacSteeringWheelHeatAuto")
-        )
 
 
 def _fleet_telemetrie_tpms_warnungen(value):
@@ -10116,14 +10185,9 @@ def _fleet_telemetrie_setze_feld(data, field, value, timestamp_ms):
         climate["wiper_blade_heater"] = _fleet_telemetrie_wahr(value)
         climate["timestamp"] = timestamp_ms
         return True
-    if field == "HvacSteeringWheelHeatLevel":
-        stufe = _fleet_telemetrie_heizstufe(value)
-        climate["steering_wheel_heat_level"] = stufe
-        climate["steering_wheel_heater"] = bool(stufe and stufe > 0)
-        climate["timestamp"] = timestamp_ms
-        return True
-    if field == "HvacSteeringWheelHeatAuto":
-        climate["auto_steering_wheel_heat"] = _fleet_telemetrie_wahr(value)
+    if field in {"HvacSteeringWheelHeatLevel", "HvacSteeringWheelHeatAuto"}:
+        data.setdefault("fleet_telemetry_field_received_at", {})[field] = timestamp_ms
+        _fleet_telemetrie_lenkradheizung_anreichern(data)
         climate["timestamp"] = timestamp_ms
         return True
     seat_heater_map = {
@@ -10740,11 +10804,17 @@ def _fleet_telemetrie_fahrzeugzustand_abrufen(vin):
     return _normalisiere_dashboard_state(antwort.get("state"))
 
 
-def _fleet_telemetrie_fallback_rohwerte_bereinigen(data, fahrzeugdaten):
+def _fleet_telemetrie_fallback_rohwerte_bereinigen(
+    data, fahrzeugdaten, empfangen_ms=None,
+):
     """Verwirf Rohwerte, die ein frischer REST-Datensatz ersetzt hat."""
 
     if not isinstance(data, dict) or not isinstance(fahrzeugdaten, dict):
         return
+    _fleet_telemetrie_lenkradheizung_rest_merken(
+        data, fahrzeugdaten.get("climate_state") or {},
+        int(time.time() * 1000) if empfangen_ms is None else empfangen_ms,
+    )
     rohwerte = data.get("fleet_telemetry_raw")
     if not isinstance(rohwerte, dict):
         return
@@ -10814,7 +10884,9 @@ def _fleet_telemetrie_fallbackdaten_uebernehmen(
                     ):
                         continue
                     ziel[key] = copy.deepcopy(value)
-            _fleet_telemetrie_fallback_rohwerte_bereinigen(data, fahrzeugdaten)
+            _fleet_telemetrie_fallback_rohwerte_bereinigen(
+                data, fahrzeugdaten, abgerufen_at_ms,
+            )
 
             drive = data.setdefault("drive_state", {})
             vehicle = data.setdefault("vehicle_state", {})
@@ -10923,7 +10995,7 @@ def _fleet_telemetrie_parkdaten_uebernehmen(
                         ziel[key] = copy.deepcopy(value)
                         übernommene_daten[abschnitt][key] = value
             _fleet_telemetrie_fallback_rohwerte_bereinigen(
-                data, übernommene_daten,
+                data, übernommene_daten, abgerufen_at_ms,
             )
             vehicle = data.setdefault("vehicle_state", {})
             climate = data.setdefault("climate_state", {})
@@ -11203,6 +11275,92 @@ def _fleet_telemetrie_fahrtverbindung_nach_timeout(vin, fehler):
         return False
 
 
+def _fleet_telemetrie_lenkradheizung_abgleich_erlaubt(data, jetzt_ms=None):
+    """Erlaube den Legacy-Abgleich nur bei belegter aktiver Fahrzeugnutzung."""
+
+    if (
+        not isinstance(data, dict)
+        or not _fleet_telemetrie_lenkradheizung_nur_ein_aus(data)
+    ):
+        return False
+    if _normalisiere_dashboard_state(data.get("state")) != "online":
+        return False
+    jetzt_ms = time.time() * 1000 if jetzt_ms is None else jetzt_ms
+    empfangen = _as_float(data.get("fleet_telemetry_received_at"))
+    if empfangen is None or not 0 <= jetzt_ms - empfangen <= 20000:
+        return False
+    rest = data.get("steering_wheel_heater_rest") or {}
+    abstand = jetzt_ms - (rest.get("received_at") or 0)
+    if abstand < FLEET_TELEMETRIE_LENKRADHEIZUNG_ABGLEICH_SECONDS * 1000:
+        return False
+    drive = data.get("drive_state") or {}
+    gang = _normalize_shift_state(drive.get("shift_state"))
+    if gang in {"D", "R"}:
+        zeit = _as_float(
+            (data.get("fleet_telemetry_field_received_at") or {}).get("VehicleSpeed")
+        )
+        speed = _as_float(drive.get("speed"))
+        return (
+            zeit is not None and 0 <= jetzt_ms - zeit <= 15000
+            and speed is not None and speed > 0.5
+        )
+    if gang != "P":
+        return False
+    anwesend = data.get("driver_presence") or {}
+    return anwesend.get("valid") is True and anwesend.get("value") is True
+
+
+def _fleet_telemetrie_lenkradheizung_abgleichen(vin):
+    """Lese ausschließlich Klimadaten; weder wecken noch Heizbefehle senden."""
+
+    data = _fleet_telemetrie_position_snapshot(vin)
+    if (
+        _fleet_telemetrie_api_pause_aktiv()
+        or not _fleet_telemetrie_lenkradheizung_abgleich_erlaubt(data)
+    ):
+        return False
+    jetzt = time.monotonic()
+    with _fleet_telemetry_position_lock:
+        vorher = _fleet_telemetry_lenkradheizung_letzte_abfrage.get(vin)
+        if (
+            vorher is not None
+            and jetzt - vorher < FLEET_TELEMETRIE_LENKRADHEIZUNG_ABGLEICH_SECONDS
+        ):
+            return False
+        _fleet_telemetry_lenkradheizung_letzte_abfrage[vin] = jetzt
+    token = _fleet_telemetrie_oauth_token()
+    if not token:
+        return False
+    response = _fleet_telemetrie_api_anfrage(
+        requests.get,
+        TESLA_FLEET_VEHICLE_COMMAND_URL.rstrip("/")
+        + f"/api/1/vehicles/{vin}/vehicle_data",
+        params={"endpoints": "climate_state"},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT,
+        verify=False,
+    )
+    payload = response.json()
+    klima = (payload.get("response") or {}).get("climate_state") or {}
+    abgerufen_ms = int(time.time() * 1000)
+    geändert = []
+    with _fleet_telemetry_lock:
+        for cache_id in _fleet_telemetrie_cache_ids(vin):
+            daten = latest_data.get(cache_id)
+            if not isinstance(daten, dict):
+                continue
+            if not _fleet_telemetrie_lenkradheizung_rest_merken(
+                daten, klima, abgerufen_ms,
+            ):
+                continue
+            _fleet_telemetrie_lenkradheizung_anreichern(daten)
+            _fleet_telemetrie_cache_spaeter_speichern(cache_id, daten)
+            geändert.append((cache_id, daten))
+    for cache_id, daten in geändert:
+        _subscriber_daten_senden(cache_id, daten)
+    return bool(geändert)
+
+
 def _fleet_telemetrie_position_worker_loop():
     """Stoße eine festhängende Fleet-Position während aktiver Fahrt wieder an."""
 
@@ -11273,6 +11431,14 @@ def _fleet_telemetrie_position_worker_loop():
                             exc,
                         )
                 data = _fleet_telemetrie_position_snapshot(vin)
+            if _fleet_telemetrie_lenkradheizung_abgleich_erlaubt(data):
+                try:
+                    _fleet_telemetrie_lenkradheizung_abgleichen(vin)
+                except Exception as exc:
+                    logging.warning(
+                        "Lenkradheizung konnte nicht abgeglichen werden (%s): %s",
+                        vin, exc,
+                    )
             if not _fleet_telemetrie_position_soll_aktualisiert_werden(data):
                 continue
             if not _fleet_telemetrie_position_abfrage_reservieren(vin):
@@ -11383,6 +11549,7 @@ def _fleet_telemetrie_v_felder_aktualisieren(vin, feldwerte):
                     field in telemetrie_diagnose.INTERVALLE
                     or field == "DriverSeatOccupied"
                     or field in FLEET_TELEMETRIE_TPMS_PROFILFELDER
+                    or field in {"HvacSteeringWheelHeatLevel", "HvacSteeringWheelHeatAuto"}
                 ):
                     vorher = data.get("fleet_telemetry_field_received_at", {}).get(field, 0)
                     if timestamp_ms < (vorher or 0):

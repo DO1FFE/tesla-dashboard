@@ -1753,7 +1753,10 @@ function updateHeaterIndicator(front, rear, steering, steeringLevel, steeringAut
             .replace(/^Level/, '')
             .toLowerCase()
             .replace(/[_\-\s]/g, '');
-        if (!norm || ['false', 'off', 'none', 'null', 'unknown'].indexOf(norm) !== -1) {
+        if (!norm || ['none', 'null', 'unknown'].indexOf(norm) !== -1) {
+            return null;
+        }
+        if (['false', 'off'].indexOf(norm) !== -1) {
             return 0;
         }
         if (['true', 'on', 'active', 'enabled', 'low'].indexOf(norm) !== -1) {
@@ -1770,18 +1773,20 @@ function updateHeaterIndicator(front, rear, steering, steeringLevel, steeringAut
     function setSteering(id, val, levelVal, autoVal, name) {
         var level = heaterLevel(levelVal);
         var autoActive = istAktiv(autoVal);
-        var active = level != null ? level > 0 : istAktiv(val);
-        if (!active && autoActive) {
-            active = true;
+        if (val == null && level == null) {
+            set(id, null, name);
+            return;
         }
+        var active = val != null ? istAktiv(val) : level > 0;
         var suffix = active ? '\uD83D\uDD25' : '\uD83D\uDEAB';
         var title = name + (active ? ' an' : ' aus');
         if (active && level != null && level > 0) {
             suffix += level;
             title = name + ' Stufe ' + level;
-        } else if (active && autoActive) {
+        }
+        if (autoActive) {
             suffix += ' A';
-            title = name + ' Automatik';
+            title += ' (Automatik)';
         }
         $('#' + id)
             .html(heaterHtml(name, suffix))
