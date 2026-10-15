@@ -42,15 +42,78 @@ def test_ap1_rest_schalter_gewinnt_gegen_auch_neuere_stufe_null(monkeypatch, akt
     assert payload["climate_state"]["steering_wheel_heat_level"] is None
 
 
-def test_veralteter_rest_status_wird_unbekannt_statt_falsch_aus(monkeypatch):
+@pytest.mark.parametrize("aktiv", [False, True])
+@pytest.mark.parametrize("zustand", ["online", "offline", "asleep"])
+def test_bestätigter_rest_status_bleibt_beim_parken_erhalten(
+    monkeypatch, aktiv, zustand,
+):
     daten = _daten()
+    daten["state"] = zustand
+    daten["driver_presence"] = {"value": False, "valid": True}
+    app._fleet_telemetrie_lenkradheizung_rest_merken(daten, {
+        "steering_wheel_heater": aktiv, "timestamp": JETZT,
+    }, JETZT)
+    monkeypatch.setattr(app.time, "time", lambda: JETZT / 1000 + 12 * 3600)
+    daten = json.loads(json.dumps(daten))
+    vorher = copy.deepcopy(daten["steering_wheel_heater_rest"])
+    payload = app._subscriber_stream_payload(daten)
+    klima = payload["climate_state"]
+    assert klima["steering_wheel_heater"] is aktiv
+    assert klima["steering_wheel_heater_cached"] is True
+    assert klima["steering_wheel_heater_timestamp"] == JETZT
+    assert klima["steering_wheel_heat_level"] is None
+    assert daten["steering_wheel_heater_rest"] == vorher
+    assert not app._fleet_telemetrie_lenkradheizung_abgleich_erlaubt(daten)
+
+
+@pytest.mark.parametrize("aktiv", [False, True])
+def test_frischer_rest_schalter_ersetzt_alten_cache(monkeypatch, aktiv):
+    daten = _daten()
+    app._fleet_telemetrie_lenkradheizung_rest_merken(daten, {
+        "steering_wheel_heater": not aktiv, "timestamp": JETZT,
+    }, JETZT)
+    später = JETZT + 120000
+    monkeypatch.setattr(app.time, "time", lambda: später / 1000)
+    app._fleet_telemetrie_lenkradheizung_anreichern(daten)
+    assert daten["climate_state"]["steering_wheel_heater_cached"] is True
+    app._fleet_telemetrie_lenkradheizung_rest_merken(daten, {
+        "steering_wheel_heater": aktiv, "timestamp": später,
+    }, später)
+    app._fleet_telemetrie_lenkradheizung_anreichern(daten)
+    assert daten["climate_state"]["steering_wheel_heater"] is aktiv
+    assert daten["climate_state"]["steering_wheel_heater_cached"] is False
+    assert daten["climate_state"]["steering_wheel_heater_timestamp"] == später
+
+
+@pytest.mark.parametrize("rest", [
+    {}, {"value": None, "timestamp": JETZT},
+    {"value": "false", "timestamp": JETZT},
+    {"value": False}, {"value": False, "timestamp": 0},
+    {"value": False, "timestamp": float("nan")},
+    {"value": False, "timestamp": float("inf")},
+    {"value": False, "timestamp": JETZT + 31000},
+])
+def test_ohne_bestätigten_schalter_bleibt_status_unbekannt(monkeypatch, rest):
+    monkeypatch.setattr(app.time, "time", lambda: JETZT / 1000)
+    daten = _daten()
+    daten["steering_wheel_heater_rest"] = rest
+    app._fleet_telemetrie_lenkradheizung_anreichern(daten)
+    assert daten["climate_state"]["steering_wheel_heater"] is None
+    assert daten["climate_state"]["steering_wheel_heat_level"] is None
+    assert daten["climate_state"]["steering_wheel_heater_cached"] is False
+    assert daten["climate_state"]["steering_wheel_heater_timestamp"] is None
+
+
+def test_modernes_fahrzeug_bekommt_keinen_legacy_dauercache(monkeypatch):
+    daten = _daten()
+    daten["vehicle_config"] = {"car_type": "model3"}
     app._fleet_telemetrie_lenkradheizung_rest_merken(daten, {
         "steering_wheel_heater": True, "timestamp": JETZT,
     }, JETZT)
     monkeypatch.setattr(app.time, "time", lambda: JETZT / 1000 + 91)
     app._fleet_telemetrie_lenkradheizung_anreichern(daten)
     assert daten["climate_state"]["steering_wheel_heater"] is None
-    assert daten["climate_state"]["steering_wheel_heat_level"] is None
+    assert daten["climate_state"]["steering_wheel_heater_cached"] is False
 
 
 @pytest.mark.parametrize("wert", [None, "unknown", "HvacSteeringWheelHeatLevelUnknown", float("nan"), float("inf"), {"invalid": True}])
@@ -219,6 +282,20 @@ for(const [aktiv,stufe,automatik,titel] of [
 ]){
  updateHeaterIndicator(null,null,aktiv,stufe,automatik);
  assert.equal(elemente['#steering-heater'].title,titel);
+}
+for(const aktiv of [false,true]){
+ const status = {steering_wheel_heater_cached:true,steering_wheel_heater_timestamp:1792013489000};
+ const args = [null,null,aktiv,null,null,null,null,null,null,null,null,null,null,status];
+ updateHeaterIndicator(...args);
+ const anzeige = elemente['#steering-heater'];
+ assert.ok(anzeige.title.startsWith('Lenkradheizung ' + (aktiv ? 'an' : 'aus') + ' (zuletzt bestätigt:'));
+ assert.ok(anzeige.title.includes('14.10.2026'));
+ assert.ok(anzeige.title.includes('gespeicherter Stand'));
+ assert.equal(anzeige['aria-label'],anzeige.title);
+ assert.ok(!anzeige.inhalt.includes('is-unknown'));
+ status.steering_wheel_heater_cached = false;
+ updateHeaterIndicator(...args);
+ assert.equal(anzeige.title,'Lenkradheizung ' + (aktiv ? 'an' : 'aus'));
 }
 """], capture_output=True, text=True, timeout=10)
     assert ergebnis.returncode == 0, ergebnis.stdout + ergebnis.stderr

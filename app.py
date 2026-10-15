@@ -5948,11 +5948,24 @@ def _fleet_telemetrie_lenkradheizung_anreichern(data):
         or (rest.get("timestamp") or 0)
         >= (empfang.get("HvacSteeringWheelHeatLevel") or 0)
     )
+    klima["steering_wheel_heater_cached"] = False
+    klima["steering_wheel_heater_timestamp"] = None
     if rest_nutzen or nur_schalter:
-        alter = time.time() * 1000 - (rest.get("timestamp") or 0)
+        zeit = _as_float(rest.get("timestamp"))
+        alter = time.time() * 1000 - (zeit or 0)
         max_alter = FLEET_TELEMETRIE_LENKRADHEIZUNG_MAX_ALTER_SECONDS * 1000
-        gültig = bool(rest) and -30000 <= alter <= max_alter
+        bekannt = (
+            isinstance(rest.get("value"), bool)
+            and zeit is not None and math.isfinite(zeit) and zeit > 0
+            and alter >= -30000
+        )
+        frisch = bekannt and alter <= max_alter
+        # Ohne unterstützte Heizstufe bleibt der bestätigte Schalter erhalten.
+        # Das Alter kennzeichnet den Cache, ohne weitere REST-Abfragen auszulösen.
+        gültig = bekannt and (nur_schalter or frisch)
         klima["steering_wheel_heater"] = rest.get("value") if gültig else None
+        klima["steering_wheel_heater_cached"] = gültig and not frisch
+        klima["steering_wheel_heater_timestamp"] = zeit if gültig else None
         klima["steering_wheel_heat_level"] = (
             rest.get("level") if gültig and not nur_schalter else None
         )

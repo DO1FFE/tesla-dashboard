@@ -1277,7 +1277,8 @@ function handleData(data) {
         climate.seat_heater_right,
         climate.seat_heater_rear_left,
         climate.seat_heater_rear_center,
-        climate.seat_heater_rear_right
+        climate.seat_heater_rear_right,
+        climate
     );
     updateTPMS(vehicle);
     updateReifendruckDetails(vehicle);
@@ -1711,7 +1712,7 @@ function updateDesiredTemp(temp) {
 
 function updateHeaterIndicator(front, rear, steering, steeringLevel, steeringAuto, wiper,
                                mirror, battery,
-                               seatL, seatR, seatRL, seatRC, seatRR) {
+                               seatL, seatR, seatRL, seatRC, seatRR, lenkradStatus) {
     function heaterHtml(name, symbol, symbolClass) {
         var klasse = 'heater-symbol';
         if (symbolClass) {
@@ -1787,6 +1788,14 @@ function updateHeaterIndicator(front, rear, steering, steeringLevel, steeringAut
         if (autoActive) {
             suffix += ' A';
             title += ' (Automatik)';
+        }
+        if (lenkradStatus && lenkradStatus.steering_wheel_heater_cached === true) {
+            title += ' (zuletzt bestätigt';
+            var zeit = parseNumber(lenkradStatus.steering_wheel_heater_timestamp);
+            if (zeit != null && zeit > 0 && isFinite(new Date(zeit).getTime())) {
+                title += ': ' + new Date(zeit).toLocaleString('de-DE', {timeZone: 'Europe/Berlin'});
+            }
+            title += ', gespeicherter Stand)';
         }
         $('#' + id)
             .html(heaterHtml(name, suffix))
