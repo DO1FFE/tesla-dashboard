@@ -145,16 +145,17 @@ if (window.ResizeObserver && mapEl) {
     var mapResizeObserver = new ResizeObserver(function() {
         map.invalidateSize();
         if (typeof marker !== 'undefined' && marker.getLatLng) {
-            zoomSetByApp = true;
-            map.setView(marker.getLatLng(), map.getZoom(), {animate: false});
+            setzeAutomatischeKartenansicht(marker.getLatLng(), map.getZoom());
         }
     });
     mapResizeObserver.observe(mapEl);
 }
-// Track when the user last changed the zoom level
+// Manuelle Eingaben haben bis 15 Sekunden nach dem letzten Zoom Vorrang.
 var lastUserZoom = 0;
-var USER_ZOOM_PRIORITY_MS = 30 * 1000;
+var USER_ZOOM_PRIORITY_MS = 15 * 1000;
 var zoomSetByApp = false;
+var manuellerKartenZoomAktiv = false;
+var kartenNachfuehrungAusstehend = false;
 var $zoomLevel = $('#zoom-level');
 var $privacyMapNotice = $('#privacy-map-notice');
 function updateZoomDisplay() {
@@ -163,6 +164,39 @@ function updateZoomDisplay() {
     }
 }
 updateZoomDisplay();
+
+function merkeManuelleKarteneingabe() {
+    lastUserZoom = Date.now();
+    kartenNachfuehrungAusstehend = true;
+}
+
+function setzeAutomatischeKartenansicht(position, zoom) {
+    if (manuellerKartenZoomAktiv || Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
+        kartenNachfuehrungAusstehend = true;
+        return false;
+    }
+    // Ohne Zoomänderung sendet Leaflet kein zoomend. Deshalb hier zurücksetzen.
+    zoomSetByApp = true;
+    try {
+        map.setView(position, zoom, {animate: false});
+        kartenNachfuehrungAusstehend = false;
+    } finally {
+        zoomSetByApp = false;
+    }
+    updateZoomDisplay();
+    return true;
+}
+
+if (mapEl) {
+    ['wheel', 'pointerdown', 'touchstart', 'dblclick'].forEach(function(ereignis) {
+        mapEl.addEventListener(ereignis, merkeManuelleKarteneingabe, {capture: true, passive: true});
+    });
+    mapEl.addEventListener('keydown', function(ereignis) {
+        if (['+', '-', '=', '_'].indexOf(ereignis.key) !== -1) {
+            merkeManuelleKarteneingabe();
+        }
+    }, true);
+}
 
 function formatierePrivatsphaereRadius(radius) {
     radius = Number(radius);
@@ -494,12 +528,17 @@ function routeLineZuKartenPunkte(routeLine) {
 }
 
 map.on('zoomend', function() {
-    if (zoomSetByApp) {
-        zoomSetByApp = false;
-    } else {
-        lastUserZoom = Date.now();
+    if (!zoomSetByApp) {
+        merkeManuelleKarteneingabe();
     }
+    manuellerKartenZoomAktiv = false;
     updateZoomDisplay();
+});
+map.on('zoomstart', function() {
+    if (!zoomSetByApp) {
+        manuellerKartenZoomAktiv = true;
+        merkeManuelleKarteneingabe();
+    }
 });
 var polyline = null;
 var pendingPath = null;
@@ -1310,13 +1349,8 @@ function handleData(data) {
         if (privacyModeAktiv) {
             zoom = zoomFuerPrivatsphaereRadius(privacyRadius, zoom);
         }
-        if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
-            zoom = map.getZoom();
-        }
-        if (coordsNeu || !letzteKartenPosition) {
-            zoomSetByApp = true;
-            map.setView([mapLat, mapLng], zoom, {animate: false});
-            updateZoomDisplay();
+        if (coordsNeu || !letzteKartenPosition || kartenNachfuehrungAusstehend || map.getZoom() !== zoom) {
+            setzeAutomatischeKartenansicht(marker.getLatLng(), zoom);
         }
         if (typeof drive.heading === 'number' && (!karteGeparkt || letzteKartenRichtung == null)) {
             var displayHeading = adjustHeadingForReverse(drive.heading, drive.shift_state);
@@ -1334,12 +1368,7 @@ function handleData(data) {
     } else if (!letzteKartenPosition && !offline) {
         // Auf Standardposition zurücksetzen, wenn keine Koordinaten vorliegen
         var zoom = DEFAULT_ZOOM;
-        if (Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
-            zoom = map.getZoom();
-        }
-        zoomSetByApp = true;
-        map.setView(DEFAULT_POS, zoom);
-        updateZoomDisplay();
+        setzeAutomatischeKartenansicht(DEFAULT_POS, zoom);
     }
     updatePrivatsphaereOverlay(privacyModeAktiv, mapLat, mapLng, privacyRadius);
 
