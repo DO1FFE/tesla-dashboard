@@ -4,7 +4,7 @@ import subprocess
 import pytest
 
 
-def test_manueller_zoom_hat_volle_15_sekunden_vorrang():
+def test_manuelle_kartenbedienung_hat_volle_15_sekunden_vorrang():
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node.js für den Kartenzoom-Test erforderlich")
@@ -26,11 +26,16 @@ const kontext = {
    aufrufe++;
    assert.equal(optionen.animate, false);
    if (fehler) throw new Error('Testfehler');
-   if (zoom !== neu) {
+   const zoomNeu = zoom !== neu;
+   if (zoomNeu) {
     ereignisse.zoomstart();
-    zoom = neu;
+   }
+   ereignisse.movestart();
+   zoom = neu;
+   if (zoomNeu) {
     ereignisse.zoomend();
    }
+   ereignisse.moveend();
   }
  }
 };
@@ -83,6 +88,42 @@ jetzt += 14999;
 assert.equal(automatisch(18), false);
 jetzt++;
 assert.equal(automatisch(18), true);
+
+// Langes Ziehen bleibt auch bei zwischenzeitlichem Zoom- oder Resize-Ende geschützt.
+ereignisse.movestart();
+ereignisse.dragstart();
+jetzt += 20000;
+assert.equal(automatisch(18), false);
+ereignisse.zoomstart();
+ereignisse.zoomend();
+ereignisse.moveend();
+jetzt += 20000;
+assert.equal(automatisch(18), false);
+ereignisse.dragend();
+jetzt += 20000;
+assert.equal(automatisch(18), false, 'Nachgleiten muss vollständig abgeschlossen sein');
+ereignisse.moveend();
+const bewegungsende = jetzt;
+jetzt += 14999;
+assert.equal(automatisch(18), false);
+assert.equal(kontext.lastUserZoom, bewegungsende);
+jetzt++;
+assert.equal(automatisch(18), true);
+assert.equal(kontext.lastUserZoom, bewegungsende, 'Automatische Bewegungen verlängern die Pause nicht');
+
+// Auch Pfeiltasten beginnen eine neue Pause, die erst nach der Bewegung abläuft.
+for (const key of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']) {
+ jetzt += 20000;
+ eingaben.keydown({key});
+ assert.equal(automatisch(18), false);
+ ereignisse.movestart();
+ jetzt += 500;
+ ereignisse.moveend();
+ jetzt += 14999;
+ assert.equal(automatisch(18), false);
+ jetzt++;
+ assert.equal(automatisch(18), true);
+}
 
 fehler = true;
 assert.throws(() => automatisch(17), /Testfehler/);

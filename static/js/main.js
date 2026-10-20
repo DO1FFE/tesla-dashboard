@@ -150,11 +150,13 @@ if (window.ResizeObserver && mapEl) {
     });
     mapResizeObserver.observe(mapEl);
 }
-// Manuelle Eingaben haben bis 15 Sekunden nach dem letzten Zoom Vorrang.
+// Manuelle Eingaben haben bis 15 Sekunden nach Zoom oder Verschieben Vorrang.
 var lastUserZoom = 0;
 var USER_ZOOM_PRIORITY_MS = 15 * 1000;
 var zoomSetByApp = false;
 var manuellerKartenZoomAktiv = false;
+var manuellesKartenZiehenAktiv = false;
+var manuelleKartenBewegungAktiv = false;
 var kartenNachfuehrungAusstehend = false;
 var $zoomLevel = $('#zoom-level');
 var $privacyMapNotice = $('#privacy-map-notice');
@@ -171,7 +173,8 @@ function merkeManuelleKarteneingabe() {
 }
 
 function setzeAutomatischeKartenansicht(position, zoom) {
-    if (manuellerKartenZoomAktiv || Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
+    if (manuellerKartenZoomAktiv || manuellesKartenZiehenAktiv || manuelleKartenBewegungAktiv ||
+        Date.now() - lastUserZoom < USER_ZOOM_PRIORITY_MS) {
         kartenNachfuehrungAusstehend = true;
         return false;
     }
@@ -192,7 +195,8 @@ if (mapEl) {
         mapEl.addEventListener(ereignis, merkeManuelleKarteneingabe, {capture: true, passive: true});
     });
     mapEl.addEventListener('keydown', function(ereignis) {
-        if (['+', '-', '=', '_'].indexOf(ereignis.key) !== -1) {
+        if (!ereignis.altKey && !ereignis.ctrlKey && !ereignis.metaKey &&
+            ['+', '-', '=', '_', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].indexOf(ereignis.key) !== -1) {
             merkeManuelleKarteneingabe();
         }
     }, true);
@@ -537,6 +541,28 @@ map.on('zoomend', function() {
 map.on('zoomstart', function() {
     if (!zoomSetByApp) {
         manuellerKartenZoomAktiv = true;
+        merkeManuelleKarteneingabe();
+    }
+});
+map.on('dragstart', function() {
+    manuellesKartenZiehenAktiv = true;
+    merkeManuelleKarteneingabe();
+});
+map.on('dragend', function() {
+    manuellesKartenZiehenAktiv = false;
+    // Leaflet kann nach dem Loslassen weitergleiten; erst moveend beendet die Bewegung.
+    manuelleKartenBewegungAktiv = true;
+    merkeManuelleKarteneingabe();
+});
+map.on('movestart', function() {
+    if (!zoomSetByApp) {
+        manuelleKartenBewegungAktiv = true;
+        merkeManuelleKarteneingabe();
+    }
+});
+map.on('moveend', function() {
+    if (!zoomSetByApp && manuelleKartenBewegungAktiv) {
+        manuelleKartenBewegungAktiv = false;
         merkeManuelleKarteneingabe();
     }
 });
