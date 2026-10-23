@@ -34,6 +34,7 @@ def isolierte_laufzeitdaten(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "PARKTIME_FILE", str(tmp_path / "parktime.json"))
     monkeypatch.setattr(app, "park_start_ms", None)
     monkeypatch.setattr(app, "last_shift_state", None)
+    monkeypatch.setattr(app, "_fleet_telemetrie_rest_abgleich_status", {})
     monkeypatch.setattr(
         app, "_telemetrie_diagnose_datenbankpfad",
         lambda: str(tmp_path / "telemetrie-diagnose.sqlite"),

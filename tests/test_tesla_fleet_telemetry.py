@@ -717,7 +717,9 @@ def test_fleet_telemetrie_parkabgleich_ruft_vollstaendige_daten_ab(monkeypatch):
             pass
 
         def json(self):
-            return {"response": {"state": "online", "vehicle_state": {}}}
+            return {"response": {
+                "state": "online", "vehicle_state": {"locked": True},
+            }}
 
     abfragen = []
 
@@ -737,7 +739,10 @@ def test_fleet_telemetrie_parkabgleich_ruft_vollstaendige_daten_ab(monkeypatch):
 
     assert daten["state"] == "online"
     assert abfragen[0][0].endswith("/api/1/vehicles/TESTVIN/vehicle_data")
-    assert "params" not in abfragen[0][1]
+    assert set(abfragen[0][1]["params"]["endpoints"].split(";")) == {
+        "location_data", "charge_state", "climate_state", "vehicle_state",
+        "gui_settings", "vehicle_config",
+    }
     assert abfragen[0][1]["headers"] == {"Authorization": "Bearer token"}
 
 
@@ -1152,13 +1157,17 @@ def test_fleet_telemetrie_positionsabfrage_aktualisiert_alle_caches(monkeypatch)
         )
 
 
-def test_fleet_telemetrie_streamwiederherstellung_uebernimmt_position_zuerst(
+def test_fleet_telemetrie_streamwiederherstellung_bündelt_position_und_zustand(
     monkeypatch,
 ):
     aufrufe = []
     position = {
         "latitude": 51.45,
         "longitude": 7.09,
+    }
+    fahrzeugdaten = {
+        "state": "online", "drive_state": position,
+        "climate_state": {"steering_wheel_heater": False},
     }
 
     monkeypatch.setattr(
@@ -1169,18 +1178,18 @@ def test_fleet_telemetrie_streamwiederherstellung_uebernimmt_position_zuerst(
     monkeypatch.setattr(
         app,
         "_fleet_telemetrie_position_abrufen",
-        lambda vin: aufrufe.append(("position", vin)) or position,
+        lambda vin: pytest.fail("Keine zusätzliche Positionsabfrage"),
     )
     monkeypatch.setattr(
         app,
-        "_fleet_telemetrie_position_uebernehmen",
-        lambda vin, daten: aufrufe.append(("position übernehmen", vin, daten))
+        "_fleet_telemetrie_fallbackdaten_uebernehmen",
+        lambda vin, daten: aufrufe.append(("übernehmen", vin, daten))
         or True,
     )
 
     def vollständige_daten(_vin):
         aufrufe.append(("vehicle_data", _vin))
-        raise RuntimeError("Zeitüberschreitung")
+        return fahrzeugdaten
 
     monkeypatch.setattr(
         app,
@@ -1191,13 +1200,12 @@ def test_fleet_telemetrie_streamwiederherstellung_uebernimmt_position_zuerst(
     assert app._fleet_telemetrie_stream_wiederherstellen("TESTVIN")
     assert aufrufe == [
         ("state", "TESTVIN"),
-        ("position", "TESTVIN"),
-        ("position übernehmen", "TESTVIN", position),
         ("vehicle_data", "TESTVIN"),
+        ("übernehmen", "TESTVIN", fahrzeugdaten),
     ]
 
 
-def test_fleet_telemetrie_streamwiederherstellung_gleicht_trotz_positionsfehler_ab(
+def test_fleet_telemetrie_streamwiederherstellung_übernimmt_auch_ohne_position(
     monkeypatch,
 ):
     aufrufe = []
@@ -1213,8 +1221,7 @@ def test_fleet_telemetrie_streamwiederherstellung_gleicht_trotz_positionsfehler_
     )
 
     def position_abrufen(_vin):
-        aufrufe.append("position")
-        raise RuntimeError("nicht verfügbar")
+        pytest.fail("Keine zusätzliche Positionsabfrage bei Teilantwort")
 
     monkeypatch.setattr(
         app,
@@ -1234,7 +1241,6 @@ def test_fleet_telemetrie_streamwiederherstellung_gleicht_trotz_positionsfehler_
 
     assert app._fleet_telemetrie_stream_wiederherstellen("TESTVIN")
     assert aufrufe == [
-        "position",
         "vehicle_data",
         ("TESTVIN", fahrzeugdaten),
     ]
@@ -5163,7 +5169,8 @@ def test_fleet_telemetrie_live_reparatur_sendet_basis_dann_vollprofil(
     assert gesendete_felder == [
         {"DCDCEnable", "Location", "Odometer", "VehicleSpeed"}
         | app.FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER
-        | app.FLEET_TELEMETRIE_TPMS_PROFILFELDER,
+        | app.FLEET_TELEMETRIE_TPMS_PROFILFELDER
+        | app.FLEET_TELEMETRIE_LENKRADHEIZUNG_FELDER,
         {
             "DCDCEnable",
             "InsideTemp",
@@ -5172,6 +5179,7 @@ def test_fleet_telemetrie_live_reparatur_sendet_basis_dann_vollprofil(
             "VehicleSpeed",
         } | app.FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER
         | app.FLEET_TELEMETRIE_TPMS_PROFILFELDER
+        | app.FLEET_TELEMETRIE_LENKRADHEIZUNG_FELDER
         | set(app.telemetrie_diagnose.profilfelder("live")),
     ]
     status = app._fleet_telemetry_profile_status

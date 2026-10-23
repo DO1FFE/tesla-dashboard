@@ -924,8 +924,8 @@ FLEET_TELEMETRIE_LADEABGLEICH_MIN_LEISTUNG_KW = max(
     0.1,
     float(os.getenv("TESLA_FLEET_CHARGE_RECONCILE_MIN_POWER_KW", "1")),
 )
-FLEET_TELEMETRIE_LENKRADHEIZUNG_ABGLEICH_SECONDS = 60
 FLEET_TELEMETRIE_LENKRADHEIZUNG_MAX_ALTER_SECONDS = 90
+FLEET_TELEMETRIE_REST_FEHLERPAUSEN_SECONDS = (30, 60, 120, 300)
 FLEET_TELEMETRIE_STREAM_WIEDERHERSTELLUNG_NACH_SECONDS = max(
     FLEET_TELEMETRIE_POSITION_STREAM_MAX_ALTER_SECONDS,
     float(os.getenv("TESLA_FLEET_STREAM_RECOVERY_AFTER_SECONDS", "20")),
@@ -1969,7 +1969,7 @@ _fleet_telemetry_position_lock = threading.Lock()
 _fleet_telemetry_position_letzte_abfrage = {}
 _fleet_telemetry_parkabgleich_letzte_abfrage = {}
 _fleet_telemetry_ladeabgleich_letzte_abfrage = {}
-_fleet_telemetry_lenkradheizung_letzte_abfrage = {}
+_fleet_telemetrie_rest_abgleich_status = {}
 _fleet_telemetry_stream_wiederherstellung_letzte_abfrage = {}
 _fleet_telemetry_fahrtverbindung_letzte_prüfung = {}
 FLEET_TELEMETRIE_FAHRTVERBINDUNG_COOLDOWN_SECONDS = 300
@@ -2016,7 +2016,7 @@ _fleet_telemetry_queue_verworfen = 0
 _fleet_telemetry_queue_warnung = 0.0
 FLEET_TELEMETRIE_PROFILE = {"live", "live_extended", "parked", "charging"}
 FLEET_TELEMETRIE_PROFILE_STANDARD = "live"
-FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 11
+FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 12
 FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS = max(
     0.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_PARK_PROFILE_DELAY_SECONDS", "120")),
@@ -2150,6 +2150,10 @@ FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_MIN_FELDER = max(
     int(os.getenv("TESLA_FLEET_TELEMETRY_LIVE_STABLE_MIN_FIELDS", "2")),
 )
 FLEET_TELEMETRIE_PROFILE_AUSGESCHLOSSENE_FELDER = frozenset()
+FLEET_TELEMETRIE_LENKRADHEIZUNG_FELDER = frozenset({
+    "HvacSteeringWheelHeatAuto",
+    "HvacSteeringWheelHeatLevel",
+})
 FLEET_TELEMETRIE_TPMS_PROFILFELDER = frozenset({
     "TpmsHardWarnings",
     "TpmsLastSeenPressureTimeFl",
@@ -2172,9 +2176,12 @@ FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER = frozenset({
     "SoftwareUpdateVersion",
     "Version",
 })
-FLEET_TELEMETRIE_PROFILE_OPTIONALE_FELDER = frozenset({
-    "DCDCEnable",
-}) | FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER | FLEET_TELEMETRIE_TPMS_PROFILFELDER
+FLEET_TELEMETRIE_PROFILE_OPTIONALE_FELDER = (
+    frozenset({"DCDCEnable"})
+    | FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER
+    | FLEET_TELEMETRIE_TPMS_PROFILFELDER
+    | FLEET_TELEMETRIE_LENKRADHEIZUNG_FELDER
+)
 FLEET_TELEMETRIE_PROFILE_LIVE_BEWEGUNGS_INKLUSIVFELDER = frozenset({
     "GpsAccuracyMeters",
     "GradeEstimatePercent",
@@ -2224,7 +2231,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_1S_FELDER = frozenset({
     "PackVoltage",
     "PedalPosition",
     "VehicleSpeed",
-})
+}) | FLEET_TELEMETRIE_LENKRADHEIZUNG_FELDER
 FLEET_TELEMETRIE_PROFILE_LIVE_5S_FELDER = frozenset({
     "BatteryLevel",
     "ExpectedEnergyPercentAtTripArrival",
@@ -2270,8 +2277,6 @@ FLEET_TELEMETRIE_PROFILE_LIVE_30S_FELDER = frozenset({
     "HvacFanSpeed",
     "HvacFanStatus",
     "HvacPower",
-    "HvacSteeringWheelHeatAuto",
-    "HvacSteeringWheelHeatLevel",
     "MediaPlaybackStatus",
     "WiperHeatEnabled",
 })
@@ -2333,7 +2338,11 @@ FLEET_TELEMETRIE_PROFILE_LIVE_FELDER = frozenset({
     "SeatHeaterRight",
     "Soc",
     "VehicleSpeed",
-}) | FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER | FLEET_TELEMETRIE_TPMS_PROFILFELDER
+}) | (
+    FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER
+    | FLEET_TELEMETRIE_TPMS_PROFILFELDER
+    | FLEET_TELEMETRIE_LENKRADHEIZUNG_FELDER
+)
 FLEET_TELEMETRIE_PROFILE_LIVE_WIEDERHERSTELLUNGSFELDER = frozenset({
     "ACChargingPower",
     "BrakePedal",
@@ -2360,7 +2369,11 @@ FLEET_TELEMETRIE_PROFILE_LIVE_WIEDERHERSTELLUNGSFELDER = frozenset({
     "RouteLine",
     "RpWindow",
     "VehicleSpeed",
-}) | FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER | FLEET_TELEMETRIE_TPMS_PROFILFELDER
+}) | (
+    FLEET_TELEMETRIE_SOFTWARE_UPDATE_FELDER
+    | FLEET_TELEMETRIE_TPMS_PROFILFELDER
+    | FLEET_TELEMETRIE_LENKRADHEIZUNG_FELDER
+)
 FLEET_TELEMETRIE_PROFILE_LIVE_ERWEITERT_60S_FELDER = frozenset({
     "ChargePort",
     "ChargePortDoorOpen",
@@ -2393,6 +2406,7 @@ FLEET_TELEMETRIE_PROFILE_LIVE_EXTENDED_FELDER = (
 )
 FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNGSFELDER = (
     FLEET_TELEMETRIE_PROFILE_LIVE_1S_FELDER
+    - FLEET_TELEMETRIE_LENKRADHEIZUNG_FELDER
 )
 FLEET_TELEMETRIE_PROFILE_LIVE_STABIL_FELDER = (
     "VehicleSpeed",
@@ -10761,7 +10775,7 @@ def _fleet_telemetrie_ladeabgleich_reservieren(vin, jetzt=None):
 
 
 def _fleet_telemetrie_parkdaten_abrufen(vin):
-    """Rufe einmalig den vollständigen Fahrzeugstand nach dem Parken ab."""
+    """Bündele Fahrzeugzustand und Position in einer einzigen Datenabfrage."""
 
     token = _fleet_telemetrie_oauth_token()
     if not token:
@@ -10773,13 +10787,23 @@ def _fleet_telemetrie_parkdaten_abrufen(vin):
     response = _fleet_telemetrie_api_anfrage(
         requests.get,
         url,
+        params={"endpoints": (
+            "location_data;charge_state;climate_state;vehicle_state;"
+            "gui_settings;vehicle_config"
+        )},
         headers={"Authorization": f"Bearer {token}"},
         timeout=FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT,
         verify=False,
     )
     payload = response.json()
     antwort = payload.get("response") if isinstance(payload, dict) else None
-    if not isinstance(antwort, dict):
+    if not isinstance(antwort, dict) or not any(
+        isinstance(antwort.get(abschnitt), dict) and antwort[abschnitt]
+        for abschnitt in (
+            "drive_state", "charge_state", "climate_state", "vehicle_state",
+            "gui_settings", "vehicle_config",
+        )
+    ):
         raise RuntimeError("Tesla lieferte keine Fahrzeugdaten")
     return antwort
 
@@ -11141,46 +11165,14 @@ def _fleet_telemetrie_position_uebernehmen(vin, drive_data, abgerufen_at_ms=None
 
 
 def _fleet_telemetrie_stream_wiederherstellen(vin):
-    """Hole bei einem stummen Stream zuerst die kleine Positionsantwort."""
+    """Stelle Position und Zustand mit einer gemeinsamen Datenabfrage wieder her."""
 
     state = _fleet_telemetrie_fahrzeugzustand_abrufen(vin)
     if state != "online":
         return False
 
-    übernommen = False
-    try:
-        position = _fleet_telemetrie_position_abrufen(vin)
-        if _fleet_telemetrie_position_uebernehmen(vin, position):
-            übernommen = True
-            logging.warning(
-                "Stumme Fleet-Position zuerst über location_data "
-                "wiederhergestellt: %s",
-                vin,
-            )
-    except Exception as exc:
-        logging.warning(
-            "Position bei Stream-Wiederherstellung nicht verfügbar (%s): %s",
-            vin,
-            exc,
-        )
-
-    try:
-        fahrzeugdaten = _fleet_telemetrie_parkdaten_abrufen(vin)
-        if _fleet_telemetrie_fallbackdaten_uebernehmen(vin, fahrzeugdaten):
-            übernommen = True
-            logging.warning(
-                "Stummen Fleet-Telemetry-Stream über vehicle_data "
-                "wiederhergestellt: %s",
-                vin,
-            )
-    except Exception as exc:
-        logging.warning(
-            "Vollständige vehicle_data bei Stream-Wiederherstellung "
-            "nicht verfügbar (%s): %s",
-            vin,
-            exc,
-        )
-    return übernommen
+    fahrzeugdaten = _fleet_telemetrie_parkdaten_abrufen(vin)
+    return _fleet_telemetrie_fallbackdaten_uebernehmen(vin, fahrzeugdaten)
 
 
 def _fleet_telemetrie_position_snapshot(vin):
@@ -11279,90 +11271,126 @@ def _fleet_telemetrie_fahrtverbindung_nach_timeout(vin, fehler):
         return False
 
 
-def _fleet_telemetrie_lenkradheizung_abgleich_erlaubt(data, jetzt_ms=None):
-    """Erlaube den Legacy-Abgleich nur bei belegter aktiver Fahrzeugnutzung."""
+def _fleet_telemetrie_rest_abgleich_erlaubt(vin):
+    """Prüfe die gemeinsame Sperrfrist aller Fahrzeugdaten-Ersatzabfragen."""
 
-    if (
-        not isinstance(data, dict)
-        or not _fleet_telemetrie_lenkradheizung_nur_ein_aus(data)
-    ):
-        return False
-    if _normalisiere_dashboard_state(data.get("state")) != "online":
-        return False
-    jetzt_ms = time.time() * 1000 if jetzt_ms is None else jetzt_ms
-    empfangen = _as_float(data.get("fleet_telemetry_received_at"))
-    if empfangen is None or not 0 <= jetzt_ms - empfangen <= 20000:
-        return False
-    rest = data.get("steering_wheel_heater_rest") or {}
-    abstand = jetzt_ms - (rest.get("received_at") or 0)
-    if abstand < FLEET_TELEMETRIE_LENKRADHEIZUNG_ABGLEICH_SECONDS * 1000:
-        return False
-    drive = data.get("drive_state") or {}
-    gang = _normalize_shift_state(drive.get("shift_state"))
-    if gang in {"D", "R"}:
-        zeit = _as_float(
-            (data.get("fleet_telemetry_field_received_at") or {}).get("VehicleSpeed")
-        )
-        speed = _as_float(drive.get("speed"))
-        return (
-            zeit is not None and 0 <= jetzt_ms - zeit <= 15000
-            and speed is not None and speed > 0.5
-        )
-    if gang != "P":
-        return False
-    anwesend = data.get("driver_presence") or {}
-    return anwesend.get("valid") is True and anwesend.get("value") is True
-
-
-def _fleet_telemetrie_lenkradheizung_abgleichen(vin):
-    """Lese ausschließlich Klimadaten; weder wecken noch Heizbefehle senden."""
-
-    data = _fleet_telemetrie_position_snapshot(vin)
-    if (
-        _fleet_telemetrie_api_pause_aktiv()
-        or not _fleet_telemetrie_lenkradheizung_abgleich_erlaubt(data)
-    ):
-        return False
-    jetzt = time.monotonic()
     with _fleet_telemetry_position_lock:
-        vorher = _fleet_telemetry_lenkradheizung_letzte_abfrage.get(vin)
-        if (
-            vorher is not None
-            and jetzt - vorher < FLEET_TELEMETRIE_LENKRADHEIZUNG_ABGLEICH_SECONDS
-        ):
+        status = _fleet_telemetrie_rest_abgleich_status.get(vin, {})
+        return (
+            not status.get("läuft")
+            and time.monotonic() >= status.get("frühestens", 0)
+        )
+
+
+def _fleet_telemetrie_rest_abgleich_reservieren(vin):
+    """Reserviere genau einen Ersatzabruf pro Fahrzeug, ohne MQTT zu sperren."""
+
+    with _fleet_telemetry_position_lock:
+        status = _fleet_telemetrie_rest_abgleich_status.setdefault(vin, {})
+        if status.get("läuft") or time.monotonic() < status.get("frühestens", 0):
             return False
-        _fleet_telemetry_lenkradheizung_letzte_abfrage[vin] = jetzt
-    token = _fleet_telemetrie_oauth_token()
-    if not token:
+        status["läuft"] = True
+        return True
+
+
+def _fleet_telemetrie_rest_abgleich_abschließen(vin, erfolgreich, fehler=None):
+    """Begrenze Fehlerwiederholungen gemeinsam und beachte Teslas Retry-After."""
+
+    with _fleet_telemetry_position_lock:
+        status = _fleet_telemetrie_rest_abgleich_status.setdefault(vin, {})
+        status["läuft"] = False
+        if erfolgreich:
+            status["fehler"] = 0
+            pause = FLEET_TELEMETRIE_POSITION_PRUEFINTERVALL_SECONDS
+        else:
+            pausen = FLEET_TELEMETRIE_REST_FEHLERPAUSEN_SECONDS
+            anzahl = min(status.get("fehler", 0) + 1, len(pausen))
+            status["fehler"] = anzahl
+            pause = pausen[anzahl - 1]
+            response = getattr(fehler, "response", None)
+            if response is not None:
+                if response.status_code in {401, 403}:
+                    pause = max(pause, pausen[-1])
+                try:
+                    vorgabe = _wartezeit_aus_http_header(
+                        response.headers.get("Retry-After"),
+                    )
+                except (ValueError, OverflowError):
+                    vorgabe = None
+                if vorgabe is not None:
+                    pause = max(pause, vorgabe)
+        status["frühestens"] = time.monotonic() + pause
+    return pause
+
+
+def _fleet_telemetrie_fahrzeug_abgleichen(vin):
+    """Bündele gleichzeitig fällige Korrekturen; keine eigene Heizungsabfrage."""
+
+    if _fleet_telemetrie_api_pause_aktiv():
         return False
-    response = _fleet_telemetrie_api_anfrage(
-        requests.get,
-        TESLA_FLEET_VEHICLE_COMMAND_URL.rstrip("/")
-        + f"/api/1/vehicles/{vin}/vehicle_data",
-        params={"endpoints": "climate_state"},
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=FLEET_TELEMETRIE_PROFILE_REQUEST_TIMEOUT,
-        verify=False,
-    )
-    payload = response.json()
-    klima = (payload.get("response") or {}).get("climate_state") or {}
-    abgerufen_ms = int(time.time() * 1000)
-    geändert = []
-    with _fleet_telemetry_lock:
-        for cache_id in _fleet_telemetrie_cache_ids(vin):
-            daten = latest_data.get(cache_id)
-            if not isinstance(daten, dict):
-                continue
-            if not _fleet_telemetrie_lenkradheizung_rest_merken(
-                daten, klima, abgerufen_ms,
-            ):
-                continue
-            _fleet_telemetrie_lenkradheizung_anreichern(daten)
-            _fleet_telemetrie_cache_spaeter_speichern(cache_id, daten)
-            geändert.append((cache_id, daten))
-    for cache_id, daten in geändert:
-        _subscriber_daten_senden(cache_id, daten)
-    return bool(geändert)
+    data = _fleet_telemetrie_position_snapshot(vin)
+    # Profilreparatur und Sekundentakt bleiben unabhängig von REST-Fehlerpausen.
+    _fleet_telemetrie_streamprofil_wiederherstellung_anfordern(data)
+    if not _fleet_telemetrie_rest_abgleich_erlaubt(vin):
+        return False
+
+    if _fleet_telemetrie_stream_wiederherstellung_soll_aktualisiert_werden(data):
+        if not _fleet_telemetrie_stream_wiederherstellung_reservieren(vin):
+            return False
+        grund = "Stream-Wiederherstellung"
+    else:
+        parken = _fleet_telemetrie_parkabgleich_soll_aktualisiert_werden(data)
+        laden = _fleet_telemetrie_ladeabgleich_soll_aktualisiert_werden(data)
+        parkauftrag = parken and _fleet_telemetrie_parkabgleich_reservieren(vin)
+        ladeauftrag = laden and _fleet_telemetrie_ladeabgleich_reservieren(vin)
+        if parkauftrag or ladeauftrag:
+            grund = "Ladeabgleich" if laden else "Parkabgleich"
+        elif (
+            _fleet_telemetrie_position_soll_aktualisiert_werden(data)
+            and _fleet_telemetrie_position_abfrage_reservieren(vin)
+        ):
+            grund = "Positionsabgleich"
+        else:
+            return False
+
+    if not _fleet_telemetrie_rest_abgleich_reservieren(vin):
+        return False
+    erfolgreich = False
+    fehler = None
+    try:
+        if grund == "Stream-Wiederherstellung":
+            erfolgreich = _fleet_telemetrie_stream_wiederherstellen(vin)
+        elif grund == "Positionsabgleich":
+            position = _fleet_telemetrie_position_abrufen(vin)
+            erfolgreich = _fleet_telemetrie_position_uebernehmen(vin, position)
+        else:
+            fahrzeugdaten = _fleet_telemetrie_parkdaten_abrufen(vin)
+            if grund == "Ladeabgleich":
+                erfolgreich = _fleet_telemetrie_fallbackdaten_uebernehmen(
+                    vin, fahrzeugdaten,
+                )
+            else:
+                erfolgreich = _fleet_telemetrie_parkdaten_uebernehmen(
+                    vin, fahrzeugdaten,
+                )
+        if not erfolgreich:
+            raise RuntimeError("Keine verwendbaren Fahrzeugdaten übernommen")
+    except Exception as exc:
+        fehler = exc
+        if grund == "Positionsabgleich":
+            _fleet_telemetrie_fahrtverbindung_nach_timeout(vin, exc)
+    finally:
+        pause = _fleet_telemetrie_rest_abgleich_abschließen(
+            vin, erfolgreich, fehler,
+        )
+    if fehler is not None:
+        logging.warning(
+            "Fleet-%s fehlgeschlagen (%s); Ersatzabfragen für %.0f s "
+            "pausiert: %s", grund, vin, pause, fehler,
+        )
+    else:
+        logging.info("Fleet-%s mit einer Datenabfrage abgeschlossen: %s", grund, vin)
+    return bool(erfolgreich)
 
 
 def _fleet_telemetrie_position_worker_loop():
@@ -11376,95 +11404,13 @@ def _fleet_telemetrie_position_worker_loop():
             vin = str(vehicle.get("vin") or "").strip()
             if not vin:
                 continue
-            data = _fleet_telemetrie_position_snapshot(vin)
-            _fleet_telemetrie_streamprofil_wiederherstellung_anfordern(data)
-            if _fleet_telemetrie_stream_wiederherstellung_soll_aktualisiert_werden(
-                data
-            ):
-                if _fleet_telemetrie_stream_wiederherstellung_reservieren(vin):
-                    try:
-                        _fleet_telemetrie_stream_wiederherstellen(vin)
-                    except Exception as exc:
-                        logging.warning(
-                            "Fleet-Telemetry-Stream konnte nicht "
-                            "wiederhergestellt werden (%s): %s",
-                            vin,
-                            exc,
-                        )
-                data = _fleet_telemetrie_position_snapshot(vin)
-            if _fleet_telemetrie_parkabgleich_soll_aktualisiert_werden(data):
-                if _fleet_telemetrie_parkabgleich_reservieren(vin):
-                    try:
-                        parkdaten = _fleet_telemetrie_parkdaten_abrufen(vin)
-                        übernommen = _fleet_telemetrie_parkdaten_uebernehmen(
-                            vin,
-                            parkdaten,
-                        )
-                        if übernommen:
-                            logging.info(
-                                "Fleet-Parkzustand über vehicle_data abgeglichen: %s",
-                                vin,
-                            )
-                    except Exception as exc:
-                        logging.warning(
-                            "Fleet-Parkzustand konnte nicht abgeglichen werden "
-                            "(%s): %s",
-                            vin,
-                            exc,
-                        )
-                data = _fleet_telemetrie_position_snapshot(vin)
-            if _fleet_telemetrie_ladeabgleich_soll_aktualisiert_werden(data):
-                if _fleet_telemetrie_ladeabgleich_reservieren(vin):
-                    try:
-                        fahrzeugdaten = _fleet_telemetrie_parkdaten_abrufen(vin)
-                        übernommen = _fleet_telemetrie_fallbackdaten_uebernehmen(
-                            vin,
-                            fahrzeugdaten,
-                        )
-                        if übernommen:
-                            logging.warning(
-                                "Fehlenden Fleet-Ladezustand über vehicle_data "
-                                "wiederhergestellt: %s",
-                                vin,
-                            )
-                    except Exception as exc:
-                        logging.warning(
-                            "Fleet-Ladezustand konnte nicht abgeglichen werden "
-                            "(%s): %s",
-                            vin,
-                            exc,
-                        )
-                data = _fleet_telemetrie_position_snapshot(vin)
-            if _fleet_telemetrie_lenkradheizung_abgleich_erlaubt(data):
-                try:
-                    _fleet_telemetrie_lenkradheizung_abgleichen(vin)
-                except Exception as exc:
-                    logging.warning(
-                        "Lenkradheizung konnte nicht abgeglichen werden (%s): %s",
-                        vin, exc,
-                    )
-            if not _fleet_telemetrie_position_soll_aktualisiert_werden(data):
-                continue
-            if not _fleet_telemetrie_position_abfrage_reservieren(vin):
-                continue
             try:
-                drive_data = _fleet_telemetrie_position_abrufen(vin)
-                übernommen = _fleet_telemetrie_position_uebernehmen(
-                    vin,
-                    drive_data,
-                )
-                if übernommen:
-                    logging.info(
-                        "Veraltete Fleet-Position über location_data aktualisiert: %s",
-                        vin,
-                    )
+                _fleet_telemetrie_fahrzeug_abgleichen(vin)
             except Exception as exc:
                 logging.warning(
-                    "Fleet-Position konnte nicht aktualisiert werden (%s): %s",
-                    vin,
-                    exc,
+                    "Fleet-Abgleich konnte nicht vorbereitet werden (%s): %s",
+                    vin, exc,
                 )
-                _fleet_telemetrie_fahrtverbindung_nach_timeout(vin, exc)
         vergangen = time.monotonic() - gestartet
         pause = max(
             0.1,

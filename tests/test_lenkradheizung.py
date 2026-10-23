@@ -2,7 +2,6 @@ import copy
 import json
 import shutil
 import subprocess
-from unittest.mock import Mock
 
 import pytest
 
@@ -63,7 +62,6 @@ def test_bestätigter_rest_status_bleibt_beim_parken_erhalten(
     assert klima["steering_wheel_heater_timestamp"] == JETZT
     assert klima["steering_wheel_heat_level"] is None
     assert daten["steering_wheel_heater_rest"] == vorher
-    assert not app._fleet_telemetrie_lenkradheizung_abgleich_erlaubt(daten)
 
 
 @pytest.mark.parametrize("aktiv", [False, True])
@@ -167,128 +165,34 @@ def test_unbrauchbare_rest_antwort_überschreibt_keinen_gültigen_stand(antwort)
     assert daten == vorher
 
 
-@pytest.mark.parametrize("gang,tempo,erwartet", [
-    ("P", 0, True), ("D", 10, True), ("R", 2, True),
-    ("D", 0, False), ("R", 0, False), ("N", 0, False), (None, 0, False),
-])
-def test_abgleich_nur_bei_nutzung_nicht_an_der_ampel(gang, tempo, erwartet):
+@pytest.mark.parametrize("profil", ["live", "live_extended"])
+@pytest.mark.parametrize("wiederherstellung", [False, True])
+def test_lenkradheizung_bei_änderung_sekündlich_ohne_zusatzmeldungen(
+    profil, wiederherstellung,
+):
+    felder = app._fleet_telemetrie_profile_config_erstellen(
+        {"config": {"fields": {}}}, profil,
+        wiederherstellung=wiederherstellung,
+    )["config"]["fields"]
+    for feld in ("HvacSteeringWheelHeatLevel", "HvacSteeringWheelHeatAuto"):
+        assert felder[feld] == {"interval_seconds": 1}
+        assert feld not in app.FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNGSFELDER
+        assert all(
+            feld not in config.get("include_fields", [])
+            for config in felder.values()
+        )
+
+
+def test_unterstützte_heizungsänderungen_erscheinen_sofort_ohne_rest(monkeypatch):
     daten = _daten()
-    daten["drive_state"] = {"shift_state": gang, "speed": tempo}
-    assert app._fleet_telemetrie_lenkradheizung_abgleich_erlaubt(daten, JETZT) is erwartet
-
-
-@pytest.mark.parametrize("grund", ["offline", "asleep", "alter_stream", "zukunft", "leer", "unbekannt", "modern", "frisch_abgerufen", "altes_tempo"])
-def test_abgleich_ohne_aktuellen_nutzungsnachweis_gesperrt(grund):
-    daten = _daten()
-    if grund in {"offline", "asleep"}:
-        daten["state"] = grund
-    elif grund in {"alter_stream", "zukunft"}:
-        daten["fleet_telemetry_received_at"] = JETZT + (-21000 if grund == "alter_stream" else 1000)
-    elif grund in {"leer", "unbekannt"}:
-        daten["driver_presence"] = {"value": False, "valid": grund == "leer"}
-    elif grund == "modern":
-        daten["vehicle_config"]["driver_assist"] = "TeslaAP3"
-    elif grund == "frisch_abgerufen":
-        daten["steering_wheel_heater_rest"] = {"received_at": JETZT - 59000}
-    elif grund == "altes_tempo":
-        daten["drive_state"] = {"shift_state": "D", "speed": 20}
-        daten["fleet_telemetry_field_received_at"]["VehicleSpeed"] = JETZT - 16000
-    assert not app._fleet_telemetrie_lenkradheizung_abgleich_erlaubt(daten, JETZT)
-
-
-@pytest.mark.parametrize("abstand_ms, erwartet", [
-    (30000, False), (59999, False), (60000, True), (60001, True),
-])
-def test_lenkradheizung_abgleich_erst_nach_60_sekunden(abstand_ms, erwartet):
-    daten = _daten()
-    daten["steering_wheel_heater_rest"] = {"received_at": JETZT - abstand_ms}
-    assert (
-        app._fleet_telemetrie_lenkradheizung_abgleich_erlaubt(daten, JETZT)
-        is erwartet
-    )
-
-
-@pytest.fixture
-def abgleich(monkeypatch):
-    daten = _daten()
-    zeit = {"wand": JETZT / 1000, "monoton": 100.0}
-    monkeypatch.setattr(app.time, "time", lambda: zeit["wand"])
-    monkeypatch.setattr(app.time, "monotonic", lambda: zeit["monoton"])
-    monkeypatch.setattr(app, "_fleet_telemetry_lenkradheizung_letzte_abfrage", {})
-    monkeypatch.setattr(app, "latest_data", {"TEST": daten})
-    monkeypatch.setattr(app, "_fleet_telemetrie_cache_ids", lambda _vin: ["TEST"])
-    monkeypatch.setattr(app, "_fleet_telemetrie_position_snapshot", lambda _vin: daten)
-    monkeypatch.setattr(app, "_fleet_telemetrie_oauth_token", lambda: "testtoken")
-    monkeypatch.setattr(app, "_fleet_telemetrie_api_pause_aktiv", lambda: False)
-    monkeypatch.setattr(app, "_fleet_telemetrie_cache_spaeter_speichern", lambda *args: None)
-    senden = Mock()
-    monkeypatch.setattr(app, "_subscriber_daten_senden", senden)
-    antwort = Mock()
-    antwort.json.return_value = {"response": {"climate_state": {
-        "steering_wheel_heater": True, "timestamp": JETZT,
-        "driver_temp_setting": 30, "is_climate_on": False,
-    }}}
-    abfrage = Mock(return_value=antwort)
-    monkeypatch.setattr(app, "_fleet_telemetrie_api_anfrage", abfrage)
-    return daten, zeit, antwort, abfrage, senden
-
-
-def test_abgleich_lädt_nur_klima_ohne_zu_wecken_oder_andere_daten_zu_ändern(abgleich):
-    daten, zeit, antwort, abfrage, senden = abgleich
-    daten["climate_state"].update({"driver_temp_setting": 20, "is_climate_on": True})
-    assert app._fleet_telemetrie_lenkradheizung_abgleichen("TESTVIN")
-    assert abfrage.call_args.args[0] is app.requests.get
-    assert abfrage.call_args.args[1].endswith("/api/1/vehicles/TESTVIN/vehicle_data")
-    assert abfrage.call_args.kwargs["params"] == {"endpoints": "climate_state"}
-    assert daten["climate_state"]["steering_wheel_heater"] is True
-    assert daten["climate_state"]["driver_temp_setting"] == 20
-    assert daten["climate_state"]["is_climate_on"] is True
-    assert daten["fleet_telemetry_received_at"] == JETZT
-    senden.assert_called_once()
-    assert not app._fleet_telemetrie_lenkradheizung_abgleichen("TESTVIN")
-    for abstand in (30, 59):
-        zeit["wand"] = JETZT / 1000 + abstand
-        zeit["monoton"] = 100 + abstand
-        daten["fleet_telemetry_received_at"] = JETZT + abstand * 1000
-        assert not app._fleet_telemetrie_lenkradheizung_abgleichen("TESTVIN")
-        assert abfrage.call_count == 1
-    zeit["wand"] = JETZT / 1000 + 60
-    zeit["monoton"] = 160
-    daten["fleet_telemetry_received_at"] = JETZT + 60000
-    antwort.json.return_value["response"]["climate_state"].update({
-        "steering_wheel_heater": False, "timestamp": JETZT + 60000,
-    })
-    assert app._fleet_telemetrie_lenkradheizung_abgleichen("TESTVIN")
-    assert daten["climate_state"]["steering_wheel_heater"] is False
-    assert abfrage.call_count == 2
-
-
-def test_fehlgeschlagener_abgleich_wird_ebenfalls_gedrosselt(abgleich):
-    daten, zeit, _, abfrage, _ = abgleich
-    abfrage.side_effect = app.requests.exceptions.Timeout()
-    with pytest.raises(app.requests.exceptions.Timeout):
-        app._fleet_telemetrie_lenkradheizung_abgleichen("TESTVIN")
-    assert not app._fleet_telemetrie_lenkradheizung_abgleichen("TESTVIN")
-    assert abfrage.call_count == 1
-    for abstand in (30, 59):
-        zeit["wand"] = JETZT / 1000 + abstand
-        zeit["monoton"] = 100 + abstand
-        daten["fleet_telemetry_received_at"] = JETZT + abstand * 1000
-        assert not app._fleet_telemetrie_lenkradheizung_abgleichen("TESTVIN")
-        assert abfrage.call_count == 1
-    zeit["wand"] = JETZT / 1000 + 60
-    zeit["monoton"] = 160
-    daten["fleet_telemetry_received_at"] = JETZT + 60000
-    with pytest.raises(app.requests.exceptions.Timeout):
-        app._fleet_telemetrie_lenkradheizung_abgleichen("TESTVIN")
-    assert abfrage.call_count == 2
-
-
-def test_abgleich_respektiert_abrechnungssperre(abgleich, monkeypatch):
-    _, _, _, abfrage, _ = abgleich
-    monkeypatch.setattr(app, "_fleet_telemetrie_api_pause_aktiv", lambda: True)
-    assert not app._fleet_telemetrie_lenkradheizung_abgleichen("TESTVIN")
-    abfrage.assert_not_called()
+    daten["vehicle_config"] = {"car_type": "model3"}
+    monkeypatch.setattr(app.time, "time", lambda: JETZT / 1000)
+    for stufe, erwartet in ((1, True), (0, False), (3, True), (None, None)):
+        app._fleet_telemetrie_setze_feld(
+            daten, "HvacSteeringWheelHeatLevel", stufe, JETZT,
+        )
+        payload = app._subscriber_stream_payload(daten)
+        assert payload["climate_state"]["steering_wheel_heater"] is erwartet
 
 
 def test_lenkradheizung_im_browser_ohne_erfundene_stufe_oder_automatikwärme():
