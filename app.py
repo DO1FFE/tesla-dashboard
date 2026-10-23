@@ -2,11 +2,12 @@ import asyncio
 import eventlet
 import eventlet.hubs
 
-try:
-    asyncio.get_running_loop()
-except RuntimeError:
-    eventlet.hubs.use_hub("eventlet.hubs.asyncio")
-eventlet.monkey_patch()
+if not eventlet.patcher.is_monkey_patched("socket"):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        eventlet.hubs.use_hub("eventlet.hubs.asyncio")
+    eventlet.monkey_patch()
 from eventlet import queue as eventlet_queue
 from eventlet import tpool as eventlet_tpool
 

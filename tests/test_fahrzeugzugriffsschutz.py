@@ -3,7 +3,10 @@
 import copy
 import json
 import os
+from pathlib import Path
+import subprocess
 import sys
+import time
 from unittest.mock import Mock
 
 import pytest
@@ -151,6 +154,31 @@ def test_starter_installiert_schutz_vor_app_start(tmp_path, monkeypatch):
     starter.main(tmp_path)
     assert gestartet
     assert json.loads((tmp_path / "data/neustartschutz.json").read_text())["pid"] == os.getpid()
+
+
+def test_vollständiger_start_in_frischem_prozess_ohne_http(tmp_path):
+    projekt = Path(__file__).resolve().parents[1]
+    umgebung = dict(os.environ, TESLA_DASHBOARD_ABFRAGESPERRE_BIS="2099-10-25T13:50:00Z",
+                    TESLA_DASHBOARD_DATA_DIR=str(tmp_path),
+                    STATISTICS_DB_PATH=str(tmp_path / "statistik.db"),
+                    DISABLE_STATISTICS_AGGREGATION="1")
+    # Der richtige Starter lädt den ganzen Anwendungscode; nur der Serverlauf
+    # wird durch eine lokale Bereitschaftsmeldung ersetzt. Kein HTTP-Aufruf.
+    befehl = (
+        "import sys; from pathlib import Path; "
+        f"sys.path.insert(0, {str(projekt)!r}); "
+        "from tools import telemetrie_geschuetzter_start as starter; "
+        "import flask_socketio; "
+        "flask_socketio.SocketIO.run = lambda *a, **k: print('START_OK'); "
+        f"starter.main(Path({str(tmp_path)!r}))"
+    )
+    # Eine kleine Kopie ohne Produktivdaten; Templates werden beim Start nicht gerendert.
+    (tmp_path / "data").mkdir()
+    (tmp_path / "app.py").write_bytes((projekt / "app.py").read_bytes())
+    ergebnis = subprocess.run([sys.executable, "-c", befehl], env=umgebung,
+                              capture_output=True, text=True, timeout=30)
+    assert ergebnis.returncode == 0, ergebnis.stderr[-3000:]
+    assert "START_OK" in ergebnis.stdout
 
 
 # © 2026 Erik Schauer, do1ffe@darc.de

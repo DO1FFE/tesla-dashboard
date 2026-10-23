@@ -98,10 +98,12 @@ def übernehmen(projekt, ordner, auftrag, ende):
         git(projekt, "fetch", "--no-tags", str(kopie), kandidat)
         sauber(projekt, basis)
         git(projekt, "merge", "--ff-only", kandidat)
-    commit = git(projekt, "rev-parse", "HEAD").decode().strip()
+    commit = kandidat
     ergebnis = {"commit": commit, "produktiv_übernommen": False, "dienst_neu_gestartet": False}
     try:
+        sauber(projekt, commit)
         git(projekt, "push", "origin", "main")
+        sauber(projekt, commit)
         subprocess.run(NEUSTART, check=True, timeout=110, capture_output=True)
     except subprocess.SubprocessError:
         # Nur den eigenen, unveränderten Commit zurücknehmen; niemals fremde Änderungen.

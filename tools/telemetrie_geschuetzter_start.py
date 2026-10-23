@@ -11,11 +11,12 @@ import sys
 import eventlet
 import eventlet.hubs
 
-try:
-    asyncio.get_running_loop()
-except RuntimeError:
-    eventlet.hubs.use_hub("eventlet.hubs.asyncio")
-eventlet.monkey_patch()
+if not eventlet.patcher.is_monkey_patched("socket"):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        eventlet.hubs.use_hub("eventlet.hubs.asyncio")
+    eventlet.monkey_patch()
 
 # Bei Installation liegen Starter und Schutzmodul schreibgeschützt nebeneinander.
 import fahrzeugzugriffsschutz
