@@ -1,0 +1,14 @@
+[Unit]
+Description=Einmalige Tesla-Logprüfung am 30.10.2026 um 14 Uhr
+
+[Timer]
+OnCalendar=2026-10-30 14:00:00 Europe/Berlin
+Persistent=true
+AccuracySec=1s
+RandomizedDelaySec=0
+Unit=tesla-dashboard-wochenpruefung.service
+
+[Install]
+WantedBy=timers.target
+
+# © 2026 Erik Schauer, do1ffe@darc.de

@@ -1,0 +1,26 @@
+[Unit]
+Description=Einmalige Tesla-Logprüfung: Einsparungen und Live-Sekundentakt
+ConditionPathExists=!/home/do1ffe/tesla-audits/2026-10-30/bericht.json
+
+[Service]
+Type=oneshot
+User=do1ffe
+Group=do1ffe
+SupplementaryGroups=systemd-journal
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/libexec/tesla-dashboard/telemetrie_wochenpruefung.py --logs /home/do1ffe/tesla-dashboard/data/monitoring --start 2026-10-23T09:28:51Z --ende 2026-10-30T14:00:00+01:00 --referenz /home/do1ffe/tesla-audits/2026-10-30/referenz.json --ausgabe /home/do1ffe/tesla-audits/2026-10-30
+TimeoutStartSec=20min
+Nice=10
+MemoryMax=1G
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/do1ffe/tesla-audits/2026-10-30
+PrivateTmp=true
+RestrictSUIDSGID=true
+
+# © 2026 Erik Schauer, do1ffe@darc.de
