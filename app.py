@@ -57,6 +57,7 @@ from functools import wraps
 from dotenv import load_dotenv, set_key
 from version import get_version
 import telemetrie_diagnose
+import fahrzeugzugriffsschutz
 import qrcode
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -99,6 +100,7 @@ def _secret_key():
 
 
 load_dotenv()
+fahrzeugzugriffsschutz.aus_umgebung_starten()
 app = Flask(__name__)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 app.config["SECRET_KEY"] = _secret_key()
@@ -7722,6 +7724,8 @@ def _fleet_telemetrie_api_pause_aktiv():
 def _fleet_telemetrie_api_anfrage(methode, url, **kwargs):
     """Bremse alle Fleet-API-Pfade gemeinsam bei Teslas Abrechnungssperre."""
 
+    if fahrzeugzugriffsschutz.aktiv():
+        fahrzeugzugriffsschutz.anfrage_prüfen(getattr(methode, "__name__", ""), url)
     with _fleet_telemetry_profile_lock:
         status = _fleet_telemetry_profile_status
         gesperrt = status.get("fleet_api_blocked_reason") == "EXCEEDED_LIMIT"
@@ -7776,6 +7780,11 @@ def _fleet_telemetrie_api_anfrage(methode, url, **kwargs):
 def _fleet_telemetrie_profile_sync_pruefen(token=None, request_data=None):
     """Prüfe bei Tesla, ob die Fleet-Konfiguration am Fahrzeug angekommen ist."""
 
+    if fahrzeugzugriffsschutz.aktiv():
+        return {
+            "synced": False, "key_paired": None, "state": "pending",
+            "details": [], "checked_at": time.time(), "error": None,
+        }
     token = token or _fleet_telemetrie_oauth_token()
     if not token:
         raise RuntimeError("Kein gültiger Fleet-OAuth-Zugriffstoken verfügbar")
@@ -8179,6 +8188,10 @@ def _fleet_telemetrie_profile_sync_erneut_pruefen():
         return
     jetzt = time.time()
     datenstand = _fleet_telemetrie_profile_aktueller_datenstand()
+    if fahrzeugzugriffsschutz.aktiv():
+        # Nur Stream-Bestätigung; keine GET-Prüfung nach einem Profilversand.
+        _fleet_telemetrie_profile_aktualisieren("profile-worker", datenstand)
+        return
     status_vorprüfung = _fleet_telemetrie_profile_status_kopie()
     live_takt_prüfen = (
         isinstance(datenstand, dict)
@@ -8548,6 +8561,7 @@ def _fleet_telemetrie_profile_aktualisieren(cache_id, data):
     if (
         not _fleet_telemetrie_profile_aktiviert()
         or _fleet_telemetrie_api_pause_aktiv()
+        or not fahrzeugzugriffsschutz.profil_freigeben(data)
     ):
         return _fleet_telemetrie_profile_status_an_daten(data)
     ziel = _fleet_telemetrie_profile_ziel(data)
@@ -11326,6 +11340,8 @@ def _fleet_telemetrie_rest_abgleich_abschließen(vin, erfolgreich, fehler=None):
 def _fleet_telemetrie_fahrzeug_abgleichen(vin):
     """Bündele gleichzeitig fällige Korrekturen; keine eigene Heizungsabfrage."""
 
+    if fahrzeugzugriffsschutz.aktiv():
+        return False
     if _fleet_telemetrie_api_pause_aktiv():
         return False
     data = _fleet_telemetrie_position_snapshot(vin)

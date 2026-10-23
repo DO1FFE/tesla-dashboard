@@ -1,0 +1,11 @@
+[Unit]
+Description=Geprüfte Korrekturen zur geschützten Übernahme erkennen
+
+[Path]
+PathChanged=/home/do1ffe/tesla-audits/2026-10-23-48h/übernahmeaufträge
+Unit=tesla-dashboard-uebernahme.service
+
+[Install]
+WantedBy=multi-user.target
+
+# © 2026 Erik Schauer, do1ffe@darc.de

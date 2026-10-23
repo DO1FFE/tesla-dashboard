@@ -26,11 +26,11 @@ DIENSTE = (
     "tesla-dashboard-mqtt-monitor.service",
 )
 GRENZEN = (
-    "Nur lokale Dateien und Journale; keine Fahrzeugabfragen, Wake-ups, "
+    "Die Diagnose liest nur lokale Dateien und Journale; keine Fahrzeugabfragen, Wake-ups, "
     "Profilübertragungen oder Dashboard-Neustarts.",
     "Befunde sind Diagnosehinweise, keine automatisch bewiesenen Codefehler. "
-    "Eine getrennte Codex-Prüfung kann getestete Korrekturvorschläge vorbereiten; "
-    "keine automatische Übernahme und kein Dienstneustart.",
+    "Getrennte Korrekturprüfung und erneute netzlose Tests vor automatischer Übernahme. "
+    "Neustarts nur mit zeitlich begrenzter Fahrzeug-Abfragesperre; Profilwechsel bleiben möglich.",
     "RouteLine und Ziel werden im Cache geprüft. Die tatsächliche Darstellung "
     "in einem entfernten Browser ist aus diesen Logs nicht nachweisbar.",
     "Stillstand, Schlaf und unveränderte Werte belegen keinen fehlenden Sekundentakt. "
@@ -335,6 +335,12 @@ def prüfschritt(args, jetzt):
     reparaturen = args.ausgabe / "korrekturstatus.json"
     if reparaturen.exists():
         zustand["korrekturprüfung"] = json_laden(reparaturen)
+    else:
+        zustand["korrekturprüfung"] = {"läufe": []}
+    übernahmen = args.ausgabe / "übernahmestatus.json"
+    if übernahmen.exists():
+        korrekturprüfung = zustand.setdefault("korrekturprüfung", {"läufe": []})
+        korrekturprüfung["läufe"].extend(json_laden(übernahmen).get("läufe", []))
     if tagesbericht:
         mail_einreihen(args.ausgabe, zustand, tag)
         zustand["berichtstag"] = tag

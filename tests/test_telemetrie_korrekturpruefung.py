@@ -79,7 +79,7 @@ def test_produktivprojekt_und_zugangsdaten_geschützt():
     assert "InaccessiblePaths=-/home/do1ffe/tesla-dashboard/.env" in dienst
     assert "NoNewPrivileges=true" in dienst
     skript = (basis / "tools/telemetrie_korrekturpruefung.py").read_text()
-    assert '"/usr/bin/unshare", "--user", "--map-root-user", "--net"' in skript
+    assert "testbefehl(projekt, quelle)" in skript
     assert '"git", "push"' not in skript
     assert '"systemctl", "restart"' not in skript
 

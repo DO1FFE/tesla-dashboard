@@ -4,6 +4,7 @@
 import argparse
 from datetime import datetime, timezone
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,9 +13,11 @@ import subprocess
 try:
     from .telemetrie_passivpruefung import json_laden, speichern
     from .telemetrie_wochenpruefung import zeitwert, zeittext
+    from .telemetrie_testsandbox import testbefehl
 except ImportError:
     from telemetrie_passivpruefung import json_laden, speichern
     from telemetrie_wochenpruefung import zeitwert, zeittext
+    from telemetrie_testsandbox import testbefehl
 
 
 CODEX = "/home/do1ffe/.local/bin/codex"
@@ -39,8 +42,13 @@ def codex_befehl(quelle, schema, ergebnis, prompt):
 
 def dateien_zulässig(dateien):
     return bool(dateien) and len(dateien) <= 12 and all(
-        pfad in {"app.py", "taximeter.py", "telemetrie_diagnose.py"}
-        or pfad.startswith(("tests/", "static/", "templates/"))
+        ".." not in Path(pfad).parts
+        and not Path(pfad).is_absolute()
+        and pfad not in {"tests/conftest.py", "tests/test_fahrzeugzugriffsschutz.py",
+                         "tests/test_telemetrie_uebernahme.py",
+                         "tests/test_telemetrie_korrekturpruefung.py"}
+        and (pfad in {"app.py", "taximeter.py", "telemetrie_diagnose.py"}
+             or pfad.startswith(("tests/", "static/", "templates/")))
         for pfad in dateien
     )
 
@@ -56,8 +64,9 @@ def prüfen(projekt, ordner, auftragspfad, ende):
     lauf = ordner / "korrekturen" / auftragspfad.stem
     lauf.mkdir(parents=True, exist_ok=True)
     quelle = lauf / "quelle"
-    subprocess.run(["/usr/bin/git", "clone", "--shared", "--quiet", str(projekt), str(quelle)],
+    subprocess.run(["/usr/bin/git", "clone", "--no-hardlinks", "--quiet", str(projekt), str(quelle)],
                    check=True, timeout=restzeit(120), capture_output=True)
+    basis = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=quelle).decode().strip()
     schema = lauf / "schema.json"
     speichern(schema, SCHEMA)
     ergebnis = lauf / "ergebnis.json"
@@ -99,15 +108,17 @@ def prüfen(projekt, ordner, auftragspfad, ende):
         subprocess.run(["git", "diff", "--check"], cwd=quelle, check=True, timeout=30)
         # Eigenständige Nachprüfung mit vom Kernel getrenntem Netzwerk, unabhängig vom Agenten.
         with (lauf / "tests.log").open("w", encoding="utf-8") as protokoll:
-            subprocess.run([
-                "/usr/bin/unshare", "--user", "--map-root-user", "--net",
-                "/usr/bin/env", "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
-                str(projekt / ".venv/bin/python"), "-m", "pytest", "-q",
-            ], cwd=quelle, stdout=protokoll, stderr=subprocess.STDOUT, timeout=restzeit(300), check=True)
+            subprocess.run(testbefehl(projekt, quelle), cwd=quelle, stdout=protokoll,
+                           stderr=subprocess.STDOUT, timeout=restzeit(300), check=True)
         patch = subprocess.check_output(["git", "diff", "--binary", "HEAD"], cwd=quelle, timeout=30)
         if len(patch) > 256000:
             raise ValueError("Patch für automatische Vorbereitung zu groß")
         (lauf / "korrektur.patch").write_bytes(patch)
+        warteschlange = ordner / "übernahmeaufträge"
+        warteschlange.mkdir(exist_ok=True)
+        speichern(warteschlange / f"{auftragspfad.stem}.json", {
+            "basis": basis, "patch_sha256": hashlib.sha256(patch).hexdigest(),
+        })
     elif dateien:
         antwort["status"] = "nicht_beurteilbar"
         antwort["begründung"] = "Arbeitskopie verändert, aber keine bestätigte Korrektur; keine Übernahme."
