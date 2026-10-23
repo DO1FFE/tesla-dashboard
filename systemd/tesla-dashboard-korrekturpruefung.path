@@ -1,0 +1,11 @@
+[Unit]
+Description=Neue passive Tesla-Befunde zur isolierten Korrekturprüfung vormerken
+
+[Path]
+PathChanged=/home/do1ffe/tesla-audits/2026-10-23-48h/korrekturaufträge
+Unit=tesla-dashboard-korrekturpruefung.service
+
+[Install]
+WantedBy=multi-user.target
+
+# © 2026 Erik Schauer, do1ffe@darc.de

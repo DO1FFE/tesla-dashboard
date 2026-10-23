@@ -1,0 +1,12 @@
+[Unit]
+Description=Neue lokale Tesla-Prüfberichte zum Versand vormerken
+
+[Path]
+PathChanged=/home/do1ffe/tesla-audits/2026-10-23-48h/postausgang
+PathExistsGlob=/home/do1ffe/tesla-audits/2026-10-23-48h/postausgang/*.json
+Unit=tesla-dashboard-passivmail.service
+
+[Install]
+WantedBy=multi-user.target
+
+# © 2026 Erik Schauer, do1ffe@darc.de
