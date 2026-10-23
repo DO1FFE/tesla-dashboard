@@ -189,11 +189,23 @@ def test_abgleich_ohne_aktuellen_nutzungsnachweis_gesperrt(grund):
     elif grund == "modern":
         daten["vehicle_config"]["driver_assist"] = "TeslaAP3"
     elif grund == "frisch_abgerufen":
-        daten["steering_wheel_heater_rest"] = {"received_at": JETZT - 29000}
+        daten["steering_wheel_heater_rest"] = {"received_at": JETZT - 59000}
     elif grund == "altes_tempo":
         daten["drive_state"] = {"shift_state": "D", "speed": 20}
         daten["fleet_telemetry_field_received_at"]["VehicleSpeed"] = JETZT - 16000
     assert not app._fleet_telemetrie_lenkradheizung_abgleich_erlaubt(daten, JETZT)
+
+
+@pytest.mark.parametrize("abstand_ms, erwartet", [
+    (30000, False), (59999, False), (60000, True), (60001, True),
+])
+def test_lenkradheizung_abgleich_erst_nach_60_sekunden(abstand_ms, erwartet):
+    daten = _daten()
+    daten["steering_wheel_heater_rest"] = {"received_at": JETZT - abstand_ms}
+    assert (
+        app._fleet_telemetrie_lenkradheizung_abgleich_erlaubt(daten, JETZT)
+        is erwartet
+    )
 
 
 @pytest.fixture
@@ -234,11 +246,17 @@ def test_abgleich_lädt_nur_klima_ohne_zu_wecken_oder_andere_daten_zu_ändern(ab
     assert daten["fleet_telemetry_received_at"] == JETZT
     senden.assert_called_once()
     assert not app._fleet_telemetrie_lenkradheizung_abgleichen("TESTVIN")
-    zeit["wand"] += 30
-    zeit["monoton"] += 30
-    daten["fleet_telemetry_received_at"] += 30000
+    for abstand in (30, 59):
+        zeit["wand"] = JETZT / 1000 + abstand
+        zeit["monoton"] = 100 + abstand
+        daten["fleet_telemetry_received_at"] = JETZT + abstand * 1000
+        assert not app._fleet_telemetrie_lenkradheizung_abgleichen("TESTVIN")
+        assert abfrage.call_count == 1
+    zeit["wand"] = JETZT / 1000 + 60
+    zeit["monoton"] = 160
+    daten["fleet_telemetry_received_at"] = JETZT + 60000
     antwort.json.return_value["response"]["climate_state"].update({
-        "steering_wheel_heater": False, "timestamp": JETZT + 30000,
+        "steering_wheel_heater": False, "timestamp": JETZT + 60000,
     })
     assert app._fleet_telemetrie_lenkradheizung_abgleichen("TESTVIN")
     assert daten["climate_state"]["steering_wheel_heater"] is False
@@ -246,12 +264,24 @@ def test_abgleich_lädt_nur_klima_ohne_zu_wecken_oder_andere_daten_zu_ändern(ab
 
 
 def test_fehlgeschlagener_abgleich_wird_ebenfalls_gedrosselt(abgleich):
-    _, _, _, abfrage, _ = abgleich
+    daten, zeit, _, abfrage, _ = abgleich
     abfrage.side_effect = app.requests.exceptions.Timeout()
     with pytest.raises(app.requests.exceptions.Timeout):
         app._fleet_telemetrie_lenkradheizung_abgleichen("TESTVIN")
     assert not app._fleet_telemetrie_lenkradheizung_abgleichen("TESTVIN")
     assert abfrage.call_count == 1
+    for abstand in (30, 59):
+        zeit["wand"] = JETZT / 1000 + abstand
+        zeit["monoton"] = 100 + abstand
+        daten["fleet_telemetry_received_at"] = JETZT + abstand * 1000
+        assert not app._fleet_telemetrie_lenkradheizung_abgleichen("TESTVIN")
+        assert abfrage.call_count == 1
+    zeit["wand"] = JETZT / 1000 + 60
+    zeit["monoton"] = 160
+    daten["fleet_telemetry_received_at"] = JETZT + 60000
+    with pytest.raises(app.requests.exceptions.Timeout):
+        app._fleet_telemetrie_lenkradheizung_abgleichen("TESTVIN")
+    assert abfrage.call_count == 2
 
 
 def test_abgleich_respektiert_abrechnungssperre(abgleich, monkeypatch):

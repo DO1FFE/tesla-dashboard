@@ -924,7 +924,7 @@ FLEET_TELEMETRIE_LADEABGLEICH_MIN_LEISTUNG_KW = max(
     0.1,
     float(os.getenv("TESLA_FLEET_CHARGE_RECONCILE_MIN_POWER_KW", "1")),
 )
-FLEET_TELEMETRIE_LENKRADHEIZUNG_ABGLEICH_SECONDS = 30
+FLEET_TELEMETRIE_LENKRADHEIZUNG_ABGLEICH_SECONDS = 60
 FLEET_TELEMETRIE_LENKRADHEIZUNG_MAX_ALTER_SECONDS = 90
 FLEET_TELEMETRIE_STREAM_WIEDERHERSTELLUNG_NACH_SECONDS = max(
     FLEET_TELEMETRIE_POSITION_STREAM_MAX_ALTER_SECONDS,
@@ -2016,7 +2016,7 @@ _fleet_telemetry_queue_verworfen = 0
 _fleet_telemetry_queue_warnung = 0.0
 FLEET_TELEMETRIE_PROFILE = {"live", "live_extended", "parked", "charging"}
 FLEET_TELEMETRIE_PROFILE_STANDARD = "live"
-FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 10
+FLEET_TELEMETRIE_PROFILE_CONFIG_REVISION = 11
 FLEET_TELEMETRIE_PROFILE_PARK_DELAY_SECONDS = max(
     0.0,
     float(os.getenv("TESLA_FLEET_TELEMETRY_PARK_PROFILE_DELAY_SECONDS", "120")),
@@ -7482,15 +7482,6 @@ def _fleet_telemetrie_profile_config_erstellen(
         if isinstance(odometer_config, dict):
             odometer_config["interval_seconds"] = (
                 FLEET_TELEMETRIE_PROFILE_LIVE_NAVIGATION_NEUVERSAND_SECONDS
-            )
-    # Ohne include_fields sendet Tesla unveränderte Drücke trotz fehlendem Delta
-    # nicht erneut. Vorhandene Meldungen übertragen den letzten Sensorstand mit.
-    for auslöser in ("Location", "BatteryLevel", "ACChargingPower", "DCChargingPower"):
-        feld_config = fields.get(auslöser)
-        if isinstance(feld_config, dict):
-            feld_config["include_fields"] = sorted(
-                set(feld_config.get("include_fields", []))
-                | FLEET_TELEMETRIE_TPMS_PROFILFELDER
             )
     return config_request
 
