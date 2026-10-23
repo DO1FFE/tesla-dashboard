@@ -1,6 +1,7 @@
 [Unit]
 Description=Einmalige Tesla-Logprüfung: Einsparungen und Live-Sekundentakt
 ConditionPathExists=!/home/do1ffe/tesla-audits/2026-10-30/bericht.json
+OnSuccess=tesla-dashboard-wochenbericht-mail.service
 
 [Service]
 Type=oneshot
