@@ -4208,6 +4208,59 @@ def test_fleet_telemetrie_profil_camp_bleibt_ohne_fahrer_und_hvac_live(modus):
     assert app._fleet_telemetrie_profile_ziel(daten) == "live"
 
 
+@pytest.mark.parametrize("modus, erwartet", [
+    ("camp", "live"),
+    ("party", "live"),
+    ("ClimateKeeperModeStateParty", "live"),
+    ("off", "charging"),
+    ("dog", "charging"),
+])
+@pytest.mark.parametrize("ladestatus", ["Charging", "Disconnected"])
+def test_fleet_telemetrie_camp_hat_vorrang_vor_ladeprofil(
+    modus, erwartet, ladestatus,
+):
+    daten = {
+        "state": "online",
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "climate_state": {"climate_keeper_mode": modus},
+        "charge_state": {"charging_state": ladestatus, "charger_power": 12},
+        "fleet_telemetry_field_received_at": {
+            "DCChargingPower": 2_000_000,
+            "ChargeState": 2_000_005,
+            "ACChargingPower": 2_000_010,
+        },
+    }
+
+    # Auch ein neuerer AC-Zeitstempel kann die Ladeerkennung aktiv halten.
+    assert app._fleet_telemetrie_profile_ladezustand(daten) is True
+    assert app._fleet_telemetrie_profile_ziel(daten) == erwartet
+
+
+def test_fleet_telemetrie_camp_wechselt_vom_bestätigten_ladeprofil(monkeypatch):
+    angefordert = []
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(app, "_fleet_telemetrie_profile_aktiviert", lambda: True)
+    monkeypatch.setattr(
+        app, "_fleet_telemetrie_profile_spaeter_anwenden", angefordert.append,
+    )
+    monkeypatch.setattr(
+        app, "_fleet_telemetry_profile_status",
+        _bestaetigter_profilstatus("charging", 1900.0, charging_observed=True),
+    )
+    daten = {
+        "state": "online",
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "climate_state": {"climate_keeper_mode": "camp"},
+        "charge_state": {"charging_state": "Charging"},
+    }
+
+    app._fleet_telemetrie_profile_aktualisieren("testfahrzeug", daten)
+
+    assert angefordert == ["live"]
+    assert app._fleet_telemetry_profile_status["target"] == "live"
+    assert app._fleet_telemetry_profile_status["live_retry_camp_active"] is True
+
+
 @pytest.mark.parametrize("ergänzung, erwartet", [
     ({"drive_state": {"shift_state": "D", "speed": 0}}, "live"),
     ({"drive_state": {"shift_state": "R", "speed": 0}}, "live"),

@@ -7363,6 +7363,9 @@ def _fleet_telemetrie_profile_ziel(data):
         return "live"
     if _v2l_für_profil_aktiv(data):
         return "live"
+    # Aktives Camp benötigt Live auch bei gleichzeitig erkanntem Laden.
+    if _fleet_telemetrie_profile_camp_aktiv(data):
+        return "live"
     if _fleet_telemetrie_profile_ladend(data):
         return "charging"
     if _fleet_telemetrie_profile_fahrzeug_aktiv(data):
