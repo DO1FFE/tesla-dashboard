@@ -40,6 +40,26 @@ def test_normale_fahrt_und_ampel_ohne_alarm(name):
     assert not prüfung.momentbefunde(cache(tempo=0), profil(name), dienste(), JETZT)
 
 
+def test_bestätigtes_live_plus_passt_zum_übergeordneten_ziel_live():
+    status = profil("live_extended")
+    status["target"] = "live"
+    assert not prüfung.momentbefunde(cache(), status, dienste(), JETZT)
+
+
+@pytest.mark.parametrize("anpassung", [
+    {"config_synced": False},
+    {"config_sync_profile": "live"},
+    {"target": "charging"},
+    {"current": "live", "target": "live_extended", "config_sync_profile": "live"},
+    {"current": None, "target": None, "config_sync_profile": None},
+])
+def test_unpassende_live_plus_bestätigung_bleibt_ein_befund(anpassung):
+    status = profil("live_extended")
+    status["target"] = "live"
+    status.update(anpassung)
+    assert "profilbestätigung" in prüfung.momentbefunde(cache(), status, dienste(), JETZT)
+
+
 def test_schlaf_ist_keine_störung():
     daten = cache()
     daten["state"] = "offline"
@@ -187,6 +207,68 @@ def test_höchstens_ein_bericht_pro_24_stunden(tmp_path, monkeypatch):
     assert len(list((args.ausgabe / "postausgang").glob("*.json"))) == 1
     prüfung.prüfschritt(args, args.ende)
     assert len(list((args.ausgabe / "postausgang").glob("*.json"))) == 2
+
+
+def test_tagesvergleich_meldet_keine_historischen_journalfehler_erneut(
+    tmp_path, monkeypatch,
+):
+    args = vorbereiten(tmp_path, monkeypatch)
+    args.start = JETZT - 86400
+    args.ende = args.start + 48 * 3600
+    journal = Mock(return_value={})
+    monkeypatch.setattr(prüfung, "journalfehler", journal)
+    prüfung.prüfschritt(args, JETZT)
+    journal.assert_called_once_with(JETZT - 600, JETZT)
+    prüfung.auswertung.auswerten.assert_called_once_with(
+        args.projekt / "data/monitoring", args.start, JETZT,
+    )
+
+
+def test_bericht_trennt_aktuellen_takt_vom_älteren_kostenzeitraum(
+    tmp_path, monkeypatch,
+):
+    args = vorbereiten(tmp_path, monkeypatch)
+    args.start = JETZT - 86400
+    args.ende = args.start + 48 * 3600
+    args.referenz.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(prüfung.auswertung, "vergleichen", lambda *a: {
+        "heizungsersparnis_modell_euro_pro_30_tage": 2.5,
+        "streamdifferenz_profilbereinigt_euro_pro_30_tage": 3.7,
+        "einschränkung": "Modellrechnung",
+    })
+    prüfung.prüfschritt(args, JETZT)
+    prüfung.prüfschritt(args, JETZT + 3600)
+    status = json.loads((args.ausgabe / "status.json").read_text())
+    assert status["vergleichszeitraum"] == {
+        "von": prüfung.auswertung.zeittext(args.start),
+        "bis": prüfung.auswertung.zeittext(JETZT),
+    }
+    assert status["auswertungszeitraum"] == {
+        "von": prüfung.auswertung.zeittext(JETZT + 3000),
+        "bis": prüfung.auswertung.zeittext(JETZT + 3600),
+    }
+    text = prüfung.berichttext(status)
+    assert sum(zeile.startswith("Zeitraum:") for zeile in text.splitlines()) == 2
+    del status["vergleichszeitraum"]
+    assert "kein aktueller Gesamtvergleich" in prüfung.berichttext(status)
+
+
+def test_bestätigtes_live_plus_erzeugt_keine_korrekturaufträge(tmp_path, monkeypatch):
+    args = vorbereiten(tmp_path, monkeypatch)
+    status = profil("live_extended")
+    status["target"] = "live"
+    (args.projekt / "data/tesla_fleet/telemetry_profile_status.json").write_text(
+        json.dumps(status), encoding="utf-8",
+    )
+    for jetzt in (JETZT, JETZT + 60, JETZT + 120):
+        daten = cache()
+        daten["fleet_telemetry_received_at"] = jetzt * 1000
+        daten["fleet_telemetry_field_received_at"]["VehicleSpeed"] = jetzt * 1000
+        (args.projekt / "data/default/cache.json").write_text(
+            json.dumps(daten), encoding="utf-8",
+        )
+        prüfung.prüfschritt(args, jetzt)
+    assert not list((args.ausgabe / "korrekturaufträge").glob("*.json"))
 
 
 def test_cachefehler_wird_als_befund_gemeldet(tmp_path, monkeypatch):

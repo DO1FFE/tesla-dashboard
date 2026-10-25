@@ -22,6 +22,7 @@ import queue
 import copy
 from collections import deque
 import threading
+import tempfile
 import time
 import logging
 import glob
@@ -5836,12 +5837,26 @@ def _load_cached(vehicle_id):
 
 
 def _save_cached(vehicle_id, data):
-    """Write vehicle data cache to disk."""
+    """Ersetze den Fahrzeugcache atomar durch vollständig geschriebene Daten."""
+
+    temporär = None
     try:
-        with open(_cache_file(vehicle_id), "w", encoding="utf-8") as f:
+        ziel = _cache_file(vehicle_id)
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=os.path.dirname(ziel),
+            prefix=".cache-", suffix=".tmp", delete=False,
+        ) as f:
+            temporär = f.name
             json.dump(data, f)
+        os.replace(temporär, ziel)
     except Exception:
         pass
+    finally:
+        if temporär is not None:
+            try:
+                os.unlink(temporär)
+            except OSError:
+                pass
 
 
 def _fleet_telemetrie_wahr(value):
@@ -7215,6 +7230,10 @@ def _fleet_telemetrie_profile_ladezustand(data):
     if status in {"charging", "starting"}:
         return True
     inaktive_status = {"complete", "stopped", "disconnected", "nopower", "standby"}
+    # DC-Leistung kann nach dem Abstecken mit neuem Empfangszeitpunkt
+    # wiederholt werden. Sie widerlegt kein Ladeende bei geschlossenem Anschluss.
+    if status in inaktive_status and charge.get("charge_port_door_open") is False:
+        return False
     charger_power = _as_float(charge.get("charger_power"))
     feld_empfang = data.get("fleet_telemetry_field_received_at")
     status_empfangen = None

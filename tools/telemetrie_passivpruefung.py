@@ -136,10 +136,15 @@ def momentbefunde(cache, profil, dienste, jetzt):
         befunde["fahrprofil"] = ("Bewegung bei einem anderen Profil als Live/Live+.", 30)
     if empfang_frisch and cache.get("state") == "online":
         seit = profil.get("target_since")
+        aktuell, ziel = profil.get("current"), profil.get("target")
+        # Live+ ist eine bestätigte Erweiterung des übergeordneten Ziels Live.
+        passend = aktuell in {"live", "live_extended", "charging", "parked"} and (
+            aktuell == ziel or aktuell == "live_extended" and ziel == "live"
+        )
         unbestätigt = (
-            profil.get("current") != profil.get("target")
+            not passend
             or profil.get("config_synced") is not True
-            or profil.get("config_sync_profile") != profil.get("target")
+            or profil.get("config_sync_profile") != aktuell
         )
         if zahl(seit) and jetzt - seit > 120 and unbestätigt:
             befunde["profilbestätigung"] = ("Profil seit über 120 s nicht passend bestätigt.", 60)
@@ -229,6 +234,9 @@ def berichttext(zustand):
         zeilen.append("Bisher keine bestätigten Prüfbefunde; das ist kein Vollständigkeitsnachweis.")
     daten = zustand.get("auswertung") or {}
     zeilen += ["", "Live/Live+ im ausgewerteten Zeitraum:"]
+    zeitraum = zustand.get("auswertungszeitraum")
+    if zeitraum:
+        zeilen.append(f"Zeitraum: {zeitraum['von']} bis {zeitraum['bis']}")
     for profil, wert in daten.get("takt", {}).items():
         zeilen.append(f"{profil}: {wert['bewertung']} ({wert['fahrtstunden']:.3f} Fahrstunden)")
         for feld in ("Location", "VehicleSpeed"):
@@ -239,12 +247,20 @@ def berichttext(zustand):
                           f"Lücken ab 8 s: {messung['lücken_ab_8_s']}")
     vergleich = zustand.get("vergleich")
     if vergleich:
-        zeilen += ["", "Kostenmodell, vor Steuern und kein Rechnungsnachweis:",
-                   "Entfallener Heizungsabgleich: "
-                   f"{vergleich['heizungsersparnis_modell_euro_pro_30_tage']} EUR / 30 Tage.",
-                   "Profilbereinigte Signal-Kostendifferenz: "
-                   f"{vergleich['streamdifferenz_profilbereinigt_euro_pro_30_tage']} EUR / 30 Tage.",
-                   vergleich["einschränkung"]]
+        zeilen += ["", "Kostenmodell, vor Steuern und kein Rechnungsnachweis:"]
+        zeitraum = zustand.get("vergleichszeitraum")
+        zeilen.append(
+            f"Zeitraum: {zeitraum['von']} bis {zeitraum['bis']}"
+            if zeitraum else
+            "Älterer Vergleich ohne gespeichertes Zeitfenster; kein aktueller Gesamtvergleich."
+        )
+        zeilen += [
+            "Entfallener Heizungsabgleich: "
+            f"{vergleich['heizungsersparnis_modell_euro_pro_30_tage']} EUR / 30 Tage.",
+            "Profilbereinigte Signal-Kostendifferenz: "
+            f"{vergleich['streamdifferenz_profilbereinigt_euro_pro_30_tage']} EUR / 30 Tage.",
+            vergleich["einschränkung"],
+        ]
     korrekturen = zustand.get("korrekturprüfung") or {}
     zeilen += ["", "Automatische Korrekturprüfung:"]
     for eintrag in korrekturen.get("läufe", []):
@@ -285,7 +301,9 @@ def prüfschritt(args, jetzt):
             kandidaten["log_lesefehler"] = ("Protokolldateien nicht vollständig lesbar.", 0)
         if not daten["journal"].get("verfügbar"):
             kandidaten["journalzugriff"] = ("Dashboard-Journal nicht lesbar.", 0)
-        fehler = journalfehler(von, bis)
+        # Der Tagesvergleich darf historische, bereits erledigte Fehler nicht
+        # erneut als aktuelle Störung an die Korrekturprüfung übergeben.
+        fehler = journalfehler(max(args.start, bis - 600), bis)
         for name, anzahl in fehler.items():
             if anzahl:
                 kandidaten[f"journal:{name}"] = (f"{name} im Dashboard-Journal; siehe lokalen Prüfzeitraum.", 0)
@@ -312,10 +330,13 @@ def prüfschritt(args, jetzt):
     zustand.update({"von": auswertung.zeittext(args.start), "bis": auswertung.zeittext(args.ende),
                     "geprüft_am": auswertung.zeittext(jetzt), "abgeschlossen": abgeschlossen,
                     "prüfungen": zustand["prüfungen"] + 1, "auswertung": daten,
+                    "auswertungszeitraum": {"von": auswertung.zeittext(von),
+                                            "bis": auswertung.zeittext(bis)},
                     "grenzen": GRENZEN, "zusätzliche_fahrzeugabfragen": 0})
     if (abgeschlossen or tagesbericht) and daten:
         try:
             zustand["vergleich"] = auswertung.vergleichen(json_laden(args.referenz), daten)
+            zustand["vergleichszeitraum"] = dict(zustand["auswertungszeitraum"])
         except (OSError, ValueError, TypeError, KeyError):
             daten["warnungen"].append("Kostenvergleich nicht möglich: Referenz nicht auswertbar.")
     # Ereignisse und Postausgang vor dem Abschlussmarker schreiben, damit ein Neustart nachholt.

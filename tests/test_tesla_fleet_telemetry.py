@@ -4331,6 +4331,74 @@ def test_fleet_telemetrie_neue_ladeleistung_ueberstimmt_alten_ladestatus():
     assert app._fleet_telemetrie_profile_ladezustand(daten) is False
 
 
+@pytest.mark.parametrize("ladestatus", [
+    "Disconnected", "Complete", "Stopped", "NoPower", "Standby",
+])
+def test_ladeende_mit_geschlossenem_anschluss_ignoriert_restleistung(ladestatus):
+    daten = {
+        "state": "online",
+        "charge_state": {
+            "charging_state": ladestatus,
+            "charger_power": 48.67125788070249,
+            "charge_port_door_open": False,
+        },
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "fleet_telemetry_field_received_at": {
+            "ChargeState": 1792856916085,
+            "DCChargingPower": 1792856916089,
+            "ACChargingPower": 1792856916093,
+        },
+    }
+    assert app._fleet_telemetrie_profile_ladezustand(daten) is False
+    assert app._fleet_telemetrie_profile_ziel(daten) == "parked"
+    daten["drive_state"]["shift_state"] = "R"
+    assert app._fleet_telemetrie_profile_ziel(daten) == "live"
+
+
+@pytest.mark.parametrize("ladestatus", ["Charging", "Starting"])
+def test_explizites_laden_hat_vorrang_vor_altem_anschlusswert(ladestatus):
+    assert app._fleet_telemetrie_profile_ladezustand({
+        "charge_state": {
+            "charging_state": ladestatus,
+            "charge_port_door_open": False,
+        },
+    }) is True
+
+
+def test_restleistung_stuft_bestätigtes_live_plus_nicht_auf_charging_zurück(
+    monkeypatch,
+):
+    angefordert = []
+    monkeypatch.setattr(app.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(
+        app, "_fleet_telemetry_profile_status",
+        _bestaetigter_profilstatus(
+            "live_extended", 1900.0, target="live", charging_observed=False,
+        ),
+    )
+    monkeypatch.setattr(
+        app, "_fleet_telemetrie_profile_spaeter_anwenden", angefordert.append,
+    )
+    daten = {
+        "state": "online",
+        "drive_state": {"shift_state": "P", "speed": 0},
+        "vehicle_state": {"is_user_present": True},
+        "charge_state": {
+            "charging_state": "Disconnected",
+            "charger_power": 48.67125788070249,
+            "charge_port_door_open": False,
+        },
+        "fleet_telemetry_field_received_at": {
+            "ChargeState": 1999000, "DCChargingPower": 1999004,
+        },
+    }
+    app._fleet_telemetrie_profile_aktualisieren("test", daten)
+    assert angefordert == []
+    assert app._fleet_telemetry_profile_status["current"] == "live_extended"
+    assert app._fleet_telemetry_profile_status["target"] == "live"
+    assert app._fleet_telemetry_profile_status["charging_observed"] is False
+
+
 def test_fleet_telemetrie_profile_nutzt_nach_ladeende_zuerst_live(monkeypatch):
     angefordert = []
     jetzt = [2000.0]
