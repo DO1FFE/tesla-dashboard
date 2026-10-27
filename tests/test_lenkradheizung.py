@@ -218,18 +218,53 @@ for(const [aktiv,stufe,automatik,titel] of [
  assert.equal(elemente['#steering-heater'].title,titel);
 }
 for(const aktiv of [false,true]){
+ const jetzt = 1792013489000;
+ Date.now = () => jetzt;
  const status = {steering_wheel_heater_cached:true,steering_wheel_heater_timestamp:1792013489000};
  const args = [null,null,aktiv,null,null,null,null,null,null,null,null,null,null,status];
  updateHeaterIndicator(...args);
  const anzeige = elemente['#steering-heater'];
- assert.ok(anzeige.title.startsWith('Lenkradheizung ' + (aktiv ? 'an' : 'aus') + ' (zuletzt bestätigt:'));
+ assert.ok(anzeige.title.startsWith('Lenkradheizung aktuell unbestätigt; Zuletzt ' + (aktiv ? 'an' : 'aus') + ':'));
  assert.ok(anzeige.title.includes('14.10.2026'));
  assert.ok(anzeige.title.includes('gespeicherter Stand'));
  assert.equal(anzeige['aria-label'],anzeige.title);
  assert.ok(!anzeige.inhalt.includes('is-unknown'));
+ assert.ok(anzeige.inhalt.includes('is-cached'));
+ assert.ok(anzeige.inhalt.includes('Aktuell unbestätigt'));
+ assert.ok(anzeige.inhalt.includes('Zuletzt ' + (aktiv ? 'an' : 'aus')));
+ assert.ok(anzeige.inhalt.includes('14.10.2026'));
  status.steering_wheel_heater_cached = false;
  updateHeaterIndicator(...args);
  assert.equal(anzeige.title,'Lenkradheizung ' + (aktiv ? 'an' : 'aus'));
+ assert.ok(!anzeige.inhalt.includes('heater-history'));
+ // Ohne neue Nachricht muss der zuletzt frische REST-Wert ebenfalls altern.
+ Date.now = () => jetzt + 90000;
+ updateHeaterIndicator(...args);
+ assert.ok(!anzeige.inhalt.includes('heater-history'));
+ Date.now = () => jetzt + 90001;
+ updateHeaterIndicator(...args);
+ assert.ok(anzeige.inhalt.includes('Aktuell unbestätigt'));
+ assert.ok(anzeige.inhalt.includes('Zuletzt ' + (aktiv ? 'an' : 'aus')));
+ // Neue Bestätigung entfernt den Hinweis und übernimmt den neuen Schalterwert.
+ status.steering_wheel_heater_timestamp = Date.now();
+ args[2] = !aktiv;
+ updateHeaterIndicator(...args);
+ assert.equal(anzeige.title,'Lenkradheizung ' + (!aktiv ? 'an' : 'aus'));
+ assert.ok(!anzeige.inhalt.includes('is-cached'));
+ assert.ok(!anzeige.inhalt.includes('heater-history'));
+ // Fehlende oder ungültige Zeitstempel erzeugen keine erfundene Messzeit.
+ for(const zeit of [null,0,'kaputt',Infinity]){
+  status.steering_wheel_heater_timestamp = zeit;
+  status.steering_wheel_heater_cached = true;
+  updateHeaterIndicator(...args);
+  assert.ok(anzeige.inhalt.includes('Aktuell unbestätigt'));
+  assert.ok(!anzeige.inhalt.includes('Invalid Date'));
+  assert.ok(!anzeige.inhalt.includes('1970'));
+ }
+ args[2] = null;
+ updateHeaterIndicator(...args);
+ assert.equal(anzeige.title,'Lenkradheizung unbekannt');
+ assert.ok(!anzeige.inhalt.includes('heater-history'));
 }
 """], capture_output=True, text=True, timeout=10)
     assert ergebnis.returncode == 0, ergebnis.stdout + ergebnis.stderr

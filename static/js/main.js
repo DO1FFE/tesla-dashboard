@@ -1329,22 +1329,7 @@ function handleData(data) {
         drive,
         darfVorklimatisierungAnzeigen(data, drive)
     );
-    updateHeaterIndicator(
-        climate.is_front_defroster_on,
-        climate.is_rear_defroster_on,
-        climate.steering_wheel_heater,
-        climate.steering_wheel_heat_level,
-        climate.auto_steering_wheel_heat,
-        climate.wiper_blade_heater,
-        climate.side_mirror_heaters,
-        charge.battery_heater_on,
-        climate.seat_heater_left,
-        climate.seat_heater_right,
-        climate.seat_heater_rear_left,
-        climate.seat_heater_rear_center,
-        climate.seat_heater_rear_right,
-        climate
-    );
+    aktualisiereHeizungsanzeigen(data);
     updateTPMS(vehicle);
     updateReifendruckDetails(vehicle);
     updateOpenings(vehicle, charge);
@@ -1765,6 +1750,27 @@ function updateDesiredTemp(temp) {
         .attr('aria-label', 'Wunschtemperatur ' + temp.toFixed(1) + ' \u00B0C');
 }
 
+function aktualisiereHeizungsanzeigen(data) {
+    var klima = data.climate_state || {};
+    var laden = data.charge_state || {};
+    updateHeaterIndicator(
+        klima.is_front_defroster_on,
+        klima.is_rear_defroster_on,
+        klima.steering_wheel_heater,
+        klima.steering_wheel_heat_level,
+        klima.auto_steering_wheel_heat,
+        klima.wiper_blade_heater,
+        klima.side_mirror_heaters,
+        laden.battery_heater_on,
+        klima.seat_heater_left,
+        klima.seat_heater_right,
+        klima.seat_heater_rear_left,
+        klima.seat_heater_rear_center,
+        klima.seat_heater_rear_right,
+        klima
+    );
+}
+
 function updateHeaterIndicator(front, rear, steering, steeringLevel, steeringAuto, wiper,
                                mirror, battery,
                                seatL, seatR, seatRL, seatRC, seatRR, lenkradStatus) {
@@ -1844,16 +1850,25 @@ function updateHeaterIndicator(front, rear, steering, steeringLevel, steeringAut
             suffix += ' A';
             title += ' (Automatik)';
         }
-        if (lenkradStatus && lenkradStatus.steering_wheel_heater_cached === true) {
-            title += ' (zuletzt bestätigt';
-            var zeit = parseNumber(lenkradStatus.steering_wheel_heater_timestamp);
-            if (zeit != null && zeit > 0 && isFinite(new Date(zeit).getTime())) {
-                title += ': ' + new Date(zeit).toLocaleString('de-DE', {timeZone: 'Europe/Berlin'});
+        var zeit = parseNumber(lenkradStatus && lenkradStatus.steering_wheel_heater_timestamp);
+        var zeitGültig = zeit != null && zeit > 0 && isFinite(new Date(zeit).getTime());
+        // Auch ohne neue Servermeldung altert ein bestätigter REST-Schaltzustand.
+        // Die Grenze entspricht FLEET_TELEMETRIE_LENKRADHEIZUNG_MAX_ALTER_SECONDS.
+        var gespeichert = lenkradStatus && (
+            lenkradStatus.steering_wheel_heater_cached === true ||
+            (zeitGültig && Date.now() - zeit > 90000)
+        );
+        var hinweis = '';
+        if (gespeichert) {
+            hinweis = 'Zuletzt ' + (active ? 'an' : 'aus');
+            if (zeitGültig) {
+                hinweis += ': ' + new Date(zeit).toLocaleString('de-DE', {timeZone: 'Europe/Berlin'});
             }
-            title += ', gespeicherter Stand)';
+            title = name + ' aktuell unbestätigt; ' + hinweis + ' (gespeicherter Stand)';
+            hinweis = '<span class="heater-history">Aktuell unbestätigt<br>' + hinweis + '</span>';
         }
         $('#' + id)
-            .html(heaterHtml(name, suffix))
+            .html(heaterHtml(name, suffix, gespeichert ? 'is-cached' : '') + hinweis)
             .attr('title', title)
             .attr('aria-label', title);
     }
@@ -4508,6 +4523,7 @@ setInterval(fetchConfig, 15000);
 setInterval(displayParkTime, 60000);
 setInterval(function() {
     if (!letzteDiagnoseDaten) return;
+    aktualisiereHeizungsanzeigen(letzteDiagnoseDaten);
     updateUserPresence(letzteDiagnoseDaten);
     updateTPMS(letzteDiagnoseDaten.vehicle_state || {});
     updateReifendruckDetails(letzteDiagnoseDaten.vehicle_state || {});
