@@ -1024,14 +1024,6 @@ select {
 #heater-indicator .heater-symbol.is-cached {
   opacity: 0.5;
 }
-#heater-indicator .heater-history {
-  grid-column: 1 / -1;
-  font-size: 12px;
-  line-height: 1.35;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  text-align: right;
-}
 #heater-indicator hr {
   width: 100%;
   border: 0;

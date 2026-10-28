@@ -1858,14 +1858,12 @@ function updateHeaterIndicator(front, rear, steering, steeringLevel, steeringAut
             lenkradStatus.steering_wheel_heater_cached === true ||
             (zeitGültig && Date.now() - zeit > 90000)
         );
-        var hinweis = '';
         if (gespeichert) {
-            hinweis = 'Zuletzt ' + (active ? 'an' : 'aus');
-            title = name + ' aktuell unbestätigt; ' + hinweis + ' (gespeicherter Stand)';
-            hinweis = '<span class="heater-history">Aktuell unbestätigt<br>' + hinweis + '</span>';
+            title = name + ' aktuell unbestätigt; Zuletzt ' +
+                (active ? 'an' : 'aus') + ' (gespeicherter Stand)';
         }
         $('#' + id)
-            .html(heaterHtml(name, suffix, gespeichert ? 'is-cached' : '') + hinweis)
+            .html(heaterHtml(name, suffix, gespeichert ? 'is-cached' : ''))
             .attr('title', title)
             .attr('aria-label', title);
     }

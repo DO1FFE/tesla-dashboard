@@ -241,8 +241,10 @@ for(const aktiv of [false,true]){
  assert.equal(anzeige['aria-label'],anzeige.title);
  assert.ok(!anzeige.inhalt.includes('is-unknown'));
  assert.ok(anzeige.inhalt.includes('is-cached'));
- assert.ok(anzeige.inhalt.includes('Aktuell unbestätigt'));
- assert.ok(anzeige.inhalt.includes('Zuletzt ' + (aktiv ? 'an' : 'aus')));
+ assert.ok(!anzeige.inhalt.includes('Aktuell unbestätigt'));
+ assert.ok(!anzeige.inhalt.includes('Zuletzt'));
+ assert.ok(!anzeige.inhalt.includes('heater-history'));
+ assert.equal(anzeige.inhalt.replace(/<[^>]+>/g,''),'Lenkradheizung:' + (aktiv ? '\uD83D\uDD25' : '\uD83D\uDEAB'));
  assert.ok(!/\d/.test(anzeige.inhalt));
  assert.ok(!/\d/.test(anzeige.title));
  status.steering_wheel_heater_cached = false;
@@ -255,8 +257,11 @@ for(const aktiv of [false,true]){
  assert.ok(!anzeige.inhalt.includes('heater-history'));
  Date.now = () => jetzt + 90001;
  updateHeaterIndicator(...args);
- assert.ok(anzeige.inhalt.includes('Aktuell unbestätigt'));
- assert.ok(anzeige.inhalt.includes('Zuletzt ' + (aktiv ? 'an' : 'aus')));
+ assert.ok(anzeige.title.includes('aktuell unbestätigt'));
+ assert.ok(anzeige.title.includes('Zuletzt ' + (aktiv ? 'an' : 'aus')));
+ assert.ok(anzeige.inhalt.includes('is-cached'));
+ assert.ok(!anzeige.inhalt.includes('heater-history'));
+ assert.ok(!anzeige.inhalt.includes('Zuletzt'));
  // Neue Bestätigung entfernt den Hinweis und übernimmt den neuen Schalterwert.
  status.steering_wheel_heater_timestamp = Date.now();
  args[2] = !aktiv;
@@ -269,7 +274,9 @@ for(const aktiv of [false,true]){
   status.steering_wheel_heater_timestamp = zeit;
   status.steering_wheel_heater_cached = true;
   updateHeaterIndicator(...args);
-  assert.ok(anzeige.inhalt.includes('Aktuell unbestätigt'));
+  assert.ok(anzeige.title.includes('aktuell unbestätigt'));
+  assert.ok(!anzeige.inhalt.includes('Aktuell unbestätigt'));
+  assert.ok(!anzeige.inhalt.includes('Zuletzt'));
   assert.ok(!anzeige.inhalt.includes('Invalid Date'));
   assert.ok(!anzeige.inhalt.includes('1970'));
  }
