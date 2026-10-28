@@ -1863,7 +1863,7 @@ function updateHeaterIndicator(front, rear, steering, steeringLevel, steeringAut
                 (active ? 'an' : 'aus') + ' (gespeicherter Stand)';
         }
         $('#' + id)
-            .html(heaterHtml(name, suffix, gespeichert ? 'is-cached' : ''))
+            .html(heaterHtml(name, suffix))
             .attr('title', title)
             .attr('aria-label', title);
     }

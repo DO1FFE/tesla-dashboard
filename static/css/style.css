@@ -1021,9 +1021,6 @@ select {
   font-family: 'Roboto', Arial, sans-serif;
   font-weight: 700;
 }
-#heater-indicator .heater-symbol.is-cached {
-  opacity: 0.5;
-}
 #heater-indicator hr {
   width: 100%;
   border: 0;

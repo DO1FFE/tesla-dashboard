@@ -240,7 +240,8 @@ for(const aktiv of [false,true]){
  assert.equal(anzeige.title,'Lenkradheizung aktuell unbestätigt; Zuletzt ' + (aktiv ? 'an' : 'aus') + ' (gespeicherter Stand)');
  assert.equal(anzeige['aria-label'],anzeige.title);
  assert.ok(!anzeige.inhalt.includes('is-unknown'));
- assert.ok(anzeige.inhalt.includes('is-cached'));
+ assert.ok(!anzeige.inhalt.includes('is-cached'));
+ const symbolAnzeige = anzeige.inhalt;
  assert.ok(!anzeige.inhalt.includes('Aktuell unbestätigt'));
  assert.ok(!anzeige.inhalt.includes('Zuletzt'));
  assert.ok(!anzeige.inhalt.includes('heater-history'));
@@ -249,6 +250,7 @@ for(const aktiv of [false,true]){
  assert.ok(!/\d/.test(anzeige.title));
  status.steering_wheel_heater_cached = false;
  updateHeaterIndicator(...args);
+ assert.equal(anzeige.inhalt,symbolAnzeige);
  assert.equal(anzeige.title,'Lenkradheizung ' + (aktiv ? 'an' : 'aus'));
  assert.ok(!anzeige.inhalt.includes('heater-history'));
  // Ohne neue Nachricht muss der zuletzt frische REST-Wert ebenfalls altern.
@@ -259,7 +261,8 @@ for(const aktiv of [false,true]){
  updateHeaterIndicator(...args);
  assert.ok(anzeige.title.includes('aktuell unbestätigt'));
  assert.ok(anzeige.title.includes('Zuletzt ' + (aktiv ? 'an' : 'aus')));
- assert.ok(anzeige.inhalt.includes('is-cached'));
+ assert.ok(!anzeige.inhalt.includes('is-cached'));
+ assert.equal(anzeige.inhalt,symbolAnzeige);
  assert.ok(!anzeige.inhalt.includes('heater-history'));
  assert.ok(!anzeige.inhalt.includes('Zuletzt'));
  // Neue Bestätigung entfernt den Hinweis und übernimmt den neuen Schalterwert.
