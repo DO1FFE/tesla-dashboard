@@ -1861,9 +1861,6 @@ function updateHeaterIndicator(front, rear, steering, steeringLevel, steeringAut
         var hinweis = '';
         if (gespeichert) {
             hinweis = 'Zuletzt ' + (active ? 'an' : 'aus');
-            if (zeitGültig) {
-                hinweis += ': ' + new Date(zeit).toLocaleString('de-DE', {timeZone: 'Europe/Berlin'});
-            }
             title = name + ' aktuell unbestätigt; ' + hinweis + ' (gespeicherter Stand)';
             hinweis = '<span class="heater-history">Aktuell unbestätigt<br>' + hinweis + '</span>';
         }

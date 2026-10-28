@@ -165,17 +165,30 @@ def test_unbrauchbare_rest_antwort_überschreibt_keinen_gültigen_stand(antwort)
     assert daten == vorher
 
 
-@pytest.mark.parametrize("profil", ["live", "live_extended"])
+@pytest.mark.parametrize("profil, intervall", [
+    ("live", 1), ("live_extended", 1), ("charging", 30), ("parked", 60),
+])
 @pytest.mark.parametrize("wiederherstellung", [False, True])
-def test_lenkradheizung_bei_änderung_sekündlich_ohne_zusatzmeldungen(
-    profil, wiederherstellung,
+@pytest.mark.parametrize("alte_konfiguration", [False, True])
+def test_lenkradheizung_in_allen_profilen_ohne_zusatzmeldungen(
+    profil, intervall, wiederherstellung, alte_konfiguration,
 ):
+    heizfelder = ("HvacSteeringWheelHeatLevel", "HvacSteeringWheelHeatAuto")
+    basis = {"config": {"fields": {}}}
+    if alte_konfiguration:
+        basis["config"]["fields"] = {
+            feld: {
+                "interval_seconds": 300, "minimum_delta": 5,
+                "include_fields": list(heizfelder),
+            }
+            for feld in (*heizfelder, "Location")
+        }
     felder = app._fleet_telemetrie_profile_config_erstellen(
-        {"config": {"fields": {}}}, profil,
+        basis, profil,
         wiederherstellung=wiederherstellung,
     )["config"]["fields"]
-    for feld in ("HvacSteeringWheelHeatLevel", "HvacSteeringWheelHeatAuto"):
-        assert felder[feld] == {"interval_seconds": 1}
+    for feld in heizfelder:
+        assert felder[feld] == {"interval_seconds": intervall}
         assert feld not in app.FLEET_TELEMETRIE_PROFILE_LIVE_BESTAETIGUNGSFELDER
         assert all(
             feld not in config.get("include_fields", [])
@@ -224,15 +237,14 @@ for(const aktiv of [false,true]){
  const args = [null,null,aktiv,null,null,null,null,null,null,null,null,null,null,status];
  updateHeaterIndicator(...args);
  const anzeige = elemente['#steering-heater'];
- assert.ok(anzeige.title.startsWith('Lenkradheizung aktuell unbestätigt; Zuletzt ' + (aktiv ? 'an' : 'aus') + ':'));
- assert.ok(anzeige.title.includes('14.10.2026'));
- assert.ok(anzeige.title.includes('gespeicherter Stand'));
+ assert.equal(anzeige.title,'Lenkradheizung aktuell unbestätigt; Zuletzt ' + (aktiv ? 'an' : 'aus') + ' (gespeicherter Stand)');
  assert.equal(anzeige['aria-label'],anzeige.title);
  assert.ok(!anzeige.inhalt.includes('is-unknown'));
  assert.ok(anzeige.inhalt.includes('is-cached'));
  assert.ok(anzeige.inhalt.includes('Aktuell unbestätigt'));
  assert.ok(anzeige.inhalt.includes('Zuletzt ' + (aktiv ? 'an' : 'aus')));
- assert.ok(anzeige.inhalt.includes('14.10.2026'));
+ assert.ok(!/\d/.test(anzeige.inhalt));
+ assert.ok(!/\d/.test(anzeige.title));
  status.steering_wheel_heater_cached = false;
  updateHeaterIndicator(...args);
  assert.equal(anzeige.title,'Lenkradheizung ' + (aktiv ? 'an' : 'aus'));
