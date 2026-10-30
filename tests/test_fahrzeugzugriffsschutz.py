@@ -35,12 +35,18 @@ def gesperrt(monkeypatch):
     ("GET", "https://proxy.example/api/1/vehicles/VIN/vehicle_data"),
     ("POST", "https://127.0.0.1:4443/api/1/vehicles/fleet_telemetry_config?x=1"),
 ])
-def test_daten_befehle_und_wakeups_gesperrt(gesperrt, methode, adresse):
+@pytest.mark.parametrize("unbefristet", [False, True])
+def test_daten_befehle_und_wakeups_gesperrt(gesperrt, methode, adresse, unbefristet):
+    if unbefristet:
+        schutz.konfigurieren("unbefristet", "https://127.0.0.1:4443")
     with pytest.raises(schutz.FahrzeugabfrageGesperrt):
         schutz.anfrage_prüfen(methode, adresse)
 
 
-def test_profil_nur_nach_neuem_stream_und_token_weiter_möglich(gesperrt):
+@pytest.mark.parametrize("unbefristet", [False, True])
+def test_profil_nur_nach_neuem_stream_und_token_weiter_möglich(gesperrt, unbefristet):
+    if unbefristet:
+        schutz.konfigurieren("unbefristet", "https://127.0.0.1:4443")
     url = "https://127.0.0.1:4443/api/1/vehicles/fleet_telemetry_config"
     assert not schutz.profil_freigeben({"fleet_telemetry_received_at": 999000})
     assert not schutz.profil_freigeben({"fleet_telemetry_received_at": 9999999999999})
@@ -56,6 +62,15 @@ def test_sperre_endet_ohne_neustart(gesperrt, monkeypatch):
     monkeypatch.setattr(schutz.time, "time", lambda: 2000)
     assert not schutz.aktiv()
     schutz.anfrage_prüfen("GET", "https://127.0.0.1:4443/api/1/vehicles")
+
+
+@pytest.mark.parametrize("jetzt", [2000, 10_000_000_000])
+def test_unbefristete_sperre_läuft_nicht_ab(gesperrt, monkeypatch, jetzt):
+    schutz.konfigurieren("unbefristet", "https://127.0.0.1:4443")
+    monkeypatch.setattr(schutz.time, "time", lambda: jetzt)
+    assert schutz.aktiv()
+    with pytest.raises(schutz.FahrzeugabfrageGesperrt):
+        schutz.anfrage_prüfen("GET", "https://127.0.0.1:4443/api/1/vehicles")
 
 
 def test_transport_stoppt_direkte_requests_vor_dem_socket(gesperrt, monkeypatch):
@@ -131,10 +146,11 @@ def test_ungültige_schutzfrist_bricht_start_ab(ende):
         schutz.konfigurieren(ende, "https://127.0.0.1:4443")
 
 
-def test_starter_installiert_schutz_vor_app_start(tmp_path, monkeypatch):
+@pytest.mark.parametrize("ende", ["2099-10-25T13:50:00Z", "unbefristet"])
+def test_starter_installiert_schutz_vor_app_start(tmp_path, monkeypatch, ende):
     from tools import telemetrie_geschuetzter_start as starter
     (tmp_path / "data").mkdir()
-    monkeypatch.setenv("TESLA_DASHBOARD_ABFRAGESPERRE_BIS", "2099-10-25T13:50:00Z")
+    monkeypatch.setenv("TESLA_DASHBOARD_ABFRAGESPERRE_BIS", ende)
     monkeypatch.setenv("TESLA_FLEET_VEHICLE_COMMAND_URL", "https://127.0.0.1:4443")
     monkeypatch.setattr(schutz, "_ende", None)
     monkeypatch.setattr(schutz, "_proxy", None)
@@ -156,9 +172,10 @@ def test_starter_installiert_schutz_vor_app_start(tmp_path, monkeypatch):
     assert json.loads((tmp_path / "data/neustartschutz.json").read_text())["pid"] == os.getpid()
 
 
-def test_vollständiger_start_in_frischem_prozess_ohne_http(tmp_path):
+@pytest.mark.parametrize("ende", ["2099-10-25T13:50:00Z", "unbefristet"])
+def test_vollständiger_start_in_frischem_prozess_ohne_http(tmp_path, ende):
     projekt = Path(__file__).resolve().parents[1]
-    umgebung = dict(os.environ, TESLA_DASHBOARD_ABFRAGESPERRE_BIS="2099-10-25T13:50:00Z",
+    umgebung = dict(os.environ, TESLA_DASHBOARD_ABFRAGESPERRE_BIS=ende,
                     TESLA_DASHBOARD_DATA_DIR=str(tmp_path),
                     STATISTICS_DB_PATH=str(tmp_path / "statistik.db"),
                     DISABLE_STATISTICS_AGGREGATION="1")

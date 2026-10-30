@@ -1,4 +1,4 @@
-"""Zeitlich begrenzte Abfragesperre für überwachte Dienstneustarts."""
+"""Befristete oder ausdrücklich unbefristete Abfragesperre für Dienstneustarts."""
 
 from datetime import datetime
 import math
@@ -21,14 +21,18 @@ class FahrzeugabfrageGesperrt(RuntimeError):
 def konfigurieren(ende, proxy):
     """Ungültige Schutzkonfiguration verhindert den Start, statt freizugeben."""
     global _ende, _proxy
-    zeit = datetime.fromisoformat(ende.replace("Z", "+00:00"))
-    if zeit.tzinfo is None or not math.isfinite(zeit.timestamp()):
-        raise ValueError("Schutzende benötigt eine gültige Zeitzone")
+    if ende == "unbefristet":
+        zeitpunkt = math.inf
+    else:
+        zeit = datetime.fromisoformat(ende.replace("Z", "+00:00"))
+        if zeit.tzinfo is None or not math.isfinite(zeit.timestamp()):
+            raise ValueError("Schutzende benötigt eine gültige Zeitzone")
+        zeitpunkt = zeit.timestamp()
     url = urlsplit(proxy)
     if (url.scheme != "https" or not url.hostname or url.username
             or url.password or url.query or url.fragment or url.path not in {"", "/"}):
         raise ValueError("Ungültige Adresse des Fahrzeug-Proxys")
-    _ende = zeit.timestamp()
+    _ende = zeitpunkt
     _proxy = (url.scheme, url.hostname, url.port or 443)
 
 

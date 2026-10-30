@@ -28,52 +28,63 @@ def _daten():
 
 
 @pytest.mark.parametrize("aktiv", [True, False])
-def test_ap1_rest_schalter_gewinnt_gegen_auch_neuere_stufe_null(monkeypatch, aktiv):
+@pytest.mark.parametrize("stufe", [0, 1, 2, 3])
+@pytest.mark.parametrize("rest_versatz", [-1000, 0, 1000])
+def test_ap1_heizstufe_gewinnt_gegen_rest_schalter(
+    monkeypatch, aktiv, stufe, rest_versatz,
+):
     monkeypatch.setattr(app.time, "time", lambda: JETZT / 1000)
     daten = _daten()
     assert app._fleet_telemetrie_lenkradheizung_rest_merken(daten, {
-        "steering_wheel_heater": aktiv, "timestamp": JETZT - 1000,
+        "steering_wheel_heater": aktiv, "timestamp": JETZT + rest_versatz,
     }, JETZT)
-    app._fleet_telemetrie_setze_feld(daten, "HvacSteeringWheelHeatLevel", 0, JETZT)
+    app._fleet_telemetrie_setze_feld(daten, "HvacSteeringWheelHeatLevel", stufe, JETZT)
     daten = json.loads(json.dumps(daten))
     payload = app._subscriber_stream_payload(daten)
-    assert payload["climate_state"]["steering_wheel_heater"] is aktiv
-    assert payload["climate_state"]["steering_wheel_heat_level"] is None
+    assert payload["climate_state"]["steering_wheel_heater"] is (stufe > 0)
+    assert payload["climate_state"]["steering_wheel_heat_level"] == stufe
+    assert payload["climate_state"]["steering_wheel_heater_cached"] is False
+    assert payload["climate_state"]["steering_wheel_heater_timestamp"] is None
 
 
 @pytest.mark.parametrize("aktiv", [False, True])
 @pytest.mark.parametrize("zustand", ["online", "offline", "asleep"])
-def test_bestätigter_rest_status_bleibt_beim_parken_erhalten(
+def test_heizstufe_bleibt_beim_parken_statt_altem_rest_status_erhalten(
     monkeypatch, aktiv, zustand,
 ):
     daten = _daten()
     daten["state"] = zustand
     daten["driver_presence"] = {"value": False, "valid": True}
     app._fleet_telemetrie_lenkradheizung_rest_merken(daten, {
-        "steering_wheel_heater": aktiv, "timestamp": JETZT,
+        "steering_wheel_heater": not aktiv, "timestamp": JETZT,
     }, JETZT)
+    app._fleet_telemetrie_setze_feld(
+        daten, "HvacSteeringWheelHeatLevel", int(aktiv), JETZT,
+    )
     monkeypatch.setattr(app.time, "time", lambda: JETZT / 1000 + 12 * 3600)
     daten = json.loads(json.dumps(daten))
     vorher = copy.deepcopy(daten["steering_wheel_heater_rest"])
     payload = app._subscriber_stream_payload(daten)
     klima = payload["climate_state"]
     assert klima["steering_wheel_heater"] is aktiv
-    assert klima["steering_wheel_heater_cached"] is True
-    assert klima["steering_wheel_heater_timestamp"] == JETZT
-    assert klima["steering_wheel_heat_level"] is None
+    assert klima["steering_wheel_heater_cached"] is False
+    assert klima["steering_wheel_heater_timestamp"] is None
+    assert klima["steering_wheel_heat_level"] == int(aktiv)
     assert daten["steering_wheel_heater_rest"] == vorher
 
 
 @pytest.mark.parametrize("aktiv", [False, True])
-def test_frischer_rest_schalter_ersetzt_alten_cache(monkeypatch, aktiv):
+def test_ohne_heizstufe_frischer_rest_schalter_ersetzt_abgelaufenen(monkeypatch, aktiv):
     daten = _daten()
+    daten["fleet_telemetry_raw"].clear()
     app._fleet_telemetrie_lenkradheizung_rest_merken(daten, {
         "steering_wheel_heater": not aktiv, "timestamp": JETZT,
     }, JETZT)
     später = JETZT + 120000
     monkeypatch.setattr(app.time, "time", lambda: später / 1000)
     app._fleet_telemetrie_lenkradheizung_anreichern(daten)
-    assert daten["climate_state"]["steering_wheel_heater_cached"] is True
+    assert daten["climate_state"]["steering_wheel_heater"] is None
+    assert daten["climate_state"]["steering_wheel_heater_cached"] is False
     app._fleet_telemetrie_lenkradheizung_rest_merken(daten, {
         "steering_wheel_heater": aktiv, "timestamp": später,
     }, später)
@@ -91,20 +102,22 @@ def test_frischer_rest_schalter_ersetzt_alten_cache(monkeypatch, aktiv):
     {"value": False, "timestamp": float("inf")},
     {"value": False, "timestamp": JETZT + 31000},
 ])
-def test_ohne_bestätigten_schalter_bleibt_status_unbekannt(monkeypatch, rest):
+def test_heizstufe_funktioniert_ohne_bestätigten_rest_schalter(monkeypatch, rest):
     monkeypatch.setattr(app.time, "time", lambda: JETZT / 1000)
     daten = _daten()
     daten["steering_wheel_heater_rest"] = rest
     app._fleet_telemetrie_lenkradheizung_anreichern(daten)
-    assert daten["climate_state"]["steering_wheel_heater"] is None
-    assert daten["climate_state"]["steering_wheel_heat_level"] is None
+    assert daten["climate_state"]["steering_wheel_heater"] is False
+    assert daten["climate_state"]["steering_wheel_heat_level"] == 0
     assert daten["climate_state"]["steering_wheel_heater_cached"] is False
     assert daten["climate_state"]["steering_wheel_heater_timestamp"] is None
 
 
-def test_modernes_fahrzeug_bekommt_keinen_legacy_dauercache(monkeypatch):
+@pytest.mark.parametrize("modell", ["models", "model3"])
+def test_ohne_heizstufe_kein_rest_dauercache(monkeypatch, modell):
     daten = _daten()
-    daten["vehicle_config"] = {"car_type": "model3"}
+    daten["vehicle_config"]["car_type"] = modell
+    daten["fleet_telemetry_raw"].clear()
     app._fleet_telemetrie_lenkradheizung_rest_merken(daten, {
         "steering_wheel_heater": True, "timestamp": JETZT,
     }, JETZT)
@@ -115,14 +128,18 @@ def test_modernes_fahrzeug_bekommt_keinen_legacy_dauercache(monkeypatch):
 
 
 @pytest.mark.parametrize("wert", [None, "unknown", "HvacSteeringWheelHeatLevelUnknown", float("nan"), float("inf"), {"invalid": True}])
-def test_ungültige_heizstufe_bleibt_unbekannt(wert):
-    daten = {}
+def test_ungültige_heizstufe_bleibt_trotz_rest_unbekannt(monkeypatch, wert):
+    monkeypatch.setattr(app.time, "time", lambda: JETZT / 1000)
+    daten = _daten()
+    app._fleet_telemetrie_lenkradheizung_rest_merken(daten, {
+        "steering_wheel_heater": True, "timestamp": JETZT,
+    }, JETZT)
     app._fleet_telemetrie_setze_feld(daten, "HvacSteeringWheelHeatLevel", wert, JETZT)
     assert daten["climate_state"]["steering_wheel_heat_level"] is None
     assert daten["climate_state"]["steering_wheel_heater"] is None
 
 
-def test_bestehender_rest_fallback_bewahrt_lenkradschalter(monkeypatch):
+def test_bestehender_rest_fallback_überschreibt_keine_heizstufe(monkeypatch):
     monkeypatch.setattr(app.time, "time", lambda: JETZT / 1000)
     daten = _daten()
     daten["climate_state"]["steering_wheel_heater"] = True
@@ -130,13 +147,14 @@ def test_bestehender_rest_fallback_bewahrt_lenkradschalter(monkeypatch):
         "climate_state": {"steering_wheel_heater": True, "timestamp": JETZT},
     }, JETZT)
     payload = app._subscriber_stream_payload(daten)
-    assert payload["climate_state"]["steering_wheel_heater"] is True
-    assert payload["climate_state"]["steering_wheel_heat_level"] is None
+    assert payload["climate_state"]["steering_wheel_heater"] is False
+    assert payload["climate_state"]["steering_wheel_heat_level"] == 0
 
 
 def test_modernes_fahrzeug_nutzt_neuere_telemetrie_nach_rest(monkeypatch):
     daten = _daten()
     daten["vehicle_config"] = {"car_type": "model3"}
+    daten["fleet_telemetry_raw"].clear()
     monkeypatch.setattr(app.time, "time", lambda: JETZT / 1000)
     app._fleet_telemetrie_lenkradheizung_rest_merken(daten, {
         "steering_wheel_heater": True, "timestamp": JETZT,
@@ -196,9 +214,10 @@ def test_lenkradheizung_in_allen_profilen_ohne_zusatzmeldungen(
         )
 
 
-def test_unterstützte_heizungsänderungen_erscheinen_sofort_ohne_rest(monkeypatch):
+@pytest.mark.parametrize("modell", ["models", "model3"])
+def test_heizungsänderungen_erscheinen_sofort_ohne_rest(monkeypatch, modell):
     daten = _daten()
-    daten["vehicle_config"] = {"car_type": "model3"}
+    daten["vehicle_config"]["car_type"] = modell
     monkeypatch.setattr(app.time, "time", lambda: JETZT / 1000)
     for stufe, erwartet in ((1, True), (0, False), (3, True), (None, None)):
         app._fleet_telemetrie_setze_feld(
@@ -206,6 +225,21 @@ def test_unterstützte_heizungsänderungen_erscheinen_sofort_ohne_rest(monkeypat
         )
         payload = app._subscriber_stream_payload(daten)
         assert payload["climate_state"]["steering_wheel_heater"] is erwartet
+
+
+@pytest.mark.parametrize("stufe, aktiv", [(0, False), (1, True), (None, None)])
+def test_automatik_ändert_den_gemeldeten_heizzustand_nicht(monkeypatch, stufe, aktiv):
+    monkeypatch.setattr(app.time, "time", lambda: JETZT / 1000)
+    daten = _daten()
+    app._fleet_telemetrie_setze_feld(daten, "HvacSteeringWheelHeatLevel", stufe, JETZT)
+    for automatik in (True, False):
+        app._fleet_telemetrie_setze_feld(
+            daten, "HvacSteeringWheelHeatAuto", automatik, JETZT + 1000,
+        )
+        klima = app._subscriber_stream_payload(daten)["climate_state"]
+        assert klima["steering_wheel_heater"] is aktiv
+        assert klima["steering_wheel_heat_level"] == stufe
+        assert klima["auto_steering_wheel_heat"] is automatik
 
 
 def test_lenkradheizung_im_browser_ohne_erfundene_stufe_oder_automatikwärme():

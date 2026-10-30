@@ -5927,16 +5927,6 @@ def _fleet_telemetrie_heizstufe(value):
     return None
 
 
-def _fleet_telemetrie_lenkradheizung_nur_ein_aus(data):
-    """Nutze beim Model S mit AP1 den verifizierten Ein/Aus-Status."""
-
-    config = data.get("vehicle_config") or {}
-    return (
-        config.get("car_type") == "models"
-        and config.get("driver_assist") == "MonoCam"
-    )
-
-
 def _fleet_telemetrie_lenkradheizung_rest_merken(data, klima, empfangen_ms):
     """Bewahre die echte REST-Quelle getrennt von abgeleiteten Heizstufen."""
 
@@ -5968,45 +5958,35 @@ def _fleet_telemetrie_lenkradheizung_rest_merken(data, klima, empfangen_ms):
 
 
 def _fleet_telemetrie_lenkradheizung_anreichern(data):
-    """Lasse eine nicht unterstützte Stufe 0 keinen echten Schaltzustand ersetzen."""
+    """Nutze die gemeldete Heizstufe, auch beim älteren Model S."""
 
     klima = data.setdefault("climate_state", {})
     raw = data.get("fleet_telemetry_raw") or {}
     rest = data.get("steering_wheel_heater_rest") or {}
-    empfang = data.get("fleet_telemetry_field_received_at") or {}
-    nur_schalter = _fleet_telemetrie_lenkradheizung_nur_ein_aus(data)
-    rest_nutzen = rest and (
-        nur_schalter
-        or (rest.get("timestamp") or 0)
-        >= (empfang.get("HvacSteeringWheelHeatLevel") or 0)
-    )
     klima["steering_wheel_heater_cached"] = False
     klima["steering_wheel_heater_timestamp"] = None
-    if rest_nutzen or nur_schalter:
-        zeit = _as_float(rest.get("timestamp"))
-        alter = time.time() * 1000 - (zeit or 0)
-        max_alter = FLEET_TELEMETRIE_LENKRADHEIZUNG_MAX_ALTER_SECONDS * 1000
-        bekannt = (
-            isinstance(rest.get("value"), bool)
-            and zeit is not None and math.isfinite(zeit) and zeit > 0
-            and alter >= -30000
-        )
-        frisch = bekannt and alter <= max_alter
-        # Ohne unterstützte Heizstufe bleibt der bestätigte Schalter erhalten.
-        # Das Alter kennzeichnet den Cache, ohne weitere REST-Abfragen auszulösen.
-        gültig = bekannt and (nur_schalter or frisch)
-        klima["steering_wheel_heater"] = rest.get("value") if gültig else None
-        klima["steering_wheel_heater_cached"] = gültig and not frisch
-        klima["steering_wheel_heater_timestamp"] = zeit if gültig else None
-        klima["steering_wheel_heat_level"] = (
-            rest.get("level") if gültig and not nur_schalter else None
-        )
-        klima["auto_steering_wheel_heat"] = rest.get("auto") if gültig else None
-        return
+    # Auch eine ungültige Telemetriemeldung darf keinen alten REST-Wert reaktivieren.
     if "HvacSteeringWheelHeatLevel" in raw:
         stufe = _fleet_telemetrie_heizstufe(raw["HvacSteeringWheelHeatLevel"])
         klima["steering_wheel_heat_level"] = stufe
         klima["steering_wheel_heater"] = stufe > 0 if stufe is not None else None
+        klima["auto_steering_wheel_heat"] = _fleet_telemetrie_optional_wahr(
+            raw.get("HvacSteeringWheelHeatAuto")
+        )
+        return
+    if rest:
+        zeit = _as_float(rest.get("timestamp"))
+        alter = time.time() * 1000 - (zeit or 0)
+        max_alter = FLEET_TELEMETRIE_LENKRADHEIZUNG_MAX_ALTER_SECONDS * 1000
+        gültig = (
+            isinstance(rest.get("value"), bool)
+            and zeit is not None and math.isfinite(zeit) and zeit > 0
+            and -30000 <= alter <= max_alter
+        )
+        klima["steering_wheel_heater"] = rest.get("value") if gültig else None
+        klima["steering_wheel_heater_timestamp"] = zeit if gültig else None
+        klima["steering_wheel_heat_level"] = rest.get("level") if gültig else None
+        klima["auto_steering_wheel_heat"] = rest.get("auto") if gültig else None
     if "HvacSteeringWheelHeatAuto" in raw:
         klima["auto_steering_wheel_heat"] = _fleet_telemetrie_optional_wahr(
             raw["HvacSteeringWheelHeatAuto"]
